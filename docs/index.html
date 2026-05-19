@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@cyanmycelium/mcp-broker — WebSocket broker for the Model Context Protocol</title>
+  <meta name="description" content="WebSocket-based broker for the Model Context Protocol. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports." />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============================== TOPBAR ============================== -->
+<header class="topbar">
+  <div class="shell topbar-inner">
+    <a class="brand" href="index.html">
+      <img class="brand-mark" src="assets/logo.png" alt="" aria-hidden="true" />
+      <span>@cyanmycelium/mcp-broker</span>
+    </a>
+    <nav class="topbar-links">
+      <a href="#why">Why</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#quick-start">Quick start</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- ================================ HERO =============================== -->
+<section class="hero">
+  <div class="shell">
+    <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
+
+    <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · v0.1</div>
+
+    <h1 class="hero-title">
+      <span class="at">@</span>cyanmycelium<span class="sl">/</span>mcp-broker
+    </h1>
+
+    <p class="hero-sub">
+      Aggregates multiple Model Context Protocol providers behind a single
+      WebSocket endpoint, with stdio, SSE, and Streamable HTTP client transports.
+    </p>
+
+    <div class="badges">
+      <span class="badge accent"><span class="k">status</span><span class="v">v0.1</span></span>
+      <span class="badge"><span class="k">npm</span><span class="v">v0.1.0</span></span>
+      <span class="badge"><span class="k">license</span><span class="v">Apache-2.0</span></span>
+      <span class="badge"><span class="k">node</span><span class="v">≥&nbsp;20.11</span></span>
+      <span class="badge"><span class="k">dotnet</span><span class="v">planned</span></span>
+    </div>
+
+    <div class="hero-cta">
+      <button class="btn btn-primary" data-copy="npx @cyanmycelium/mcp-broker">
+        <span class="cmd-dollar">$</span>
+        <span class="cmd-text">npx @cyanmycelium/mcp-broker</span>
+        <span class="copy-state" data-copy-state>copy</span>
+      </button>
+      <a class="btn btn-secondary" href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== WHY ================================== -->
+<section id="why">
+  <div class="shell">
+    <div class="section-num">01 — Motivation</div>
+    <h2>One MCP server is rarely enough</h2>
+
+    <p class="intro">Real-world MCP deployments don't consist of a single isolated server. An organization typically needs to expose, behind one endpoint:</p>
+
+    <ol class="why">
+      <li>
+        <span class="why-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="3" rx="0.5"/><rect x="2" y="10" width="12" height="3" rx="0.5"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor"/></svg>
+        </span>
+        <span class="why-body">
+          <b>Industrial assets</b> — PLCs, SCADA, machine telemetry — wrapped as MCP servers, each speaking its own protocol behind the wrapper.
+        </span>
+      </li>
+      <li>
+        <span class="why-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1v4M8 11v4M1 8h4M11 8h4M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5L10 6M6 10l-2.5 2.5"/><circle cx="8" cy="8" r="1.6"/></svg>
+        </span>
+        <span class="why-body">
+          <b>Sensors and data sources</b> the agent can query on demand, often living on different networks with different latencies.
+        </span>
+      </li>
+      <li>
+        <span class="why-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+        </span>
+        <span class="why-body">
+          <b>Agent hosts</b> — micro-containers, headless engines, RPA bots — reachable as tools rather than monolithic services.
+        </span>
+      </li>
+      <li>
+        <span class="why-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M6 8h4M8 6v4"/></svg>
+        </span>
+        <span class="why-body">
+          <b>Browser-side providers</b> (3D scenes, web apps) that cannot listen on a port and need an external broker to relay JSON-RPC frames.
+        </span>
+      </li>
+      <li>
+        <span class="why-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M6 8h4M6 8l4-4M6 8l4 4"/></svg>
+        </span>
+        <span class="why-body">
+          <b>One client, many providers</b> — Claude, MCP Inspector, custom agents should reach any of them through a single URL instead of juggling N configurations.
+        </span>
+      </li>
+    </ol>
+
+    <div class="conclusion">
+      <code class="inline">@cyanmycelium/mcp-broker</code> is the relay layer that
+      lets all of those connect to a central point and be reached by MCP clients
+      without each client having to know every backend.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ARCHITECTURE =========================== -->
+<section id="architecture">
+  <div class="shell">
+    <div class="section-num">02 — Architecture</div>
+    <h2>Three roles, one process</h2>
+
+    <p class="intro">The broker sits between two populations and translates framing where needed. Each provider gets an isolated slot with its own pending requests and notification streams.</p>
+
+    <div class="stack" role="img" aria-label="Three roles: providers connect inbound, broker routes, clients connect outbound">
+
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">01</span>
+          <span class="stack-layer-name">PROVIDERS</span>
+        </div>
+        <div class="stack-layer-body">Industrial assets, sensors, agent hosts, browser scenes — connect inbound over WebSocket (dedicated or multiplexed) or are spawned as stdio child processes.</div>
+      </div>
+      <div class="stack-arrow" aria-hidden="true">
+        <svg width="14" height="22" viewBox="0 0 14 22"><path d="M7 0v18M2 14l5 5 5-5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">02</span>
+          <span class="stack-layer-name">BROKER</span>
+        </div>
+        <div class="stack-layer-body">Named slots, JSON-RPC routing, per-session pending maps, notification broadcast, TLS, optional static mounts. One process, lazy state, no shared store between providers.</div>
+      </div>
+      <div class="stack-arrow" aria-hidden="true">
+        <svg width="14" height="22" viewBox="0 0 14 22"><path d="M7 0v18M2 14l5 5 5-5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">03</span>
+          <span class="stack-layer-name">CLIENTS</span>
+        </div>
+        <div class="stack-layer-body">Claude Desktop (stdio bridge), MCP Inspector (Streamable HTTP), legacy Claude (SSE), custom agents (raw WebSocket). All target a provider by name through a single host.</div>
+      </div>
+
+    </div>
+
+    <p class="caption">Each slot is created lazily the first time any client references a provider name — even before that provider's WebSocket connects. While disconnected, the broker responds with a JSON-RPC error on the client's transport.</p>
+  </div>
+</section>
+
+<!-- ============================ TRANSPORTS ============================= -->
+<section id="transports">
+  <div class="shell">
+    <div class="section-num">03 — Transports</div>
+    <h2>Asymmetric by design</h2>
+
+    <p class="intro">A provider speaks WebSocket; a client speaks SSE on the same slot. The broker translates framing without the participants knowing about each other.</p>
+
+    <h3><span class="h3-num">3.1</span>Provider side (inbound)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 26%;">Transport</th>
+            <th style="width: 34%;">Endpoint</th>
+            <th style="width: 40%;">Use case</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Dedicated WS</code></td>
+            <td><code>ws[s]://broker/provider/&lt;name&gt;</code></td>
+            <td>One provider, one socket. The default for in-process MCP servers.</td>
+          </tr>
+          <tr>
+            <td><code>Multiplexed WS</code></td>
+            <td><code>ws[s]://broker/providers</code></td>
+            <td>One socket carries N providers via <code>{ provider, payload }</code> envelopes. For micro-frontend or many-scene browser apps.</td>
+          </tr>
+          <tr>
+            <td><code>Stdio upstream</code></td>
+            <td>broker spawns child process</td>
+            <td>The broker manages the lifecycle of a local stdio MCP server. Configured at startup.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3><span class="h3-num">3.2</span>Client side (outbound)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 26%;">Transport</th>
+            <th style="width: 34%;">Endpoint</th>
+            <th style="width: 40%;">Use case</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Streamable HTTP</code></td>
+            <td><code>POST/GET /&lt;name&gt;/mcp</code></td>
+            <td>MCP 2025-03-26. MCP Inspector and modern SDKs.</td>
+          </tr>
+          <tr>
+            <td><code>Raw WebSocket</code></td>
+            <td><code>ws[s]://broker/&lt;name&gt;</code></td>
+            <td>Custom MCP clients, lowest framing overhead.</td>
+          </tr>
+          <tr>
+            <td><code>Legacy SSE</code></td>
+            <td><code>GET /&lt;name&gt;/sse</code> + <code>POST /&lt;name&gt;/messages</code></td>
+            <td>Older Claude transport. Still widely deployed.</td>
+          </tr>
+          <tr>
+            <td><code>Stdio bridge</code></td>
+            <td>broker reads stdin, writes stdout</td>
+            <td>Claude Desktop wrapping the broker as a stdio MCP server pointing at one provider.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ QUICK START ============================ -->
+<section id="quick-start">
+  <div class="shell">
+    <div class="section-num">04 — Quick start</div>
+    <h2>From zero to a connected client</h2>
+
+    <p class="intro">No installation step. The broker is a CLI; <code class="inline">npx</code> runs the latest published version.</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Shell</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">$</span> <span class="tk-f">npx</span> <span class="tk-s">@cyanmycelium/mcp-broker</span>
+
+⚙️  mcp-broker started
+────────────────────────────────────────────────────────────────
+📡  Provider WebSocket   ws://localhost:3000/provider/&lt;name&gt;
+🔌  MCP (Streamable HTTP) http://localhost:3000/&lt;name&gt;/mcp
+📺  Legacy SSE            http://localhost:3000/&lt;name&gt;/sse
+────────────────────────────────────────────────────────────────
+</code></pre>
+    </div>
+
+    <p>Then point any MCP provider at the WS endpoint, and any MCP client at the HTTP one:</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">TypeScript · provider.ts</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-c">// Inside any MCP server (uses @cyanmycelium/mcp-core or any SDK).</span>
+<span class="tk-k">import</span> <span class="tk-pu">{</span> <span class="tk-t">McpServerBuilder</span><span class="tk-pu">,</span> <span class="tk-t">DirectTransport</span> <span class="tk-pu">}</span> <span class="tk-k">from</span> <span class="tk-s">'@cyanmycelium/mcp-core/server'</span>
+
+<span class="tk-k">const</span> <span class="tk-p">server</span> <span class="tk-pu">=</span> <span class="tk-k">new</span> <span class="tk-t">McpServerBuilder</span><span class="tk-pu">()</span>
+  <span class="tk-pu">.</span><span class="tk-f">withName</span><span class="tk-pu">(</span><span class="tk-s">'my-provider'</span><span class="tk-pu">)</span>          <span class="tk-c">// the slot name on the broker</span>
+  <span class="tk-pu">.</span><span class="tk-f">withTransport</span><span class="tk-pu">(</span><span class="tk-k">new</span> <span class="tk-t">DirectTransport</span><span class="tk-pu">(</span>
+    <span class="tk-s">'ws://localhost:3000/provider/my-provider'</span>
+  <span class="tk-pu">))</span>
+  <span class="tk-pu">.</span><span class="tk-f">build</span><span class="tk-pu">()</span>
+
+<span class="tk-k">await</span> <span class="tk-p">server</span><span class="tk-pu">.</span><span class="tk-f">start</span><span class="tk-pu">()</span>
+</code></pre>
+    </div>
+
+    <p>The MCP client (Claude Desktop, MCP Inspector, custom) now reaches your tools at <code class="inline">http://localhost:3000/my-provider/mcp</code>. The provider can run anywhere — browser, container, edge — as long as it can open a WebSocket back to the broker.</p>
+  </div>
+</section>
+
+<!-- ============================ PROGRAMMATIC =========================== -->
+<section id="programmatic">
+  <div class="shell">
+    <div class="section-num">05 — Programmatic API</div>
+    <h2>Embed the broker in your own process</h2>
+
+    <p class="intro">Useful when the broker is one component of a larger Node service (gateway, fleet manager, dev harness) and you want to wire stdio upstreams or static mounts from code.</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">TypeScript</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-k">import</span> <span class="tk-pu">{</span> <span class="tk-t">WsTunnelBuilder</span> <span class="tk-pu">}</span> <span class="tk-k">from</span> <span class="tk-s">'@cyanmycelium/mcp-broker'</span>
+
+<span class="tk-k">const</span> <span class="tk-p">broker</span> <span class="tk-pu">=</span> <span class="tk-k">new</span> <span class="tk-t">WsTunnelBuilder</span><span class="tk-pu">()</span>
+  <span class="tk-pu">.</span><span class="tk-f">withPort</span><span class="tk-pu">(</span><span class="tk-n">3000</span><span class="tk-pu">)</span>
+  <span class="tk-pu">.</span><span class="tk-f">withHost</span><span class="tk-pu">(</span><span class="tk-s">'0.0.0.0'</span><span class="tk-pu">)</span>
+
+  <span class="tk-c">// Spawn a local stdio MCP server as a provider slot.</span>
+  <span class="tk-pu">.</span><span class="tk-f">withStdioUpstream</span><span class="tk-pu">(</span><span class="tk-s">'fs'</span><span class="tk-pu">,</span> <span class="tk-s">'npx'</span><span class="tk-pu">,</span> <span class="tk-pu">[</span><span class="tk-s">'-y'</span><span class="tk-pu">,</span> <span class="tk-s">'@modelcontextprotocol/server-filesystem'</span><span class="tk-pu">,</span> <span class="tk-s">'/data'</span><span class="tk-pu">])</span>
+
+  <span class="tk-c">// Optional: serve a dev harness or admin UI.</span>
+  <span class="tk-pu">.</span><span class="tk-f">withStaticMount</span><span class="tk-pu">(</span><span class="tk-s">'/'</span><span class="tk-pu">,</span> <span class="tk-s">'./public'</span><span class="tk-pu">)</span>
+
+  <span class="tk-c">// TLS in two lines.</span>
+  <span class="tk-pu">.</span><span class="tk-f">withTlsFiles</span><span class="tk-pu">(</span><span class="tk-s">'./certs/cert.pem'</span><span class="tk-pu">,</span> <span class="tk-s">'./certs/key.pem'</span><span class="tk-pu">)</span>
+
+  <span class="tk-pu">.</span><span class="tk-f">build</span><span class="tk-pu">()</span>
+
+<span class="tk-k">await</span> <span class="tk-p">broker</span><span class="tk-pu">.</span><span class="tk-f">start</span><span class="tk-pu">()</span>
+</code></pre>
+    </div>
+
+    <p>Every builder method is also reachable via an environment variable when running the broker as a CLI (see next section). Pick the surface that suits the deployment.</p>
+  </div>
+</section>
+
+<!-- ============================ CONFIGURATION ========================== -->
+<section id="configuration">
+  <div class="shell">
+    <div class="section-num">06 — Configuration</div>
+    <h2>Environment variables</h2>
+
+    <p class="intro">All paths are resolved relative to <code class="inline">process.cwd()</code>. Sensible defaults; no required variable for a plain HTTP broker on port 3000.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 38%;">Variable</th>
+            <th style="width: 18%;">Default</th>
+            <th style="width: 44%;">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>MCP_BROKER_PORT</code></td><td><code>3000</code></td><td>TCP port</td></tr>
+          <tr><td><code>MCP_BROKER_HOST</code></td><td><code>0.0.0.0</code></td><td>Interface to bind</td></tr>
+          <tr><td><code>MCP_BROKER_PROVIDER_PATH</code></td><td><code>/provider</code></td><td>Provider WS prefix</td></tr>
+          <tr><td><code>MCP_BROKER_CLIENT_PATH</code></td><td><code>/</code></td><td>Raw WS client prefix</td></tr>
+          <tr><td><code>MCP_BROKER_MCP_PATH</code></td><td><code>/mcp</code></td><td>Streamable HTTP suffix</td></tr>
+          <tr><td><code>MCP_BROKER_WWW_DIR</code></td><td>(unset)</td><td>Serve this directory at <code>/</code></td></tr>
+          <tr><td><code>MCP_BROKER_BUNDLE_DIR</code></td><td>(unset)</td><td>Serve this directory at <code>/bundle</code></td></tr>
+          <tr><td><code>MCP_BROKER_OPEN</code></td><td>(unset)</td><td><code>1</code> to auto-open browser on startup (requires <code>WWW_DIR</code>)</td></tr>
+          <tr><td><code>MCP_BROKER_TLS_CERT</code></td><td>(unset)</td><td>Path to a PEM certificate. Enables HTTPS/WSS</td></tr>
+          <tr><td><code>MCP_BROKER_TLS_KEY</code></td><td>(unset)</td><td>Path to a PEM private key. Enables HTTPS/WSS</td></tr>
+          <tr><td><code>MCP_BROKER_PROTOCOL</code></td><td>auto</td><td><code>http</code> forces plain, <code>https</code> forces TLS</td></tr>
+          <tr><td><code>MCP_BROKER_STDIO_PROVIDER</code></td><td>(unset)</td><td>Bridge stdin/stdout to this provider (Claude Desktop integration)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Generate a localhost certificate for development with:</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Shell</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">$</span> <span class="tk-f">npm</span> <span class="tk-p">run</span> <span class="tk-p">gen-cert</span>
+<span class="tk-c"># writes ../certs/cert.pem and ../certs/key.pem</span>
+</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== ROADMAP ============================= -->
+<section id="roadmap">
+  <div class="shell">
+    <div class="section-num">07 — Roadmap</div>
+    <h2>Where this is going</h2>
+
+    <p class="intro">v0.1 is the single-provider-per-slot relay. The full broker — multi-tenant, authenticated, aggregating tools across providers — is the v1 target.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 16%;">Version</th>
+            <th style="width: 84%;">Capabilities</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-this"><code>v0.1</code></td>
+            <td class="col-this">Single-provider-per-slot. WS/Streamable HTTP/SSE/stdio transports. TLS. Stdio upstream. Static mounts.</td>
+          </tr>
+          <tr>
+            <td><code>v0.2</code></td>
+            <td>.NET implementation parity. Structured logging. Health endpoint. Container image.</td>
+          </tr>
+          <tr>
+            <td><code>v0.3</code></td>
+            <td>Bearer/mTLS authentication on provider and client sides. Per-route ACLs. Audit log.</td>
+          </tr>
+          <tr>
+            <td><code>v0.4</code></td>
+            <td>Discovery endpoint. <b>Cross-provider aggregation</b> — one client endpoint exposes the union of tools across N providers.</td>
+          </tr>
+          <tr>
+            <td><code>v1.0</code></td>
+            <td>Multi-tenant separation. Provider health and active failover. Per-tenant grammar/description-override layer.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="caption">Full detail in <a href="https://github.com/pandaGaume/mcp-broker/blob/main/docs/roadmap.md" target="_blank" rel="noopener">docs/roadmap.md</a> on GitHub.</p>
+  </div>
+</section>
+
+<!-- =============================== INSTALL ============================= -->
+<section id="install">
+  <div class="shell">
+    <div class="section-num">08 — Install</div>
+    <h2>Install</h2>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Shell</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-c"># Run without installing</span>
+<span class="tk-pu">$</span> <span class="tk-f">npx</span> <span class="tk-s">@cyanmycelium/mcp-broker</span>
+
+<span class="tk-c"># Or install globally</span>
+<span class="tk-pu">$</span> <span class="tk-f">npm</span> <span class="tk-p">install</span> <span class="tk-pu">-g</span> <span class="tk-s">@cyanmycelium/mcp-broker</span>
+<span class="tk-pu">$</span> <span class="tk-f">mcp-broker</span>
+
+<span class="tk-c"># Or as a dependency of a larger Node service</span>
+<span class="tk-pu">$</span> <span class="tk-f">npm</span> <span class="tk-p">install</span> <span class="tk-s">@cyanmycelium/mcp-broker</span>
+</code></pre>
+    </div>
+
+    <p>Requires Node 20.11+. Apache-2.0.</p>
+  </div>
+</section>
+
+</main>
+
+<!-- ================================ FOOTER ============================= -->
+<footer>
+  <div class="shell footer-inner">
+    <div class="footer-links">
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">github.com/pandaGaume/mcp-broker</a>
+      <a href="https://npmjs.com/package/@cyanmycelium/mcp-broker" target="_blank" rel="noopener">npmjs.com/package/@cyanmycelium/mcp-broker</a>
+      <a href="https://github.com/pandaGaume/mcp-broker/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+    </div>
+    <div>© CyanMycelium · Apache-2.0</div>
+  </div>
+</footer>
+
+<div class="toast" id="toast">Copied to clipboard</div>
+
+<script>
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg || 'Copied to clipboard';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+  }
+
+  document.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy');
+      try {
+        await navigator.clipboard.writeText(text);
+        const stateEl = btn.querySelector('[data-copy-state]');
+        if (stateEl) {
+          const original = stateEl.textContent;
+          stateEl.textContent = '✓ copied';
+          setTimeout(() => stateEl.textContent = original, 1400);
+        }
+        showToast('$ ' + text);
+      } catch (e) {
+        showToast('Copy failed');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-copy-block]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const wrap = btn.closest('.code-wrap');
+      const pre = wrap.querySelector('pre');
+      const text = pre.innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add('copied');
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+      } catch (e) {
+        showToast('Copy failed');
+      }
+    });
+  });
+
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (!el) return;
+      e.preventDefault();
+      window.scrollTo({ top: el.offsetTop - 70, behavior: 'smooth' });
+      history.replaceState(null, '', '#' + id);
+    });
+  });
+</script>
+
+</body>
+</html>
