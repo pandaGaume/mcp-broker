@@ -1,6 +1,6 @@
 {
     "name": "@cyanmycelium/mcp-broker",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "WebSocket-based Model Context Protocol broker. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports.",
     "type": "module",
     "license": "Apache-2.0",
