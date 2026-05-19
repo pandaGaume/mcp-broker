@@ -1,0 +1,32 @@
+{
+    "tools": {
+        "broker_info": {
+            "description": "返回 broker 的名称、版本、运行时间、主机、端口、TLS 状态和已配置的 URL 路径。"
+        },
+        "providers_list": {
+            "description": "列出 broker 已知的所有 provider 槽位（已连接和未连接），包括传输类型、客户端数量和待处理请求数量。"
+        },
+        "provider_status": {
+            "description": "返回由名称标识的某个 provider 槽位的状态。如果槽位不存在则返回错误。",
+            "properties": {
+                "name": "provider 的精确名称（区分大小写）。"
+            }
+        }
+    },
+    "resources": {
+        "broker://info": {
+            "name": "Broker 信息",
+            "description": "Broker 的身份、版本、运行时间和监听配置。"
+        },
+        "broker://providers": {
+            "name": "Broker Providers",
+            "description": "Broker 已知的所有 provider 槽位列表，包括未连接的。"
+        }
+    },
+    "templates": {
+        "broker://providers/{name}": {
+            "name": "Broker Provider",
+            "description": "指定名称的 provider 槽位快照。"
+        }
+    }
+}

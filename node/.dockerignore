@@ -1,0 +1,47 @@
+# Things we never want to copy into the Docker build context.
+
+# Build artifacts (regenerated inside the image)
+dist/
+*.tsbuildinfo
+
+# Local dependencies (re-installed via npm ci)
+node_modules/
+
+# VCS, CI, editor metadata
+.git/
+.github/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+
+# Local config that has no place in an image
+.env
+.env.*
+.npmrc
+.eslintrc.json
+.eslintignore
+.prettierrc
+.prettierignore
+.editorconfig
+
+# Test artifacts
+tests/
+coverage/
+vitest.config.ts
+
+# Generated TLS material — never bake into image
+../certs/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / AI tooling cruft
+.DS_Store
+Thumbs.db
+.claude/
+
+# Project docs (not needed at runtime)
+README.md
+LICENSE

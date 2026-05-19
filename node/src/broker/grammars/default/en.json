@@ -1,0 +1,32 @@
+{
+    "tools": {
+        "broker_info": {
+            "description": "Returns the broker's name, version, uptime, host, port, TLS status, and configured URL paths."
+        },
+        "providers_list": {
+            "description": "Returns every provider slot known to the broker (connected and disconnected), with transport kind, client count, and pending request count."
+        },
+        "provider_status": {
+            "description": "Returns the status of one provider slot identified by name. Errors if the slot does not exist.",
+            "properties": {
+                "name": "Exact provider name (case-sensitive)."
+            }
+        }
+    },
+    "resources": {
+        "broker://info": {
+            "name": "Broker info",
+            "description": "Broker identity, version, uptime, and listening configuration."
+        },
+        "broker://providers": {
+            "name": "Broker providers",
+            "description": "List of every provider slot known to the broker, including disconnected ones."
+        }
+    },
+    "templates": {
+        "broker://providers/{name}": {
+            "name": "Broker provider",
+            "description": "Snapshot of one specific provider slot, addressed by its name."
+        }
+    }
+}

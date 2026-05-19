@@ -1,0 +1,7 @@
+{
+    "tools": {
+        "broker_info": {
+            "description": "Récupère l'identité du broker comme dans la version packagée, mais avec ton ton perso. (Exemple d'override local.)"
+        }
+    }
+}

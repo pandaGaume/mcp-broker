@@ -2,14 +2,12 @@
     "folders": [
         { "name": "📦 mcp-broker (root)", "path": "." },
         { "name": "🟢 node", "path": "node" },
-        { "name": "🔷 dotnet", "path": "dotnet" },
-        { "name": "📚 docs", "path": "docs" }
+        { "name": "🔷 dotnet", "path": "dotnet" } 
     ],
     "settings": {
         "files.exclude": {
             "node": true,
             "dotnet": true,
-            "docs": true,
             "**/node_modules": true,
             "**/bin": true,
             "**/obj": true,
@@ -26,7 +24,8 @@
             { "directory": "node", "changeProcessCWD": true }
         ],
         "dotnet.defaultSolution": "dotnet/McpBroker.sln",
-        "files.eol": "\n"
+        "files.eol": "\n",
+        "liveServer.settings.multiRootWorkspaceName": "📦 mcp-broker (root)"
     },
     "extensions": {
         "recommendations": [

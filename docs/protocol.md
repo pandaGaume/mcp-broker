@@ -13,9 +13,9 @@ Endpoint: `ws[s]://<host>/provider/<encodedName>`
 Framing: one JSON-RPC message per WebSocket text frame. No envelope.
 
 ```
-  Provider          Broker
-     │  ── { id: 1, method: "tools/list", ... } ◀──   (forwarded from a client)
-     │  ── { id: 1, result: { tools: [...] } } ──▶    (response sent back to that client)
+  Provider                                                             Broker
+     │  ── { id: 1, method: "tools/list", ... }           ◀──   (forwarded from a client)
+     │  ── { id: 1, result: { tools: [...] } }            ──▶   (response sent back to that client)
      │  ── { method: "notifications/tools/list_changed" } ──▶   (broadcast to all clients)
 ```
 

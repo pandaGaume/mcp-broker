@@ -5,7 +5,11 @@ import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer } from "ws";
+import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioUpstream, type StdioUpstreamConfig } from "./stdio.upstream.js";
+import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
+import type { BrokerContext, BrokerLocaleResolver, BrokerProviderInfo, BrokerProviderTransport, BrokerUserAgentResolver } from "./broker/index.js";
+import { VERSION, PACKAGE_NAME } from "./version.js";
 
 // ---------------------------------------------------------------------------
 // Static-file helpers
@@ -186,6 +190,52 @@ export interface WsTunnelOptions {
         /** PEM-encoded private key. */
         key: string;
     };
+
+    /**
+     * When `true` (default), the broker exposes itself as an MCP server under the
+     * reserved slot `_broker`. Tier-1 behaviors (`broker_info`, `providers_list`,
+     * `provider_status`) become callable at `<host>/_broker/mcp`.
+     *
+     * Set to `false` to keep the broker invisible to MCP clients.
+     * @default true
+     */
+    enableBrokerProvider?: boolean;
+
+    /**
+     * Logical name reported by `broker_info`. Useful when running multiple
+     * broker instances and you want to tell them apart from the agent side
+     * (e.g. `"broker-eu-west"`).
+     * @default PACKAGE_NAME — `@cyanmycelium/mcp-broker`
+     */
+    brokerName?: string;
+
+    /**
+     * Custom resolver picking the grammar locale for the embedded broker
+     * server. Defaults to `defaultBrokerLocaleResolver` (keeps the ISO 639-1
+     * prefix of a BCP-47 tag read from `MCP_BROKER_LOCALE`).
+     */
+    brokerLocaleResolver?: BrokerLocaleResolver;
+
+    /**
+     * Custom resolver mapping a connecting client's identity to a user-agent
+     * family. Defaults to `defaultBrokerUserAgentResolver` (substring match on
+     * `clientInfo.name` against known LLM families).
+     */
+    brokerUserAgentResolver?: BrokerUserAgentResolver;
+
+    /**
+     * Custom source of the raw locale string fed to the locale resolver.
+     * Defaults to `() => process.env.MCP_BROKER_LOCALE`. Override when the
+     * locale should come from a config file, HTTP header, etc.
+     */
+    brokerLocaleSource?: () => string | undefined;
+
+    /**
+     * Path to a user-supplied grammars directory whose `<userAgent>/<locale>.json`
+     * files are merged **on top of** the packaged grammars used by the embedded
+     * broker server. Typically pointed at `.mcp-broker/grammars/`.
+     */
+    brokerLocalGrammarsDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +263,7 @@ export interface WsTunnelOptions {
  * Each provider gets its own isolated set of sessions, pending requests, and
  * notification streams. Multiple providers can be connected simultaneously.
  */
-export class WsTunnel {
+export class WsTunnel implements BrokerContext {
     private readonly _options: WsTunnelOptions;
     private _httpServer: http.Server | https.Server | null = null;
     private _wss: WebSocketServer | null = null;
@@ -231,14 +281,160 @@ export class WsTunnel {
     /** Stdio upstream providers, keyed by provider name. */
     private readonly _stdioUpstreams = new Map<string, StdioUpstream>();
 
+    /**
+     * In-process loopback transports registered as provider slots.
+     * Used by the embedded broker server (`_broker`) and any other component
+     * that wants to expose itself as a provider without going through a network.
+     */
+    private readonly _loopbackProviders = new Map<string, IMessageTransport>();
+
+    /** The embedded broker MCP server, when {@link WsTunnelOptions.enableBrokerProvider} is on. */
+    private _brokerServer: IMcpServer | null = null;
+
     /** Provider name that the stdio client transport is bridged to, or null when disabled. */
     private _stdioClientProvider: string | null = null;
 
     /** Buffered partial line from stdin (stdio client transport). */
     private _stdioClientBuffer = "";
 
+    /** Timestamp of the most recent successful `start()`. */
+    private _startedAt: Date | null = null;
+
     constructor(options: WsTunnelOptions) {
         this._options = options;
+    }
+
+    // -------------------------------------------------------------------------
+    // BrokerContext implementation
+    // -------------------------------------------------------------------------
+
+    get version(): string {
+        return VERSION;
+    }
+
+    get name(): string {
+        return this._options.brokerName ?? PACKAGE_NAME;
+    }
+
+    get startedAt(): Date | null {
+        return this._startedAt;
+    }
+
+    get uptimeSeconds(): number {
+        if (!this._startedAt) return 0;
+        return Math.floor((Date.now() - this._startedAt.getTime()) / 1000);
+    }
+
+    get host(): string | undefined {
+        return this._options.host;
+    }
+
+    get port(): number {
+        return this._options.port;
+    }
+
+    get tls(): boolean {
+        return !!this._options.tls;
+    }
+
+    get paths(): BrokerContext["paths"] {
+        const o = this._options;
+        return {
+            provider: o.providerPath ?? "/provider",
+            providers: o.providersPath ?? "/providers",
+            client: o.clientPath ?? "/",
+            mcp: o.mcpPath ?? "/mcp",
+            sse: o.ssePath ?? "/sse",
+            messages: o.messagesPath ?? "/messages",
+        };
+    }
+
+    public getProvidersInfo(): BrokerProviderInfo[] {
+        const out: BrokerProviderInfo[] = [];
+        for (const [name, state] of this._providers) {
+            out.push(this._buildProviderInfo(name, state));
+        }
+        return out;
+    }
+
+    public getProviderInfo(name: string): BrokerProviderInfo | undefined {
+        const state = this._providers.get(name);
+        if (!state) return undefined;
+        return this._buildProviderInfo(name, state);
+    }
+
+    private _buildProviderInfo(name: string, state: ProviderState): BrokerProviderInfo {
+        let transport: BrokerProviderTransport;
+        let connected: boolean;
+
+        if (this._loopbackProviders.get(name)?.isOpen) {
+            transport = "loopback";
+            connected = true;
+        } else if (this._stdioUpstreams.get(name)?.isOpen) {
+            transport = "stdio";
+            connected = true;
+        } else if (state.ws?.readyState === WebSocket.OPEN) {
+            transport = this._multiplexSockets.has(state.ws) ? "ws-multiplex" : "ws";
+            connected = true;
+        } else {
+            transport = "none";
+            connected = false;
+        }
+
+        return {
+            name,
+            transport,
+            connected,
+            clientCount: state.wsClients.size,
+            sessionCount: state.sseSessions.size + state.mcpGetSessions.size,
+            pendingCount: state.pending.size,
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // Loopback provider registration (in-process transports)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Registers an in-process transport as a provider slot. Used by the embedded
+     * broker server and may be used by application code that wants to host an
+     * MCP server inside the same process without opening a real WebSocket.
+     *
+     * @throws if the name is already used by a stdio upstream or another loopback.
+     */
+    public registerLoopbackProvider(name: string, transport: IMessageTransport): void {
+        if (this._loopbackProviders.has(name)) {
+            throw new Error(`Loopback provider "${name}" is already registered.`);
+        }
+        if (this._stdioUpstreams.has(name)) {
+            throw new Error(`Cannot register loopback "${name}": a stdio upstream with the same name already exists.`);
+        }
+
+        const state = this._getOrCreateProviderState(name);
+        this._loopbackProviders.set(name, transport);
+
+        transport.onMessage = (data: string) => this._routeFromProvider(state, data);
+        transport.onClose = () => {
+            this._loopbackProviders.delete(name);
+            // Tell every pending sink that the provider is gone, same as for a WS close.
+            const error = JSON.stringify({
+                jsonrpc: "2.0",
+                id: null,
+                error: { code: -32000, message: `Provider "${name}" disconnected` },
+            });
+            for (const sink of state.pending.values()) {
+                if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
+                    sink.socket.send(error);
+                } else if (sink.type === "sse") {
+                    const sseRes = state.sseSessions.get(sink.sessionId);
+                    if (sseRes) this._sendSseEvent(sseRes, error);
+                } else if (sink.type === "http") {
+                    sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                    sink.res.end(error);
+                }
+            }
+            state.pending.clear();
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -342,15 +538,56 @@ export class WsTunnel {
                     });
                 }
 
-                resolve();
+                this._startedAt = new Date();
+
+                // Spawn the embedded broker server last so it can already report
+                // accurate state in its first `broker_info` call.
+                void this._maybeStartBrokerServer().then(
+                    () => resolve(),
+                    (err: unknown) => {
+                        console.error("[broker] embedded broker server failed to start:", err);
+                        // Keep the tunnel up even if the introspection server fails.
+                        resolve();
+                    }
+                );
             });
         });
     }
 
     /**
+     * Starts the in-process MCP server that exposes the broker's own behaviors
+     * (`broker_info`, `providers_list`, `provider_status`) under the reserved
+     * provider slot `_broker`. No-op when {@link WsTunnelOptions.enableBrokerProvider}
+     * is `false`.
+     */
+    private async _maybeStartBrokerServer(): Promise<void> {
+        if (this._options.enableBrokerProvider === false) return;
+        const { server, clientTransport } = await startBrokerServer(this, {
+            localeResolver: this._options.brokerLocaleResolver,
+            userAgentResolver: this._options.brokerUserAgentResolver,
+            localeSource: this._options.brokerLocaleSource,
+            localGrammarsDir: this._options.brokerLocalGrammarsDir,
+        });
+        this._brokerServer = server;
+        this.registerLoopbackProvider(BROKER_PROVIDER_NAME, clientTransport);
+    }
+
+    /**
      * Gracefully closes all connections and stops the HTTP server.
      */
-    stop(): Promise<void> {
+    async stop(): Promise<void> {
+        // Stop the embedded broker first so it does not see its loopback close
+        // as an unexpected disconnect (and to flush any pending broker responses).
+        const brokerServer = this._brokerServer;
+        this._brokerServer = null;
+        if (brokerServer) {
+            try {
+                await brokerServer.stop();
+            } catch {
+                /* best-effort; continue tearing down */
+            }
+        }
+
         return new Promise((resolve, reject) => {
             for (const state of this._providers.values()) {
                 for (const res of state.sseSessions.values()) res.end();
@@ -365,6 +602,9 @@ export class WsTunnel {
             this._multiplexSockets.clear();
             for (const upstream of this._stdioUpstreams.values()) upstream.close();
             this._stdioUpstreams.clear();
+            for (const loopback of this._loopbackProviders.values()) loopback.close();
+            this._loopbackProviders.clear();
+            this._startedAt = null;
             this._wss?.close();
             this._httpServer?.close((err) => (err ? reject(err) : resolve()));
         });
@@ -624,6 +864,12 @@ export class WsTunnel {
             return;
         }
 
+        if (this._loopbackProviders.has(name)) {
+            console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected — the slot is held by an in-process loopback (reserved system slot).`);
+            ws.close(1008, `Provider "${name}" is reserved by the broker`);
+            return;
+        }
+
         const existing = this._providers.get(name);
         if (existing?.ws?.readyState === WebSocket.OPEN) {
             ws.close(1008, `Provider "${name}" is already connected`);
@@ -713,6 +959,20 @@ export class WsTunnel {
                     return;
                 }
 
+                if (this._loopbackProviders.has(name)) {
+                    ws.send(
+                        JSON.stringify({
+                            provider: name,
+                            payload: {
+                                jsonrpc: "2.0",
+                                id: null,
+                                error: { code: -32000, message: `Provider "${name}" is reserved by the broker` },
+                            },
+                        })
+                    );
+                    return;
+                }
+
                 const existing = this._providers.get(name);
                 if (existing?.ws?.readyState === WebSocket.OPEN) {
                     // Provider already connected via another socket — reject this name.
@@ -779,6 +1039,13 @@ export class WsTunnel {
         const stdioUpstream = this._stdioUpstreams.get(providerName);
         if (stdioUpstream?.isOpen) {
             stdioUpstream.send(data);
+            return;
+        }
+
+        // In-process loopback (e.g. the embedded `_broker`) takes the same priority.
+        const loopback = this._loopbackProviders.get(providerName);
+        if (loopback?.isOpen) {
+            loopback.send(data);
             return;
         }
 
@@ -893,11 +1160,12 @@ export class WsTunnel {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns `true` if the provider is reachable — either via a WebSocket
-     * connection or via a stdio upstream.
+     * Returns `true` if the provider is reachable — via a WebSocket connection,
+     * a stdio upstream, or an in-process loopback transport.
      */
     private _isProviderConnected(providerName: string, state: ProviderState): boolean {
         if (this._stdioUpstreams.get(providerName)?.isOpen) return true;
+        if (this._loopbackProviders.get(providerName)?.isOpen) return true;
         if (state.ws?.readyState === WebSocket.OPEN) return true;
         return false;
     }

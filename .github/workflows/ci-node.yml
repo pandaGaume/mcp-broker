@@ -12,6 +12,11 @@ on:
             - "node/**"
             - ".github/workflows/ci-node.yml"
 
+env:
+    # Opt into Node 24 for JavaScript-based actions to silence the
+    # September 2026 deprecation warning for Node 20.
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 defaults:
     run:
         working-directory: node

@@ -1,0 +1,32 @@
+{
+    "tools": {
+        "broker_info": {
+            "description": "Retourne le nom, la version, l'uptime, l'hôte, le port, l'état TLS et les chemins URL du broker."
+        },
+        "providers_list": {
+            "description": "Liste tous les emplacements de providers connus du broker (connectés et déconnectés), avec leur type de transport, leur nombre de clients et le nombre de requêtes en attente."
+        },
+        "provider_status": {
+            "description": "Retourne l'état d'un emplacement de provider identifié par son nom. Échoue si le provider n'existe pas.",
+            "properties": {
+                "name": "Nom exact du provider (sensible à la casse)."
+            }
+        }
+    },
+    "resources": {
+        "broker://info": {
+            "name": "Informations du broker",
+            "description": "Identité, version, uptime et configuration d'écoute du broker."
+        },
+        "broker://providers": {
+            "name": "Providers du broker",
+            "description": "Liste de tous les emplacements de providers connus du broker, y compris les déconnectés."
+        }
+    },
+    "templates": {
+        "broker://providers/{name}": {
+            "name": "Provider du broker",
+            "description": "Snapshot d'un emplacement de provider spécifique, identifié par son nom."
+        }
+    }
+}

@@ -28,10 +28,62 @@ The broker starts on `http://localhost:3000` by default.
 - Connect your MCP provider to: `ws://localhost:3000/provider/<name>`
 - Point an MCP client at: `http://localhost:3000/<name>/mcp` (Streamable HTTP) or `http://localhost:3000/<name>/sse` (legacy SSE) or `ws://localhost:3000/<name>` (raw WS)
 
-## Environment variables
+## Configuration
+
+Two sources, env vars **always win** over the file. The file is the static baseline you ship with the broker; env vars are deploy-specific overrides.
+
+### Option A — `.mcp-broker/` folder (recommended)
+
+Drop a `.mcp-broker/` folder next to where you launch the broker. Paths
+inside `config.json` are resolved against this folder, so it stays
+self-contained (certs, www, grammar overrides all next to the config).
+
+```
+your-project/
+└── .mcp-broker/
+    ├── config.json       ← broker configuration
+    ├── certs/            ← TLS material (optional)
+    ├── grammars/         ← local grammar overrides (optional)
+    └── www/              ← static dev harness (optional)
+```
+
+Minimal `config.json`:
+
+```json
+{
+    "port": 3001,
+    "locale": "fr",
+    "tls": {
+        "cert": "certs/cert.pem",
+        "key":  "certs/key.pem"
+    },
+    "www": {
+        "open":   false,
+        "mounts": [{ "urlPrefix": "/", "dir": "www" }]
+    },
+    "stdioUpstreams": [
+        {
+            "name": "fs",
+            "command": "npx",
+            "args":   ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+        }
+    ]
+}
+```
+
+Start from the [`.mcp-broker.example/`](.mcp-broker.example/) template:
+
+```sh
+cp -r node_modules/@cyanmycelium/mcp-broker/.mcp-broker.example .mcp-broker
+```
+
+Full reference (every field, defaults, recipes, grammar overrides): **[docs/config.md](docs/config.md)**.
+
+### Option B — Environment variables
 
 | Variable | Default | Notes |
 |---|---|---|
+| `MCP_BROKER_CONFIG` | `./.mcp-broker/config.json` | Path to a JSON config file (see above) |
 | `MCP_BROKER_PORT` | `3000` | TCP port to listen on |
 | `MCP_BROKER_HOST` | `0.0.0.0` | Interface to bind |
 | `MCP_BROKER_PROVIDER_PATH` | `/provider` | Prefix for provider WS connections |
@@ -78,6 +130,66 @@ npm start
 ```
 
 The generated certificate covers `localhost`, `127.0.0.1`, `::1` for 365 days. Browsers will warn about an untrusted issuer on first visit. Click "Advanced → Proceed". MCP clients (Claude, Inspector) ignore certificate validation by default.
+
+## Docker
+
+A multi-stage `Dockerfile` ships with the package: build stage compiles TypeScript and copies grammar JSON, runtime stage carries only the compiled `dist/`, production `node_modules`, and runs as a non-root user.
+
+```sh
+# From the node/ directory
+docker build -t cyanmycelium/mcp-broker:0.1.0 .
+
+# Run on host port 3000
+docker run --rm -p 3000:3000 cyanmycelium/mcp-broker:0.1.0
+
+# With a custom locale and host port
+docker run --rm -p 4000:4000 \
+    -e MCP_BROKER_PORT=4000 \
+    -e MCP_BROKER_LOCALE=fr-CA \
+    cyanmycelium/mcp-broker:0.1.0
+```
+
+### Mounting TLS material
+
+```sh
+# Generate localhost certs on the host first
+npm run gen-cert  # writes ../certs/cert.pem and ../certs/key.pem
+
+docker run --rm -p 3000:3000 \
+    -v "$(pwd)/../certs:/certs:ro" \
+    -e MCP_BROKER_TLS_CERT=/certs/cert.pem \
+    -e MCP_BROKER_TLS_KEY=/certs/key.pem \
+    cyanmycelium/mcp-broker:0.1.0
+```
+
+### Mounting a static dev harness
+
+```sh
+docker run --rm -p 3000:3000 \
+    -v "$(pwd)/public:/www:ro" \
+    -e MCP_BROKER_WWW_DIR=/www \
+    cyanmycelium/mcp-broker:0.1.0
+```
+
+### Health check
+
+The image declares a `HEALTHCHECK` that opens a TCP socket on `MCP_BROKER_PORT`. Orchestrators (Docker Compose, Kubernetes liveness probe) pick it up automatically.
+
+### docker-compose snippet
+
+```yaml
+services:
+  broker:
+    build: .
+    # Or pull a published image once available:
+    # image: ghcr.io/pandagaume/mcp-broker:0.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      MCP_BROKER_PORT: "3000"
+      MCP_BROKER_LOCALE: "en"
+    restart: unless-stopped
+```
 
 ## Claude Desktop integration
 

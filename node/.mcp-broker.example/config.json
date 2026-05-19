@@ -1,0 +1,32 @@
+{
+    "port": 3001,
+    "host": "0.0.0.0",
+    "locale": "fr",
+    "brokerName": "broker-eu-west",
+
+    "paths": {
+        "provider": "/provider",
+        "client":   "/",
+        "mcp":      "/mcp"
+    },
+
+    "tls": {
+        "cert": "certs/cert.pem",
+        "key":  "certs/key.pem"
+    },
+
+    "www": {
+        "open": false,
+        "mounts": [
+            { "urlPrefix": "/", "dir": "www" }
+        ]
+    },
+
+    "stdioUpstreams": [
+        {
+            "name":    "fs",
+            "command": "npx",
+            "args":    ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+        }
+    ]
+}

@@ -19,7 +19,7 @@
         "@typescript-eslint/explicit-module-boundary-types": "off",
         "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
         "no-console": "off",
-        "eqeqeq": ["error", "always"],
+        "eqeqeq": ["error", "smart"],
         "no-var": "error",
         "prefer-const": "error"
     },

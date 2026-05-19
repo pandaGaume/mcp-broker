@@ -33,6 +33,7 @@ export class WsTunnelBuilder {
     private _stdioUpstreams: StdioUpstreamConfig[] = [];
     private _stdioClient: { providerName: string } | undefined = undefined;
     private _tls: { cert: string; key: string } | undefined = undefined;
+    private _brokerLocalGrammarsDir: string | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -179,6 +180,17 @@ export class WsTunnelBuilder {
         return this.withTls(fs.readFileSync(certPath, "utf8"), fs.readFileSync(keyPath, "utf8"));
     }
 
+    /**
+     * Sets the path to a user-supplied grammars directory whose
+     * `<userAgent>/<locale>.json` files are merged on top of the packaged
+     * grammars used by the embedded broker server (the reserved `_broker`
+     * provider slot). Typically pointed at `.mcp-broker/grammars/`.
+     */
+    withBrokerLocalGrammarsDir(dir: string): this {
+        this._brokerLocalGrammarsDir = dir;
+        return this;
+    }
+
     /** Constructs and returns a configured {@link WsTunnel}. */
     build(): WsTunnel {
         const options: WsTunnelOptions = {
@@ -195,6 +207,7 @@ export class WsTunnelBuilder {
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
             stdioClient: this._stdioClient,
             tls: this._tls,
+            brokerLocalGrammarsDir: this._brokerLocalGrammarsDir,
         };
         return new WsTunnel(options);
     }

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>@cyanmycelium/mcp-broker — WebSocket broker for the Model Context Protocol</title>
-  <meta name="description" content="WebSocket-based broker for the Model Context Protocol. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports." />
+  <title>@cyanmycelium/mcp-broker - WebSocket broker for the Model Context Protocol</title>
+  <meta name="description" content="Routes MCP clients to multiple Model Context Protocol providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides." />
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -24,6 +24,7 @@
       <a href="#why">Why</a>
       <a href="#architecture">Architecture</a>
       <a href="#quick-start">Quick start</a>
+      <a href="#grammar">Grammar</a>
       <a href="#install">Install</a>
       <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
     </nav>
@@ -44,8 +45,8 @@
     </h1>
 
     <p class="hero-sub">
-      Aggregates multiple Model Context Protocol providers behind a single
-      WebSocket endpoint, with stdio, SSE, and Streamable HTTP client transports.
+      Routes MCP clients to multiple Model Context Protocol providers through a
+      single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides.
     </p>
 
     <div class="badges">
@@ -73,10 +74,10 @@
 <!-- ============================== WHY ================================== -->
 <section id="why">
   <div class="shell">
-    <div class="section-num">01 — Motivation</div>
+    <div class="section-num">01 - Motivation</div>
     <h2>One MCP server is rarely enough</h2>
 
-    <p class="intro">Real-world MCP deployments don't consist of a single isolated server. An organization typically needs to expose, behind one endpoint:</p>
+    <p class="intro">Real-world MCP deployments don't consist of a single isolated server. An organization typically needs to expose, behind one address:</p>
 
     <ol class="why">
       <li>
@@ -84,7 +85,7 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="3" rx="0.5"/><rect x="2" y="10" width="12" height="3" rx="0.5"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor"/></svg>
         </span>
         <span class="why-body">
-          <b>Industrial assets</b> — PLCs, SCADA, machine telemetry — wrapped as MCP servers, each speaking its own protocol behind the wrapper.
+          <b>Industrial assets</b> - PLCs, SCADA, machine telemetry - wrapped as MCP servers, each speaking its own protocol behind the wrapper.
         </span>
       </li>
       <li>
@@ -100,7 +101,7 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
         </span>
         <span class="why-body">
-          <b>Agent hosts</b> — micro-containers, headless engines, RPA bots — reachable as tools rather than monolithic services.
+          <b>Agent hosts</b> - micro-containers, headless engines, RPA bots - reachable as tools rather than monolithic services.
         </span>
       </li>
       <li>
@@ -116,7 +117,7 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M6 8h4M6 8l4-4M6 8l4 4"/></svg>
         </span>
         <span class="why-body">
-          <b>One client, many providers</b> — Claude, MCP Inspector, custom agents should reach any of them through a single URL instead of juggling N configurations.
+          <b>One client, many providers</b> - Claude, MCP Inspector, custom agents should reach any of them through a single URL instead of juggling N configurations.
         </span>
       </li>
     </ol>
@@ -132,7 +133,7 @@
 <!-- ============================ ARCHITECTURE =========================== -->
 <section id="architecture">
   <div class="shell">
-    <div class="section-num">02 — Architecture</div>
+    <div class="section-num">02 - Architecture</div>
     <h2>Three roles, one process</h2>
 
     <p class="intro">The broker sits between two populations and translates framing where needed. Each provider gets an isolated slot with its own pending requests and notification streams.</p>
@@ -144,7 +145,7 @@
           <span class="stack-layer-idx">01</span>
           <span class="stack-layer-name">PROVIDERS</span>
         </div>
-        <div class="stack-layer-body">Industrial assets, sensors, agent hosts, browser scenes — connect inbound over WebSocket (dedicated or multiplexed) or are spawned as stdio child processes.</div>
+        <div class="stack-layer-body">Industrial assets, sensors, agent hosts, browser scenes - connect inbound over WebSocket (dedicated or multiplexed) or are spawned as stdio child processes.</div>
       </div>
       <div class="stack-arrow" aria-hidden="true">
         <svg width="14" height="22" viewBox="0 0 14 22"><path d="M7 0v18M2 14l5 5 5-5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -171,14 +172,14 @@
 
     </div>
 
-    <p class="caption">Each slot is created lazily the first time any client references a provider name — even before that provider's WebSocket connects. While disconnected, the broker responds with a JSON-RPC error on the client's transport.</p>
+    <p class="caption">Each slot is created lazily the first time any client references a provider name - even before that provider's WebSocket connects. While disconnected, the broker responds with a JSON-RPC error on the client's transport.</p>
   </div>
 </section>
 
 <!-- ============================ TRANSPORTS ============================= -->
 <section id="transports">
   <div class="shell">
-    <div class="section-num">03 — Transports</div>
+    <div class="section-num">03 - Transports</div>
     <h2>Asymmetric by design</h2>
 
     <p class="intro">A provider speaks WebSocket; a client speaks SSE on the same slot. The broker translates framing without the participants knowing about each other.</p>
@@ -253,7 +254,7 @@
 <!-- ============================ QUICK START ============================ -->
 <section id="quick-start">
   <div class="shell">
-    <div class="section-num">04 — Quick start</div>
+    <div class="section-num">04 - Quick start</div>
     <h2>From zero to a connected client</h2>
 
     <p class="intro">No installation step. The broker is a CLI; <code class="inline">npx</code> runs the latest published version.</p>
@@ -295,14 +296,184 @@
 </code></pre>
     </div>
 
-    <p>The MCP client (Claude Desktop, MCP Inspector, custom) now reaches your tools at <code class="inline">http://localhost:3000/my-provider/mcp</code>. The provider can run anywhere — browser, container, edge — as long as it can open a WebSocket back to the broker.</p>
+    <p>The MCP client (Claude Desktop, MCP Inspector, custom) now reaches your tools at <code class="inline">http://localhost:3000/my-provider/mcp</code>. The provider can run anywhere - browser, container, edge - as long as it can open a WebSocket back to the broker.</p>
+  </div>
+</section>
+
+<!-- ========================== SELF-INTROSPECTION ======================= -->
+<section id="self-introspection">
+  <div class="shell">
+    <div class="section-num">05 - Self-introspection</div>
+    <h2>The broker is itself an MCP server</h2>
+
+    <p class="intro">When the broker starts, it registers <strong>itself</strong> under the reserved slot <code class="inline">_broker</code>. Any MCP client can connect to <code class="inline">http://&lt;host&gt;/_broker/mcp</code> and discover the broker's own state through standard MCP tools - no out-of-band documentation, no admin protocol to learn.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 26%;">Tool</th>
+            <th>What it returns</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>broker_info</code></td>
+            <td>Identity: name, version, uptime, host, port, TLS status, configured URL paths.</td>
+          </tr>
+          <tr>
+            <td><code>providers_list</code></td>
+            <td>Every provider slot (connected and disconnected): name, transport kind, client count, pending request count.</td>
+          </tr>
+          <tr>
+            <td><code>provider_status</code></td>
+            <td>Detail of one slot identified by name.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Resources at <code class="inline">broker://info</code>, <code class="inline">broker://providers</code>, and the URI template <code class="inline">broker://providers/{name}</code> mirror the same data for clients that prefer <code class="inline">resources/read</code> to <code class="inline">tools/call</code>.</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Agent perspective</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-c">// Calling _broker like any other MCP provider.</span>
+
+<span class="tk-pu">→</span> <span class="tk-f">tools/call</span> <span class="tk-pu">{</span> <span class="tk-p">name</span><span class="tk-pu">:</span> <span class="tk-s">"broker_info"</span> <span class="tk-pu">}</span>
+<span class="tk-pu">← {</span>
+  <span class="tk-p">name</span><span class="tk-pu">:</span>          <span class="tk-s">"@cyanmycelium/mcp-broker"</span><span class="tk-pu">,</span>
+  <span class="tk-p">version</span><span class="tk-pu">:</span>       <span class="tk-s">"0.1.0"</span><span class="tk-pu">,</span>
+  <span class="tk-p">uptimeSeconds</span><span class="tk-pu">:</span> <span class="tk-n">128</span><span class="tk-pu">,</span>
+  <span class="tk-p">port</span><span class="tk-pu">:</span>          <span class="tk-n">3000</span><span class="tk-pu">,</span>
+  <span class="tk-p">tls</span><span class="tk-pu">:</span>           <span class="tk-k">false</span>
+<span class="tk-pu">}</span>
+
+<span class="tk-pu">→</span> <span class="tk-f">tools/call</span> <span class="tk-pu">{</span> <span class="tk-p">name</span><span class="tk-pu">:</span> <span class="tk-s">"providers_list"</span> <span class="tk-pu">}</span>
+<span class="tk-pu">← {</span>
+  <span class="tk-p">count</span><span class="tk-pu">:</span> <span class="tk-n">3</span><span class="tk-pu">,</span>
+  <span class="tk-p">providers</span><span class="tk-pu">: [</span>
+    <span class="tk-pu">{ </span><span class="tk-p">name</span><span class="tk-pu">:</span> <span class="tk-s">"_broker"</span><span class="tk-pu">,       </span><span class="tk-p">transport</span><span class="tk-pu">:</span> <span class="tk-s">"loopback"</span><span class="tk-pu">, </span><span class="tk-p">connected</span><span class="tk-pu">:</span> <span class="tk-k">true</span> <span class="tk-pu">},</span>
+    <span class="tk-pu">{ </span><span class="tk-p">name</span><span class="tk-pu">:</span> <span class="tk-s">"babylon-scene"</span><span class="tk-pu">, </span><span class="tk-p">transport</span><span class="tk-pu">:</span> <span class="tk-s">"ws"</span><span class="tk-pu">,       </span><span class="tk-p">connected</span><span class="tk-pu">:</span> <span class="tk-k">true</span> <span class="tk-pu">},</span>
+    <span class="tk-pu">{ </span><span class="tk-p">name</span><span class="tk-pu">:</span> <span class="tk-s">"scene-2"</span><span class="tk-pu">,       </span><span class="tk-p">transport</span><span class="tk-pu">:</span> <span class="tk-s">"ws"</span><span class="tk-pu">,       </span><span class="tk-p">connected</span><span class="tk-pu">:</span> <span class="tk-k">true</span> <span class="tk-pu">}</span>
+  <span class="tk-pu">]</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <div class="conclusion">
+      Agents always know what they are talking to and where they can route, without any out-of-band manifest.
+    </div>
+  </div>
+</section>
+
+<!-- ============================= GRAMMAR LAYER ========================= -->
+<section id="grammar">
+  <div class="shell">
+    <div class="section-num">06 - Grammar layer</div>
+    <h2>Tool descriptions tuned per client, per locale</h2>
+
+    <p class="intro">Tool, property, resource, and resource-template descriptions live in JSON files - not in the code. The broker ships a matrix of grammars indexed by <code class="inline">(userAgent, locale)</code>, and the session resolver picks the right combination when a client connects.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 18%;"></th>
+            <th><code>en</code></th>
+            <th><code>fr</code></th>
+            <th><code>zh</code></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>default</code></td>
+            <td class="col-this">packaged</td>
+            <td class="col-this">packaged</td>
+            <td class="col-this">packaged</td>
+          </tr>
+          <tr>
+            <td><code>claude</code></td>
+            <td class="col-this">packaged</td>
+            <td class="col-this">packaged</td>
+            <td>→ <code>default:zh</code></td>
+          </tr>
+          <tr>
+            <td><code>gpt</code></td>
+            <td>→ <code>default:en</code></td>
+            <td>→ <code>default:fr</code></td>
+            <td>→ <code>default:zh</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Each filled cell is one JSON file at <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code>. Missing cells cascade: <code class="inline">claude:zh</code> → <code class="inline">default:zh</code> → <code class="inline">claude:en</code> → <code class="inline">default:en</code>. Add a new locale or a new user-agent family by dropping a file. No code change.</p>
+
+    <h3><span class="h3-num">6.1</span>Shape of a grammar file</h3>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">JSON · grammars/default/fr.json</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">{</span>
+  <span class="tk-p">"tools"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"broker_info"</span><span class="tk-pu">: {</span>
+      <span class="tk-p">"description"</span><span class="tk-pu">:</span> <span class="tk-s">"Retourne le nom, la version, l'uptime, ..."</span>
+    <span class="tk-pu">},</span>
+    <span class="tk-p">"provider_status"</span><span class="tk-pu">: {</span>
+      <span class="tk-p">"description"</span><span class="tk-pu">:</span> <span class="tk-s">"Retourne l'état d'un emplacement de provider..."</span><span class="tk-pu">,</span>
+      <span class="tk-p">"properties"</span><span class="tk-pu">: {</span>
+        <span class="tk-p">"name"</span><span class="tk-pu">:</span> <span class="tk-s">"Nom exact du provider (sensible à la casse)."</span>
+      <span class="tk-pu">}</span>
+    <span class="tk-pu">}</span>
+  <span class="tk-pu">},</span>
+  <span class="tk-p">"resources"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"broker://info"</span><span class="tk-pu">: {</span>
+      <span class="tk-p">"name"</span><span class="tk-pu">:</span>        <span class="tk-s">"Informations du broker"</span><span class="tk-pu">,</span>
+      <span class="tk-p">"description"</span><span class="tk-pu">:</span> <span class="tk-s">"Identité, version, uptime, configuration d'écoute."</span>
+    <span class="tk-pu">}</span>
+  <span class="tk-pu">},</span>
+  <span class="tk-p">"templates"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"broker://providers/{name}"</span><span class="tk-pu">: {</span>
+      <span class="tk-p">"name"</span><span class="tk-pu">:</span>        <span class="tk-s">"Provider du broker"</span><span class="tk-pu">,</span>
+      <span class="tk-p">"description"</span><span class="tk-pu">:</span> <span class="tk-s">"Snapshot d'un emplacement de provider..."</span>
+    <span class="tk-pu">}</span>
+  <span class="tk-pu">}</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <h3><span class="h3-num">6.2</span>Local overrides without forking</h3>
+
+    <p>Need to retune a Claude-French description for your organization? Drop a file in <code class="inline">.mcp-broker/grammars/claude/fr.json</code> with <strong>only</strong> the entries you want to change:</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">JSON · .mcp-broker/grammars/claude/fr.json</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">{</span>
+  <span class="tk-p">"tools"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"broker_info"</span><span class="tk-pu">: {</span>
+      <span class="tk-p">"description"</span><span class="tk-pu">:</span> <span class="tk-s">"Description sur-mesure pour Claude en français, propre à ton org."</span>
+    <span class="tk-pu">}</span>
+  <span class="tk-pu">}</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <p>The broker merges this <strong>on top of</strong> the packaged <code class="inline">claude:fr</code> grammar. Entries you don't override fall through to the packaged values. Translators edit JSON; developers edit code; the two never collide.</p>
   </div>
 </section>
 
 <!-- ============================ PROGRAMMATIC =========================== -->
 <section id="programmatic">
   <div class="shell">
-    <div class="section-num">05 — Programmatic API</div>
+    <div class="section-num">07 - Programmatic API</div>
     <h2>Embed the broker in your own process</h2>
 
     <p class="intro">Useful when the broker is one component of a larger Node service (gateway, fleet manager, dev harness) and you want to wire stdio upstreams or static mounts from code.</p>
@@ -340,10 +511,53 @@
 <!-- ============================ CONFIGURATION ========================== -->
 <section id="configuration">
   <div class="shell">
-    <div class="section-num">06 — Configuration</div>
-    <h2>Environment variables</h2>
+    <div class="section-num">08 - Configuration</div>
+    <h2>One folder, or one env var per knob</h2>
 
-    <p class="intro">All paths are resolved relative to <code class="inline">process.cwd()</code>. Sensible defaults; no required variable for a plain HTTP broker on port 3000.</p>
+    <p class="intro">Two sources, env vars <strong>always win</strong> over the file. The file is the static baseline; env vars are deploy-specific overrides.</p>
+
+    <h3><span class="h3-num">8.1</span>JSON config file (recommended)</h3>
+
+    <p>Drop a <code class="inline">.mcp-broker/</code> folder next to where you launch the broker. Paths inside <code class="inline">config.json</code> are resolved against the folder, so it stays self-contained - certs, www, and grammar overrides all live next to the config.</p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Layout</span>
+      </div>
+<pre><code>.mcp-broker/
+├── config.json       <span class="tk-c">← broker configuration</span>
+├── certs/            <span class="tk-c">← TLS material (optional)</span>
+├── grammars/         <span class="tk-c">← local grammar overrides (optional)</span>
+└── www/              <span class="tk-c">← static dev harness (optional)</span>
+</code></pre>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">JSON · .mcp-broker/config.json</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">{</span>
+  <span class="tk-p">"port"</span><span class="tk-pu">:</span> <span class="tk-n">3001</span><span class="tk-pu">,</span>
+  <span class="tk-p">"locale"</span><span class="tk-pu">:</span> <span class="tk-s">"fr"</span><span class="tk-pu">,</span>
+  <span class="tk-p">"tls"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"cert"</span><span class="tk-pu">:</span> <span class="tk-s">"certs/cert.pem"</span><span class="tk-pu">,</span>
+    <span class="tk-p">"key"</span><span class="tk-pu">:</span>  <span class="tk-s">"certs/key.pem"</span>
+  <span class="tk-pu">},</span>
+  <span class="tk-p">"www"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"open"</span><span class="tk-pu">:</span> <span class="tk-k">false</span><span class="tk-pu">,</span>
+    <span class="tk-p">"mounts"</span><span class="tk-pu">: [{</span> <span class="tk-p">"urlPrefix"</span><span class="tk-pu">:</span> <span class="tk-s">"/"</span><span class="tk-pu">,</span> <span class="tk-p">"dir"</span><span class="tk-pu">:</span> <span class="tk-s">"www"</span> <span class="tk-pu">}]</span>
+  <span class="tk-pu">},</span>
+  <span class="tk-p">"stdioUpstreams"</span><span class="tk-pu">: [</span>
+    <span class="tk-pu">{</span> <span class="tk-p">"name"</span><span class="tk-pu">:</span> <span class="tk-s">"fs"</span><span class="tk-pu">,</span> <span class="tk-p">"command"</span><span class="tk-pu">:</span> <span class="tk-s">"npx"</span><span class="tk-pu">,</span> <span class="tk-p">"args"</span><span class="tk-pu">: [</span><span class="tk-s">"-y"</span><span class="tk-pu">,</span> <span class="tk-s">"@modelcontextprotocol/server-filesystem"</span><span class="tk-pu">,</span> <span class="tk-s">"/data"</span><span class="tk-pu">] }</span>
+  <span class="tk-pu">]</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <p>Drop additional <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code> files to override packaged tool/resource descriptions for your organization - no fork required. Full reference in <a href="https://github.com/pandaGaume/mcp-broker/blob/main/node/docs/config.md" target="_blank" rel="noopener">node/docs/config.md</a>.</p>
+
+    <h3><span class="h3-num">8.2</span>Environment variables</h3>
 
     <div class="table-wrap">
       <table>
@@ -355,43 +569,35 @@
           </tr>
         </thead>
         <tbody>
+          <tr><td><code>MCP_BROKER_CONFIG</code></td><td><code>./.mcp-broker/config.json</code></td><td>Path to a JSON config file</td></tr>
           <tr><td><code>MCP_BROKER_PORT</code></td><td><code>3000</code></td><td>TCP port</td></tr>
           <tr><td><code>MCP_BROKER_HOST</code></td><td><code>0.0.0.0</code></td><td>Interface to bind</td></tr>
+          <tr><td><code>MCP_BROKER_LOCALE</code></td><td><code>en</code></td><td>BCP-47 tag fed to the broker grammar resolver</td></tr>
           <tr><td><code>MCP_BROKER_PROVIDER_PATH</code></td><td><code>/provider</code></td><td>Provider WS prefix</td></tr>
           <tr><td><code>MCP_BROKER_CLIENT_PATH</code></td><td><code>/</code></td><td>Raw WS client prefix</td></tr>
           <tr><td><code>MCP_BROKER_MCP_PATH</code></td><td><code>/mcp</code></td><td>Streamable HTTP suffix</td></tr>
-          <tr><td><code>MCP_BROKER_WWW_DIR</code></td><td>(unset)</td><td>Serve this directory at <code>/</code></td></tr>
-          <tr><td><code>MCP_BROKER_BUNDLE_DIR</code></td><td>(unset)</td><td>Serve this directory at <code>/bundle</code></td></tr>
-          <tr><td><code>MCP_BROKER_OPEN</code></td><td>(unset)</td><td><code>1</code> to auto-open browser on startup (requires <code>WWW_DIR</code>)</td></tr>
+          <tr><td><code>MCP_BROKER_WWW_DIR</code></td><td>(unset)</td><td>Shortcut: mount this directory at <code>/</code></td></tr>
+          <tr><td><code>MCP_BROKER_BUNDLE_DIR</code></td><td>(unset)</td><td>Shortcut: mount this directory at <code>/bundle</code></td></tr>
+          <tr><td><code>MCP_BROKER_OPEN</code></td><td>(unset)</td><td><code>1</code> to auto-open browser on startup</td></tr>
           <tr><td><code>MCP_BROKER_TLS_CERT</code></td><td>(unset)</td><td>Path to a PEM certificate. Enables HTTPS/WSS</td></tr>
           <tr><td><code>MCP_BROKER_TLS_KEY</code></td><td>(unset)</td><td>Path to a PEM private key. Enables HTTPS/WSS</td></tr>
           <tr><td><code>MCP_BROKER_PROTOCOL</code></td><td>auto</td><td><code>http</code> forces plain, <code>https</code> forces TLS</td></tr>
-          <tr><td><code>MCP_BROKER_STDIO_PROVIDER</code></td><td>(unset)</td><td>Bridge stdin/stdout to this provider (Claude Desktop integration)</td></tr>
+          <tr><td><code>MCP_BROKER_STDIO_PROVIDER</code></td><td>(unset)</td><td>Bridge stdin/stdout to this provider (Claude Desktop)</td></tr>
         </tbody>
       </table>
     </div>
 
-    <p>Generate a localhost certificate for development with:</p>
-
-    <div class="code-wrap">
-      <div class="code-head">
-        <span class="lang">Shell</span>
-        <button class="copy-btn" data-copy-block>Copy</button>
-      </div>
-<pre><code><span class="tk-pu">$</span> <span class="tk-f">npm</span> <span class="tk-p">run</span> <span class="tk-p">gen-cert</span>
-<span class="tk-c"># writes ../certs/cert.pem and ../certs/key.pem</span>
-</code></pre>
-    </div>
+    <p class="caption">Env-var paths are resolved against <code class="inline">process.cwd()</code>; config-file paths are resolved against the config file's directory. Two different reference points by design - env is the deploy override, the file is the self-contained bundle.</p>
   </div>
 </section>
 
 <!-- =============================== ROADMAP ============================= -->
 <section id="roadmap">
   <div class="shell">
-    <div class="section-num">07 — Roadmap</div>
+    <div class="section-num">09 - Roadmap</div>
     <h2>Where this is going</h2>
 
-    <p class="intro">v0.1 is the single-provider-per-slot relay. The full broker — multi-tenant, authenticated, aggregating tools across providers — is the v1 target.</p>
+    <p class="intro">v0.1 is the single-provider-per-slot relay. The full broker - multi-tenant, authenticated, aggregating tools across providers - is the v1 target.</p>
 
     <div class="table-wrap">
       <table>
@@ -404,7 +610,7 @@
         <tbody>
           <tr>
             <td class="col-this"><code>v0.1</code></td>
-            <td class="col-this">Single-provider-per-slot. WS/Streamable HTTP/SSE/stdio transports. TLS. Stdio upstream. Static mounts.</td>
+            <td class="col-this">Single-provider-per-slot. WS / Streamable HTTP / SSE / stdio transports. TLS. Stdio upstream. Static mounts. Self-introspection MCP server (<code>_broker</code> slot exposing <code>broker_info</code>, <code>providers_list</code>, <code>provider_status</code>). Grammar layer with per-locale and per-user-agent overrides loadable from JSON. <code>.mcp-broker/</code> config folder.</td>
           </tr>
           <tr>
             <td><code>v0.2</code></td>
@@ -416,7 +622,7 @@
           </tr>
           <tr>
             <td><code>v0.4</code></td>
-            <td>Discovery endpoint. <b>Cross-provider aggregation</b> — one client endpoint exposes the union of tools across N providers.</td>
+            <td>Discovery endpoint. <b>Cross-provider aggregation</b> - one client endpoint exposes the union of tools across N providers.</td>
           </tr>
           <tr>
             <td><code>v1.0</code></td>
@@ -433,7 +639,7 @@
 <!-- =============================== INSTALL ============================= -->
 <section id="install">
   <div class="shell">
-    <div class="section-num">08 — Install</div>
+    <div class="section-num">10 - Install</div>
     <h2>Install</h2>
 
     <div class="code-wrap">

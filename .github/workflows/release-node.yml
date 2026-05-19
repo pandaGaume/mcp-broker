@@ -4,6 +4,11 @@ on:
     push:
         tags: ["node-v*"]
 
+env:
+    # Opt into Node 24 for JavaScript-based actions (checkout, setup-node, ...)
+    # to silence the September 2026 deprecation warning for Node 20.
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 defaults:
     run:
         working-directory: node
@@ -22,13 +27,37 @@ jobs:
                   registry-url: https://registry.npmjs.org
                   cache: "npm"
                   cache-dependency-path: node/package-lock.json
+
+            # npm < 11.5.1 does not support OIDC trusted publishing.
+            # Node 20.x ships with npm 10.x, so upgrade explicitly before publish.
+            - name: Upgrade npm to enable OIDC trusted publishing
+              run: |
+                  npm install -g npm@latest
+                  echo "npm version after upgrade: $(npm --version)"
+
             - run: npm ci
             - run: npm run lint
             - run: npm run build
             - run: npm test
+
             - run: npm publish --access public --provenance
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+            - name: Dump npm debug log on failure
+              if: failure()
+              run: |
+                  echo "=== Environment ==="
+                  echo "ACTIONS_ID_TOKEN_REQUEST_URL: ${ACTIONS_ID_TOKEN_REQUEST_URL:+<set>}"
+                  echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+<set>}"
+                  echo "=== npm version ==="
+                  npm --version
+                  echo "=== npm config ==="
+                  npm config list
+                  echo "=== npm debug logs ==="
+                  for f in /home/runner/.npm/_logs/*.log; do
+                    echo "----- $f -----"
+                    cat "$f"
+                  done
+
             - uses: softprops/action-gh-release@v2
               with:
                   generate_release_notes: true
