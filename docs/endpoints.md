@@ -21,6 +21,21 @@ For each connected provider slot `<name>`:
 | GET | `/<encodedName>/sse` | Legacy SSE notification stream. Emits one `endpoint` event with the messages URL. |
 | POST | `/<encodedName>/messages?sessionId=<uuid>` | Legacy SSE request channel. |
 
+## Reserved `_broker` slot — self-introspection
+
+The broker registers itself as a provider under the reserved slot `_broker`.
+The same client-side endpoints apply, with `<encodedName>` = `_broker`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/_broker/mcp` | Call broker introspection tools (`broker_info`, `providers_list`, `provider_status`) or read introspection resources (`broker://info`, `broker://providers`, `broker://providers/{name}`) |
+| GET | `/_broker/mcp` | Notification stream from the broker (currently no broker-emitted notifications) |
+| WS | `/_broker` | Raw WebSocket MCP transport to the broker introspection server |
+
+The broker's MCP server is in-process and connected to the routing layer via
+a loopback transport — there is no real network hop. Reachable through every
+client-side transport the broker exposes, just like a regular provider slot.
+
 ## Utility
 
 | Method | Path | Purpose |

@@ -47,18 +47,36 @@ When any of these references a provider name for the first time, the broker crea
 
 A request from any client lands in `pending` keyed by its JSON-RPC id; the matching response from the provider is routed back to the same sink. Notifications without an id are broadcast to all sinks of that slot.
 
+## The reserved `_broker` slot — self-introspection
+
+The broker registers **itself** as a provider under the reserved slot
+`_broker`. Any MCP client that connects to `<host>/_broker/mcp` reaches the
+broker's own MCP server (in-process, over a loopback transport) and can
+discover the broker's state through standard MCP tools:
+
+- `broker_info` — name, version, uptime, host, port, TLS, configured paths.
+- `providers_list` — every provider slot known to the broker (connected and
+  disconnected), with transport kind, client count, and pending request
+  count. This is cross-slot discovery: a single client gets the full
+  inventory from one call.
+- `provider_status({ name })` — detail of one slot by name.
+
+Matching resources at `broker://info`, `broker://providers`, and the URI
+template `broker://providers/{name}` mirror the same data for clients that
+prefer `resources/read` to `tools/call`.
+
 ## Why this design
 
-- **Provider isolation.** Two providers with unrelated tool catalogs do not see each other's traffic.
-- **Multiple clients per provider.** A scene running once can be inspected by Inspector and driven by Claude at the same time.
-- **Asymmetric transports.** A provider can speak WS while a client speaks SSE on the same slot; the broker translates the framing.
-- **Lazy state.** Clients can connect to a provider name before the provider itself is up; the broker buffers the slot and answers with a JSON-RPC error until the provider attaches.
-
-## What v0.1 is not yet
-
-- No cross-slot aggregation (a single client sees one provider's tools, not the union of all)
-- No authentication or authorization
-- No tenant or environment separation
-- No health checks or active failover
-
-See [roadmap.md](roadmap.md) for the path forward.
+- **Provider isolation at the tool level.** Two providers with unrelated
+  tool catalogs do not see each other's traffic. A client connected to
+  `<name1>/mcp` cannot call `<name2>`'s tools — only the broker's
+  introspection tools expose information about other slots.
+- **Multiple clients per provider.** A scene running once can be inspected
+  by Inspector and driven by Claude at the same time.
+- **Asymmetric transports.** A provider can speak WS while a client speaks
+  SSE on the same slot; the broker translates the framing.
+- **Lazy state.** Clients can connect to a provider name before the
+  provider itself is up; the broker buffers the slot and answers with a
+  JSON-RPC error until the provider attaches.
+- **The broker is itself an MCP server.** Discoverability comes for free —
+  no separate admin API to learn.

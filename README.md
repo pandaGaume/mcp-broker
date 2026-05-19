@@ -8,10 +8,7 @@
 
 # mcp-broker
 
-WebSocket-based broker for the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Aggregates multiple MCP providers behind a single endpoint so a client (Claude, MCP Inspector, custom agent) reaches any of them through one server.
-
-> Status: v0.1 — single-provider-per-slot WebSocket tunnel with stdio bridge.
-> Roadmap toward a full multi-tenant broker is in [docs/roadmap.md](docs/roadmap.md).
+Routes MCP clients to multiple [Model Context Protocol](https://modelcontextprotocol.io/) providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides. The broker registers itself as an MCP server under the reserved slot `_broker`, so any client can discover what is routable through standard MCP tools.
 
 ## Why a broker
 
@@ -29,9 +26,9 @@ This repo is a multi-implementation reference. Each language lives under its own
 
 ```
 mcp-broker/
-├── node/              ← TypeScript implementation (v0.1, production-ready)
+├── node/              ← TypeScript implementation (current)
 ├── dotnet/            ← .NET implementation (planned)
-├── docs/              ← protocol, architecture, endpoints, roadmap
+├── docs/              ← protocol, architecture, endpoints
 ├── .github/workflows/ ← CI + release pipelines per implementation
 └── mcp-broker.code-workspace
 ```
@@ -42,7 +39,7 @@ Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the r
 
 | Implementation | Status | Package | Tag prefix |
 |---|---|---|---|
-| [node/](node/) | v0.1 published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
+| [node/](node/) | published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
 | [dotnet/](dotnet/) | planned | `CyanMycelium.Mcp.Broker` on NuGet | `dotnet-v*` |
 
 ## Quick start (Node)
@@ -57,10 +54,9 @@ Full instructions, environment variables, and programmatic API in [node/README.m
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — overview, request flow, components
+- [docs/architecture.md](docs/architecture.md) — overview, roles, request flow, the reserved `_broker` slot
 - [docs/protocol.md](docs/protocol.md) — provider WebSocket framing, JSON-RPC envelopes
-- [docs/endpoints.md](docs/endpoints.md) — all HTTP and WS endpoints exposed by the broker
-- [docs/roadmap.md](docs/roadmap.md) — from v0.1 to multi-tenant broker
+- [docs/endpoints.md](docs/endpoints.md) — every HTTP and WS endpoint exposed by the broker
 
 ## License
 

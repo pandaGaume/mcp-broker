@@ -10,7 +10,7 @@
 
 WebSocket-based [Model Context Protocol](https://modelcontextprotocol.io/) broker. Aggregates multiple MCP providers behind a single endpoint, with WebSocket, Streamable HTTP, SSE, and stdio client transports.
 
-> This is the Node/TypeScript implementation of the broker. Architecture, wire protocol, and roadmap are documented language-neutrally in [../docs](../docs).
+> This is the Node/TypeScript implementation of the broker. Architecture, wire protocol, and endpoints are documented language-neutrally in [../docs](../docs).
 
 ## Install and run
 
@@ -208,21 +208,6 @@ The broker can act as a stdio MCP server for Claude Desktop, bridging to any pro
 ```
 
 In this mode all broker logging goes to stderr; stdout is reserved for the JSON-RPC stream Claude expects.
-
-## What the broker does (and does not yet)
-
-| Capability | Status |
-|---|---|
-| One named provider slot, multiple clients | ✅ |
-| Provider transports: WS dedicated, WS multiplexed, stdio upstream | ✅ |
-| Client transports: raw WS, Streamable HTTP (2025-03-26), legacy SSE, stdio bridge | ✅ |
-| TLS via PEM files | ✅ |
-| Static file serving (dev harness) | ✅ |
-| Cross-provider tool aggregation (one client sees all providers' tools at once) | 🚧 v0.4 |
-| Authentication / authorization | 🚧 v0.3 |
-| Multi-tenant isolation | 🚧 v1.0 |
-
-Full roadmap: [../docs/roadmap.md](../docs/roadmap.md).
 
 ## Development
 
