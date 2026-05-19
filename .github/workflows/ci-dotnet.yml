@@ -1,0 +1,42 @@
+name: ci-dotnet
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "dotnet/**"
+            - ".github/workflows/ci-dotnet.yml"
+    pull_request:
+        branches: [main]
+        paths:
+            - "dotnet/**"
+            - ".github/workflows/ci-dotnet.yml"
+
+defaults:
+    run:
+        working-directory: dotnet
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0.x"
+            # Implementation not started yet — exit cleanly once McpBroker.sln exists.
+            - name: Detect solution
+              id: detect
+              run: |
+                  if [ -f McpBroker.sln ]; then
+                    echo "found=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "::notice::No McpBroker.sln yet — skipping build."
+                    echo "found=false" >> "$GITHUB_OUTPUT"
+                  fi
+            - if: steps.detect.outputs.found == 'true'
+              run: dotnet restore
+            - if: steps.detect.outputs.found == 'true'
+              run: dotnet build --configuration Release --no-restore
+            - if: steps.detect.outputs.found == 'true'
+              run: dotnet test --configuration Release --no-build --verbosity normal

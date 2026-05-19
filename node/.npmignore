@@ -1,0 +1,12 @@
+# `files` in package.json is the authoritative allowlist for publish.
+# This .npmignore prevents accidental inclusion of dev artifacts.
+tests/
+*.tsbuildinfo
+.eslintrc.json
+.eslintignore
+.prettierrc
+.prettierignore
+tsconfig.json
+tsconfig.build.json
+vitest.config.ts
+.npmrc

@@ -1,0 +1,40 @@
+{
+    "folders": [
+        { "name": "📦 mcp-broker (root)", "path": "." },
+        { "name": "🟢 node", "path": "node" },
+        { "name": "🔷 dotnet", "path": "dotnet" },
+        { "name": "📚 docs", "path": "docs" }
+    ],
+    "settings": {
+        "files.exclude": {
+            "node": true,
+            "dotnet": true,
+            "docs": true,
+            "**/node_modules": true,
+            "**/bin": true,
+            "**/obj": true,
+            "**/dist": true
+        },
+        "search.exclude": {
+            "**/node_modules": true,
+            "**/dist": true,
+            "**/bin": true,
+            "**/obj": true
+        },
+        "typescript.tsdk": "node/node_modules/typescript/lib",
+        "eslint.workingDirectories": [
+            { "directory": "node", "changeProcessCWD": true }
+        ],
+        "dotnet.defaultSolution": "dotnet/McpBroker.sln",
+        "files.eol": "\n"
+    },
+    "extensions": {
+        "recommendations": [
+            "dbaeumer.vscode-eslint",
+            "esbenp.prettier-vscode",
+            "ms-dotnettools.csharp",
+            "ms-dotnettools.csdevkit",
+            "editorconfig.editorconfig"
+        ]
+    }
+}

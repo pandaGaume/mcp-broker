@@ -1,0 +1,29 @@
+name: release-dotnet
+
+on:
+    push:
+        tags: ["dotnet-v*"]
+
+defaults:
+    run:
+        working-directory: dotnet
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0.x"
+            # Wire up actual publish when McpBroker.sln exists.
+            # Expected steps:
+            #   - run: dotnet pack -c Release -o artifacts
+            #   - run: dotnet nuget push artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+            - name: Placeholder
+              run: echo "::warning::release-dotnet.yml triggered but no .NET implementation yet."
+            - uses: softprops/action-gh-release@v2
+              with:
+                  generate_release_notes: true
