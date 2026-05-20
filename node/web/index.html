@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@cyanmycelium/mcp-broker - running on localhost:3000</title>
+  <meta name="description" content="The MCP broker is running. It is safe to close this page." />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    /* --- Landing-specific overrides ----------------------------------- */
+
+    /* The hero is shorter on this page: it's a status banner, not a marketing pitch */
+    .hero { padding: 80px 0 56px; }
+    .hero-mark { margin-bottom: 20px; }
+
+    /* "Running" status dot — pulsing green to read as "live" at a glance */
+    .status-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--lime);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .status-row .pulse {
+      position: relative;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--lime);
+      box-shadow: 0 0 10px var(--lime);
+    }
+    .status-row .pulse::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 1px solid var(--lime);
+      opacity: 0.6;
+      animation: pulse 1.6s ease-out infinite;
+    }
+    @keyframes pulse {
+      0%   { transform: scale(0.6); opacity: 0.7; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+
+    /* Address line — copy-on-click, same vibe as the hero CTA from the docs site */
+    .address {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 8px;
+      padding: 14px 18px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule-strong);
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--fg);
+      cursor: pointer;
+      transition: border-color 120ms, background 120ms;
+      max-width: 100%;
+    }
+    .address:hover { border-color: var(--blue-dim); background: var(--bg-elev-2); }
+    .address .scheme { color: var(--fg-dim); }
+    .address .host   { color: var(--blue); }
+    .address .copy-hint {
+      margin-left: auto;
+      font-size: 10px;
+      color: var(--fg-dim);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding-left: 12px;
+      border-left: 1px solid var(--rule);
+    }
+    .address.copied .copy-hint { color: var(--blue); }
+
+    /* "Safe to close" reassurance — green-tinted version of the .conclusion block */
+    .safe {
+      margin: 28px 0 0;
+      padding: 14px 18px;
+      background: rgba(184, 224, 96, 0.06);
+      border-left: 2px solid var(--lime);
+      border-radius: 0 6px 6px 0;
+      color: var(--fg-muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .safe b { color: var(--fg); font-weight: 500; }
+    .safe svg { vertical-align: -3px; margin-right: 6px; color: var(--lime); }
+
+    /* Endpoints — a quick reference, two columns on wide screens */
+    .endpoints {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .endpoint {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 14px 16px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+    }
+    .endpoint .label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--blue);
+      text-transform: uppercase;
+    }
+    .endpoint .url {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--fg);
+      word-break: break-all;
+    }
+
+    /* Example cards grid — links to other pages mounted under www/ */
+    .examples-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 8px;
+    }
+    a.example {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 18px 20px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule-strong);
+      border-radius: 8px;
+      color: var(--fg);
+      text-decoration: none;
+      transition: border-color 160ms, background 160ms, transform 160ms;
+      position: relative;
+    }
+    a.example:hover {
+      border-color: var(--blue-dim);
+      background: var(--bg-elev-2);
+      text-decoration: none;
+      transform: translateY(-1px);
+    }
+    a.example .ex-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    a.example .ex-title {
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+    }
+    a.example .ex-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 2px 7px;
+      border: 1px solid var(--rule-strong);
+      border-radius: 3px;
+    }
+    a.example .ex-tag.live { color: var(--lime); border-color: rgba(184, 224, 96, 0.35); }
+    a.example .ex-tag.tool { color: var(--blue); border-color: rgba(59, 130, 246, 0.35); }
+    a.example .ex-desc {
+      color: var(--fg-muted);
+      font-size: 13.5px;
+      line-height: 1.5;
+      margin: 0;
+    }
+    a.example .ex-path {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--fg-dim);
+      margin-top: 4px;
+      letter-spacing: 0.01em;
+    }
+    a.example .ex-path .arrow {
+      color: var(--blue);
+      transition: transform 160ms;
+      display: inline-block;
+    }
+    a.example:hover .ex-path .arrow { transform: translateX(3px); }
+
+    /* Placeholder cards — visibly inactive, still clickable to the explainer.
+       Uses the same dashed/striped pattern as the placeholder page's mark
+       so the two visually agree. */
+    a.example.placeholder {
+      background:
+        repeating-linear-gradient(
+          45deg,
+          transparent 0 6px,
+          rgba(255, 255, 255, 0.012) 6px 7px
+        ),
+        var(--bg-elev-1);
+      border-style: dashed;
+      border-color: var(--rule);
+      opacity: 0.72;
+    }
+    a.example.placeholder:hover {
+      opacity: 1;
+      transform: none;
+      border-color: var(--rule-strong);
+      background:
+        repeating-linear-gradient(
+          45deg,
+          transparent 0 6px,
+          rgba(255, 255, 255, 0.02) 6px 7px
+        ),
+        var(--bg-elev-2);
+    }
+    a.example.placeholder .ex-title { color: var(--fg-muted); }
+    a.example.placeholder .ex-desc  { color: var(--fg-dim); }
+    a.example.placeholder .ex-path  { color: var(--fg-dim); }
+    a.example.placeholder .ex-path .arrow { color: var(--fg-dim); }
+    a.example.placeholder .ex-tag {
+      color: var(--fg-dim);
+      border-color: var(--rule);
+      background: transparent;
+    }
+
+    /* Hide-this-page section — a quieter, more compact look */
+    #disable .code-wrap { margin-top: 14px; }
+    .hide-options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .hide-option {
+      padding: 14px 16px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+    }
+    .hide-option .h {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--blue);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .hide-option p {
+      margin: 0;
+      font-size: 13.5px;
+      line-height: 1.55;
+    }
+    .hide-option code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--blue);
+      background: var(--bg-inline);
+      border: 1px solid var(--rule);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* Section heads on this page don't need such big padding — it's a single screen */
+    section { padding: 56px 0; }
+    section:first-of-type { padding-top: 0; } /* hero handles its own top */
+  </style>
+</head>
+<body>
+
+<!-- ============================== TOPBAR ============================== -->
+<header class="topbar">
+  <div class="shell topbar-inner">
+    <a class="brand" href="/">
+      <img class="brand-mark" src="assets/logo.png" alt="" aria-hidden="true" />
+      <span>@cyanmycelium/mcp-broker</span>
+    </a>
+    <nav class="topbar-links">
+      <a href="#endpoints">Endpoints</a>
+      <a href="#examples">Examples</a>
+      <a href="#disable">Hide this page</a>
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- ================================ HERO =============================== -->
+<section class="hero">
+  <div class="shell">
+    <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
+
+    <div class="status-row">
+      <span class="pulse" aria-hidden="true"></span>
+      <span>broker running · uptime 00:00:12</span>
+    </div>
+
+    <h1 class="hero-title">
+      Your broker is up.
+    </h1>
+
+    <p class="hero-sub">
+      <code class="inline" style="font-size: 0.95em;">@cyanmycelium/mcp-broker</code>
+      is listening on the address below. Point your MCP clients at it,
+      or open one of the bundled example pages.
+    </p>
+
+    <button class="address" type="button" data-copy="http://localhost:3000" id="address-btn">
+      <span class="scheme">http://</span><span class="host">localhost:3000</span>
+      <span class="copy-hint" data-copy-state>copy</span>
+    </button>
+
+    <div class="safe">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>
+      <b>Safe to close this page.</b>
+      The broker runs in the terminal that started it — closing the tab will not stop it.
+      Use <code class="inline">Ctrl + C</code> in that terminal when you want to shut it down.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ENDPOINTS ============================== -->
+<section id="endpoints">
+  <div class="shell">
+    <div class="section-num">01 - Endpoints</div>
+    <h2>Where to connect from</h2>
+
+    <p class="intro">Four transports are mounted on the same host. Replace <code class="inline">&lt;name&gt;</code> with one of your provider slot names — or use <code class="inline">_broker</code> to talk to the broker itself.</p>
+
+    <div class="endpoints">
+      <div class="endpoint">
+        <span class="label">Provider · WebSocket</span>
+        <span class="url">ws://localhost:3000/provider/&lt;name&gt;</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Client · Streamable HTTP</span>
+        <span class="url">http://localhost:3000/&lt;name&gt;/mcp</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Client · Raw WebSocket</span>
+        <span class="url">ws://localhost:3000/&lt;name&gt;</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Client · Legacy SSE</span>
+        <span class="url">http://localhost:3000/&lt;name&gt;/sse</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ EXAMPLES =============================== -->
+<section id="examples">
+  <div class="shell">
+    <div class="section-num">02 - Bundled examples</div>
+    <h2>Try the broker without writing any code</h2>
+
+    <p class="intro">Each card is a small page served by the broker's static mount. They register themselves as MCP providers on connect, so any client pointed at the matching slot can call their tools immediately.</p>
+
+    <div class="examples-grid">
+
+      <a class="example" href="demos/provider-tunnel/">
+        <div class="ex-head">
+          <span class="ex-title">Provider Tunnel</span>
+          <span class="ex-tag live">live</span>
+        </div>
+        <p class="ex-desc">An MCP server running in the browser, tunnelled to the broker over WebSocket using the official <code class="inline">@modelcontextprotocol/sdk</code>. Exposes 6 tools and 2 resources.</p>
+        <span class="ex-path">demos/provider-tunnel/ <span class="arrow">→</span></span>
+      </a>
+
+      <a class="example placeholder" href="demos/DemoPlaceholder.html?slot=babylon-scene">
+        <div class="ex-head">
+          <span class="ex-title">Babylon scene</span>
+          <span class="ex-tag">soon</span>
+        </div>
+        <p class="ex-desc">A 3D scene that exposes <code class="inline">move</code>, <code class="inline">rotate</code> and <code class="inline">camera</code> tools over a WebSocket up to the broker.</p>
+        <span class="ex-path">demos/babylon-scene/ <span class="arrow">→</span></span>
+      </a>
+
+      <a class="example" href="demos/DemoPlaceholder.html?slot=_broker">
+        <div class="ex-head">
+          <span class="ex-title">Broker self-MCP</span>
+          <span class="ex-tag tool">tools/call</span>
+        </div>
+        <p class="ex-desc">The broker is itself an MCP server. Point Inspector here to list providers, read <code class="inline">broker_info</code> and explore broker resources.</p>
+        <span class="ex-path">/_broker/mcp <span class="arrow">→</span></span>
+      </a>
+
+    </div>
+  </div>
+</section>
+
+<!-- ========================== DISABLE THIS PAGE ======================== -->
+<section id="disable">
+  <div class="shell">
+    <div class="section-num">03 - Hide this page on next launch</div>
+    <h2>Don't want a browser tab every time?</h2>
+
+    <p class="intro">This landing only opens because <code class="inline">www.open</code> is <code class="inline">true</code> (the default for fresh installs). Flip it off and the broker will keep serving everything silently in the background.</p>
+
+    <div class="hide-options">
+      <div class="hide-option">
+        <div class="h">Option A · config file</div>
+        <p>Set <code>"open": false</code> under <code>www</code> in <code>.mcp-broker/config.json</code>.</p>
+      </div>
+      <div class="hide-option">
+        <div class="h">Option B · env var</div>
+        <p>Unset (or remove) <code>MCP_BROKER_OPEN</code> before launching the broker.</p>
+      </div>
+      <div class="hide-option">
+        <div class="h">Option C · CLI flag</div>
+        <p>Pass <code>--no-open</code> on the command line — wins over both.</p>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">JSON · .mcp-broker/config.json</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">{</span>
+  <span class="tk-p">"port"</span><span class="tk-pu">:</span> <span class="tk-n">3000</span><span class="tk-pu">,</span>
+  <span class="tk-p">"www"</span><span class="tk-pu">: {</span>
+    <span class="tk-p">"open"</span><span class="tk-pu">:</span> <span class="tk-k">false</span><span class="tk-pu">,</span>             <span class="tk-c">// ← was true; flip to false</span>
+    <span class="tk-p">"mounts"</span><span class="tk-pu">: [{</span> <span class="tk-p">"urlPrefix"</span><span class="tk-pu">:</span> <span class="tk-s">"/"</span><span class="tk-pu">,</span> <span class="tk-p">"dir"</span><span class="tk-pu">:</span> <span class="tk-s">"www"</span> <span class="tk-pu">}]</span>
+  <span class="tk-pu">}</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <p class="caption">Need the page back for a one-off? <code class="inline">npx @cyanmycelium/mcp-broker --open</code> overrides the config for a single launch.</p>
+  </div>
+</section>
+
+</main>
+
+<!-- ================================ FOOTER ============================= -->
+<footer>
+  <div class="shell footer-inner">
+    <div class="footer-links">
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">github.com/pandaGaume/mcp-broker</a>
+      <a href="https://npmjs.com/package/@cyanmycelium/mcp-broker" target="_blank" rel="noopener">npmjs.com/package/@cyanmycelium/mcp-broker</a>
+      <a href="https://github.com/pandaGaume/mcp-broker/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+    </div>
+    <div>© CyanMycelium · Apache-2.0</div>
+  </div>
+</footer>
+
+<div class="toast" id="toast">Copied to clipboard</div>
+
+<script>
+  /* ---- live uptime counter ----------------------------------------- */
+  (function () {
+    const start = Date.now();
+    const el = document.querySelector('.status-row span:last-child');
+    if (!el) return;
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function tick() {
+      const sec = Math.floor((Date.now() - start) / 1000);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      el.textContent = 'broker running · uptime ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+    }
+    tick();
+    setInterval(tick, 1000);
+  })();
+
+  /* ---- toast + copy plumbing (mirrors the docs site) --------------- */
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg || 'Copied to clipboard';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+  }
+
+  document.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy');
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add('copied');
+        const stateEl = btn.querySelector('[data-copy-state]');
+        if (stateEl) {
+          const original = stateEl.textContent;
+          stateEl.textContent = '✓ copied';
+          setTimeout(() => {
+            stateEl.textContent = original;
+            btn.classList.remove('copied');
+          }, 1400);
+        }
+        showToast(text);
+      } catch (e) {
+        showToast('Copy failed');
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-copy-block]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const wrap = btn.closest('.code-wrap');
+      const pre = wrap.querySelector('pre');
+      const text = pre.innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add('copied');
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+      } catch (e) {
+        showToast('Copy failed');
+      }
+    });
+  });
+
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (!el) return;
+      e.preventDefault();
+      window.scrollTo({ top: el.offsetTop - 70, behavior: 'smooth' });
+      history.replaceState(null, '', '#' + id);
+    });
+  });
+</script>
+
+</body>
+</html>

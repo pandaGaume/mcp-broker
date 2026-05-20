@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>MCP Broker — Provider Tunnel Demo</title>
+        <link rel="icon" type="image/png" href="../../assets/logo.png" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        />
+        <link rel="stylesheet" href="../../css/styles.css" />
+        <link rel="stylesheet" href="css/app.css" />
+    </head>
+    <body>
+        <!-- Topbar -->
+        <header class="topbar">
+            <a class="brand" href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">
+                <img class="brand-mark" src="../../assets/logo.png" alt="" aria-hidden="true" />
+                <span>@cyanmycelium/mcp-broker</span>
+            </a>
+            <span class="topbar-tag">Provider Tunnel Demo</span>
+            <span class="topbar-spacer"></span>
+            <a class="topbar-link" href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">
+                GitHub →
+            </a>
+            <span id="status-badge" class="badge disconnected">Disconnected</span>
+        </header>
+
+        <div class="layout">
+            <!-- Left: tunnel connection -->
+            <aside class="left-panel panel">
+                <div class="panel-title">Tunnel connection</div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="ws-url">Broker provider base URL</label>
+                        <input type="text" id="ws-url" />
+                    </div>
+                    <div class="field">
+                        <label for="server-name">Provider slot name</label>
+                        <input type="text" id="server-name" value="demo-toolbox" />
+                    </div>
+                    <div class="btn-row">
+                        <button id="start-btn" class="btn btn-primary">Connect</button>
+                        <button id="stop-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                    </div>
+
+                    <div class="endpoints" id="endpoints" hidden>
+                        <div class="field">
+                            <label for="ep-http">Streamable HTTP (MCP Inspector)</label>
+                            <input type="text" id="ep-http" readonly />
+                        </div>
+                        <div class="field">
+                            <label for="ep-sse">Legacy SSE</label>
+                            <input type="text" id="ep-sse" readonly />
+                        </div>
+                        <div class="field">
+                            <label for="ep-ws">Raw WebSocket</label>
+                            <input type="text" id="ep-ws" readonly />
+                        </div>
+                    </div>
+
+                    <p class="hint">
+                        This page hosts an MCP <strong>server</strong> built with the official
+                        <code>@modelcontextprotocol/sdk</code>. Connecting opens an outbound WebSocket to the broker's
+                        <code>/provider/&lt;name&gt;</code> endpoint — the broker then relays any MCP client that
+                        targets the slot above. The broker-specific code is isolated in
+                        <code>js/lib/broker-tunnel.js</code>.
+                    </p>
+                </div>
+            </aside>
+
+            <!-- Right: catalog + console -->
+            <div class="right-column">
+                <section class="panel catalog-panel">
+                    <div class="panel-title">Server catalog — what this MCP server exposes</div>
+                    <div class="panel-body" id="catalog"></div>
+                </section>
+                <section class="panel console-panel">
+                    <div class="panel-title">Console</div>
+                    <div class="panel-body" id="console-output"></div>
+                </section>
+            </div>
+        </div>
+
+        <script type="module" src="js/app.js"></script>
+    </body>
+</html>

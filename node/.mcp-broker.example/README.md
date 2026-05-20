@@ -22,6 +22,9 @@ cp -r .mcp-broker.example .mcp-broker
     └── index.html
 ```
 
+A ready-made instance UI lives at [`node/web/`](../web/) — point a `www`
+mount at it (`"dir": "../web"`) to serve it. See [`node/web/README.md`](../web/README.md).
+
 ## Path resolution
 
 Paths inside `config.json` are resolved against the **directory of the
