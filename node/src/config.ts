@@ -73,6 +73,22 @@ export interface BrokerConfig {
         command: string;
         args?: string[];
         env?: Record<string, string>;
+        /** When `true`, the upstream joins the `_all` aggregate slot once connected. */
+        aggregate?: boolean;
+    }>;
+
+    /**
+     * Remote MCP servers the broker connects out to and exposes as provider
+     * slots. Each entry is reached by URL (Streamable HTTP / SSE / WebSocket);
+     * local servers should be shipped as `.mcpb` bundles instead.
+     */
+    mcpServers?: Array<{
+        name: string;
+        url: string;
+        transport?: "streamable-http" | "sse" | "websocket";
+        headers?: Record<string, string>;
+        /** When `true`, the upstream joins the `_all` aggregate slot once connected. */
+        aggregate?: boolean;
     }>;
 }
 

@@ -1,0 +1,13 @@
+# Type declarations and source maps — not needed at runtime
+**/*.d.ts
+**/*.d.ts.map
+**/*.js.map
+**/*.tsbuildinfo
+
+# npm install cruft
+node_modules/.bin/
+node_modules/.package-lock.json
+
+# OS junk
+.DS_Store
+Thumbs.db

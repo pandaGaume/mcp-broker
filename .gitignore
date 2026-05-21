@@ -36,3 +36,7 @@ Thumbs.db
 
 # ── AI tooling ──────────────────────────────────────────────────────────────
 .claude/
+
+# ── MCP Bundle build output (node/scripts/pack-mcpb.mjs) ────────────────────
+node/mcpb/build/
+*.mcpb

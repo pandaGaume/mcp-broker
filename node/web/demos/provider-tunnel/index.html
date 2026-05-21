@@ -45,6 +45,15 @@
                     <div class="btn-row">
                         <button id="start-btn" class="btn btn-primary">Connect</button>
                         <button id="stop-btn" class="btn btn-secondary" disabled>Disconnect</button>
+                        <label class="check">
+                            <input type="checkbox" id="aggregate-check" />
+                            <span>aggregate</span>
+                            <span class="check-tip" role="tooltip">
+                                Joins the broker's <code>_all</code> slot: this server's tools and prompts are
+                                merged into one aggregate MCP endpoint alongside every other aggregated
+                                provider, so a single client reaches them all.
+                            </span>
+                        </label>
                     </div>
 
                     <div class="endpoints" id="endpoints" hidden>

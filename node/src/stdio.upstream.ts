@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from "node:child_process";
+import type { Upstream } from "./upstream.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -13,6 +14,8 @@ export interface StdioUpstreamConfig {
     args?: string[];
     /** Extra environment variables merged with `process.env`. */
     env?: NodeJS.ProcessEnv;
+    /** When `true`, this upstream joins the `_all` aggregate slot once connected. */
+    aggregate?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -27,7 +30,7 @@ export interface StdioUpstreamConfig {
  * One instance per configured provider. The broker uses this to bridge
  * WebSocket/SSE/HTTP clients to local MCP server processes.
  */
-export class StdioUpstream {
+export class StdioUpstream implements Upstream {
     readonly name: string;
 
     private readonly _config: StdioUpstreamConfig;

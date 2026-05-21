@@ -99,6 +99,7 @@ const stopBtn = document.getElementById("stop-btn");
 const wsUrlInput = document.getElementById("ws-url");
 const nameInput = document.getElementById("server-name");
 const endpointsEl = document.getElementById("endpoints");
+const aggregateCheck = document.getElementById("aggregate-check");
 
 // Derive the provider WebSocket base from the page origin: ws:// over HTTP,
 // wss:// over HTTPS — avoids mixed-content errors under TLS.
@@ -114,6 +115,7 @@ function teardown() {
     setStatus("disconnected");
     startBtn.disabled = false;
     stopBtn.disabled = true;
+    aggregateCheck.disabled = false;
     endpointsEl.hidden = true;
 }
 
@@ -156,13 +158,19 @@ startBtn.addEventListener("click", async () => {
     }
     const url = `${base}/${encodeURIComponent(slotName)}`;
 
+    const aggregate = aggregateCheck.checked;
+
     setStatus("connecting");
     startBtn.disabled = true;
+    aggregateCheck.disabled = true;
     intentionalClose = false;
     tunnelWasOpen = false;
     log(`Opening tunnel WebSocket to ${url} …`, "dim");
+    if (aggregate) {
+        log("Aggregate mode on — this server will join the broker's _all slot.", "dim");
+    }
 
-    transport = new BrokerTunnelTransport(url);
+    transport = new BrokerTunnelTransport(url, { aggregate });
     transport.onTunnelOpen = () => {
         tunnelWasOpen = true;
     };

@@ -7,8 +7,11 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioUpstream, type StdioUpstreamConfig } from "./stdio.upstream.js";
+import { RemoteUpstream, type RemoteUpstreamConfig } from "./remote.upstream.js";
+import type { Upstream } from "./upstream.js";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
 import type { BrokerContext, BrokerLocaleResolver, BrokerProviderInfo, BrokerProviderTransport, BrokerUserAgentResolver } from "./broker/index.js";
+import { AggregateServer } from "./broker/aggregate/aggregate.server.js";
 import { VERSION, PACKAGE_NAME } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -38,9 +41,15 @@ const MIME: Readonly<Record<string, string>> = {
  * Where a JSON-RPC response should be delivered.
  * Either a WebSocket socket (raw WS client), an SSE session (legacy MCP/HTTP),
  * a held-open HTTP response (Streamable HTTP transport, MCP 2025-03-26),
- * or the process stdout (stdio transport for Claude Desktop).
+ * the process stdout (stdio transport for Claude Desktop), or an in-process
+ * internal client (e.g. the aggregate server).
  */
-type ResponseSink = { type: "ws"; socket: WebSocket } | { type: "sse"; sessionId: string } | { type: "http"; res: ServerResponse } | { type: "stdio" };
+type ResponseSink =
+    | { type: "ws"; socket: WebSocket }
+    | { type: "sse"; sessionId: string }
+    | { type: "http"; res: ServerResponse }
+    | { type: "stdio" }
+    | { type: "internal"; client: InternalClient };
 
 /**
  * All mutable state for one named provider slot.
@@ -58,6 +67,8 @@ interface ProviderState {
     readonly mcpGetSessions: Map<string, ServerResponse>;
     /** Raw WebSocket MCP clients connected to this provider. */
     readonly wsClients: Set<WebSocket>;
+    /** In-process clients (e.g. the aggregate server) attached to this slot. */
+    readonly internalClients: Set<InternalClient>;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +87,28 @@ export interface StaticMount {
     urlPrefix: string;
     /** Absolute path to the directory to serve. */
     dir: string;
+}
+
+/**
+ * In-process client handle for a provider slot — the symmetric counterpart of
+ * {@link WsTunnel.registerLoopbackProvider}. Lets a component inside the broker
+ * process (e.g. the aggregate server) issue MCP requests to a provider slot and
+ * receive both the responses and the provider's broadcast notifications,
+ * without opening a real network connection.
+ */
+export interface InternalClient {
+    /**
+     * Sends a JSON-RPC message to the provider slot. When the message carries an
+     * `id`, the matching response is delivered to {@link onMessage}. When the
+     * provider is not connected, a JSON-RPC error is delivered synchronously.
+     */
+    send(message: string): void;
+    /** Receives responses to this client's requests and the provider's notifications. */
+    onMessage: ((data: string) => void) | null;
+    /** Fires when the provider slot loses its connection. */
+    onClose: (() => void) | null;
+    /** Detaches this internal client; pending requests are dropped. */
+    close(): void;
 }
 
 /**
@@ -158,6 +191,9 @@ export interface WsTunnelOptions {
      */
     stdioUpstreams?: StdioUpstreamConfig[];
 
+    /** Remote MCP servers reached by URL, exposed as provider slots. */
+    remoteUpstreams?: RemoteUpstreamConfig[];
+
     /**
      * Stdio client transport. When set, the broker reads JSON-RPC from
      * `process.stdin` and writes responses to `process.stdout`, bridging an
@@ -200,6 +236,17 @@ export interface WsTunnelOptions {
      * @default true
      */
     enableBrokerProvider?: boolean;
+
+    /**
+     * When `true` (default), the broker exposes the reserved slot `_all` — an
+     * aggregate MCP server that unions the tools and prompts of every provider
+     * that opted in via the registration handshake. Reachable like any other
+     * slot (`<host>/_all/mcp`, etc.).
+     *
+     * Set to `false` to disable aggregation entirely.
+     * @default true
+     */
+    enableAggregateProvider?: boolean;
 
     /**
      * Logical name reported by `broker_info`. Useful when running multiple
@@ -278,8 +325,8 @@ export class WsTunnel implements BrokerContext {
     /** Maps a multiplexed WebSocket to the set of provider names it feeds. */
     private readonly _multiplexSockets = new Map<WebSocket, Set<string>>();
 
-    /** Stdio upstream providers, keyed by provider name. */
-    private readonly _stdioUpstreams = new Map<string, StdioUpstream>();
+    /** Upstream providers (stdio child processes and remote URL servers), keyed by name. */
+    private readonly _upstreams = new Map<string, Upstream>();
 
     /**
      * In-process loopback transports registered as provider slots.
@@ -290,6 +337,9 @@ export class WsTunnel implements BrokerContext {
 
     /** The embedded broker MCP server, when {@link WsTunnelOptions.enableBrokerProvider} is on. */
     private _brokerServer: IMcpServer | null = null;
+
+    /** The aggregate MCP server (`_all` slot), when {@link WsTunnelOptions.enableAggregateProvider} is on. */
+    private _aggregateServer: AggregateServer | null = null;
 
     /** Provider name that the stdio client transport is bridged to, or null when disabled. */
     private _stdioClientProvider: string | null = null;
@@ -370,7 +420,7 @@ export class WsTunnel implements BrokerContext {
         if (this._loopbackProviders.get(name)?.isOpen) {
             transport = "loopback";
             connected = true;
-        } else if (this._stdioUpstreams.get(name)?.isOpen) {
+        } else if (this._upstreams.get(name)?.isOpen) {
             transport = "stdio";
             connected = true;
         } else if (state.ws?.readyState === WebSocket.OPEN) {
@@ -406,7 +456,7 @@ export class WsTunnel implements BrokerContext {
         if (this._loopbackProviders.has(name)) {
             throw new Error(`Loopback provider "${name}" is already registered.`);
         }
-        if (this._stdioUpstreams.has(name)) {
+        if (this._upstreams.has(name)) {
             throw new Error(`Cannot register loopback "${name}": a stdio upstream with the same name already exists.`);
         }
 
@@ -416,25 +466,60 @@ export class WsTunnel implements BrokerContext {
         transport.onMessage = (data: string) => this._routeFromProvider(state, data);
         transport.onClose = () => {
             this._loopbackProviders.delete(name);
-            // Tell every pending sink that the provider is gone, same as for a WS close.
-            const error = JSON.stringify({
-                jsonrpc: "2.0",
-                id: null,
-                error: { code: -32000, message: `Provider "${name}" disconnected` },
-            });
-            for (const sink of state.pending.values()) {
-                if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
-                    sink.socket.send(error);
-                } else if (sink.type === "sse") {
-                    const sseRes = state.sseSessions.get(sink.sessionId);
-                    if (sseRes) this._sendSseEvent(sseRes, error);
-                } else if (sink.type === "http") {
-                    sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                    sink.res.end(error);
-                }
-            }
-            state.pending.clear();
+            this._failProviderDisconnected(state, name);
         };
+    }
+
+    /**
+     * Opens an in-process client to a provider slot. The returned handle can
+     * issue MCP requests and receives both the responses and the provider's
+     * broadcast notifications. Used by the aggregate server to fan a single
+     * in-process client out to every aggregated provider.
+     *
+     * The slot does not need a provider attached yet — `send` returns a
+     * JSON-RPC error while the provider is disconnected.
+     */
+    public openInternalClient(providerName: string): InternalClient {
+        const state = this._getOrCreateProviderState(providerName);
+        let closed = false;
+
+        const client: InternalClient = {
+            onMessage: null,
+            onClose: null,
+            send: (message: string): void => {
+                if (closed) return;
+                let id: string | number | null = null;
+                try {
+                    const parsed = JSON.parse(message) as { id?: string | number };
+                    if (parsed?.id != null) id = parsed.id;
+                } catch {
+                    /* forward as-is */
+                }
+                if (this._isProviderConnected(providerName, state)) {
+                    if (id != null) state.pending.set(id, { type: "internal", client });
+                    this._sendToProvider(state, providerName, message);
+                } else if (id != null) {
+                    client.onMessage?.(
+                        JSON.stringify({
+                            jsonrpc: "2.0",
+                            id,
+                            error: { code: -32000, message: `Provider "${providerName}" not connected` },
+                        })
+                    );
+                }
+            },
+            close: (): void => {
+                if (closed) return;
+                closed = true;
+                state.internalClients.delete(client);
+                for (const [id, sink] of state.pending) {
+                    if (sink.type === "internal" && sink.client === client) state.pending.delete(id);
+                }
+            },
+        };
+
+        state.internalClients.add(client);
+        return client;
     }
 
     // -------------------------------------------------------------------------
@@ -502,9 +587,14 @@ export class WsTunnel implements BrokerContext {
             });
 
             this._httpServer.listen(this._options.port, this._options.host ?? "0.0.0.0", () => {
-                // Spawn configured stdio upstream providers.
-                for (const cfg of this._options.stdioUpstreams ?? []) {
-                    const upstream = new StdioUpstream(cfg);
+                // Bring the aggregate `_all` slot up before any upstream connects
+                // (a Streamable HTTP upstream opens synchronously on connect()).
+                this._maybeStartAggregateServer();
+
+                // Attach configured upstreams (stdio child processes + remote URL
+                // servers). Both implement the Upstream contract, so the wiring
+                // into a provider slot is identical.
+                const wireUpstream = (cfg: { name: string; aggregate?: boolean }, upstream: Upstream): void => {
                     upstream.onMessage = (data) => {
                         const state = this._getOrCreateProviderState(cfg.name);
                         this._routeFromProvider(state, data);
@@ -512,9 +602,18 @@ export class WsTunnel implements BrokerContext {
                     upstream.onError = (err) => {
                         console.error(`[broker] ${err.message}`);
                     };
-                    this._stdioUpstreams.set(cfg.name, upstream);
+                    upstream.onClose = () => {
+                        const state = this._providers.get(cfg.name);
+                        if (state) this._failProviderDisconnected(state, cfg.name);
+                    };
+                    if (cfg.aggregate) {
+                        upstream.onOpen = () => void this._aggregateServer?.addProvider(cfg.name);
+                    }
+                    this._upstreams.set(cfg.name, upstream);
                     upstream.connect();
-                }
+                };
+                for (const cfg of this._options.stdioUpstreams ?? []) wireUpstream(cfg, new StdioUpstream(cfg));
+                for (const cfg of this._options.remoteUpstreams ?? []) wireUpstream(cfg, new RemoteUpstream(cfg));
 
                 // Attach stdio client transport if configured.
                 // stdin carries Claude Desktop's JSON-RPC requests; stdout carries responses.
@@ -573,6 +672,22 @@ export class WsTunnel implements BrokerContext {
     }
 
     /**
+     * Starts the aggregate MCP server and registers it on the reserved `_all`
+     * slot. No-op when {@link WsTunnelOptions.enableAggregateProvider} is `false`.
+     */
+    private _maybeStartAggregateServer(): void {
+        if (this._options.enableAggregateProvider === false) return;
+        try {
+            const server = new AggregateServer((providerName) => this.openInternalClient(providerName));
+            server.start();
+            this.registerLoopbackProvider(AggregateServer.SLOT, server);
+            this._aggregateServer = server;
+        } catch (err) {
+            console.error(`[broker] aggregate server failed to start: ${(err as Error).message}`);
+        }
+    }
+
+    /**
      * Gracefully closes all connections and stops the HTTP server.
      */
     async stop(): Promise<void> {
@@ -583,6 +698,18 @@ export class WsTunnel implements BrokerContext {
         if (brokerServer) {
             try {
                 await brokerServer.stop();
+            } catch {
+                /* best-effort; continue tearing down */
+            }
+        }
+
+        // Close the aggregate server so its provider sessions and internal
+        // clients detach before the provider slots are torn down.
+        const aggregateServer = this._aggregateServer;
+        this._aggregateServer = null;
+        if (aggregateServer) {
+            try {
+                aggregateServer.close();
             } catch {
                 /* best-effort; continue tearing down */
             }
@@ -600,8 +727,8 @@ export class WsTunnel implements BrokerContext {
             }
             this._providers.clear();
             this._multiplexSockets.clear();
-            for (const upstream of this._stdioUpstreams.values()) upstream.close();
-            this._stdioUpstreams.clear();
+            for (const upstream of this._upstreams.values()) upstream.close();
+            this._upstreams.clear();
             for (const loopback of this._loopbackProviders.values()) loopback.close();
             this._loopbackProviders.clear();
             this._startedAt = null;
@@ -855,7 +982,7 @@ export class WsTunnel implements BrokerContext {
     // -------------------------------------------------------------------------
 
     private _onProviderConnect(ws: WebSocket, name: string): void {
-        if (this._stdioUpstreams.has(name)) {
+        if (this._upstreams.has(name)) {
             console.warn(
                 `[broker] WARNING: WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
                     `Rename one of them to avoid the conflict.`
@@ -879,29 +1006,45 @@ export class WsTunnel implements BrokerContext {
         const state = this._getOrCreateProviderState(name);
         state.ws = ws;
 
-        ws.on("message", (data: Buffer) => this._routeFromProvider(state, data.toString()));
+        // A provider MAY send a registration control frame as its very first
+        // message (see _tryHandleRegistration). Any other first message —
+        // including a normal MCP frame — is routed and leaves the provider
+        // non-aggregated, so every pre-existing provider keeps working.
+        let registrationChecked = false;
+        ws.on("message", (data: Buffer) => {
+            const text = data.toString();
+            if (!registrationChecked) {
+                registrationChecked = true;
+                if (this._tryHandleRegistration(name, text)) return;
+            }
+            this._routeFromProvider(state, text);
+        });
 
         ws.on("close", () => {
             state.ws = null;
-            // Notify all pending sinks that the provider is gone.
-            const error = JSON.stringify({
-                jsonrpc: "2.0",
-                id: null,
-                error: { code: -32000, message: `Provider "${name}" disconnected` },
-            });
-            for (const sink of state.pending.values()) {
-                if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
-                    sink.socket.send(error);
-                } else if (sink.type === "sse") {
-                    const sseRes = state.sseSessions.get(sink.sessionId);
-                    if (sseRes) this._sendSseEvent(sseRes, error);
-                } else if (sink.type === "http") {
-                    sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                    sink.res.end(error);
-                }
-            }
-            state.pending.clear();
+            this._failProviderDisconnected(state, name);
         });
+    }
+
+    /**
+     * Inspects a provider's first WebSocket message for an optional registration
+     * control frame `{ "type": "register", "aggregate": boolean }`. Returns
+     * `true` when the message was a registration frame — and thus consumed, not
+     * routed as MCP traffic. A normal MCP frame always carries `jsonrpc`, so it
+     * returns `false` and the provider stays non-aggregated.
+     */
+    private _tryHandleRegistration(name: string, text: string): boolean {
+        let frame: { type?: unknown; jsonrpc?: unknown; aggregate?: unknown };
+        try {
+            frame = JSON.parse(text) as typeof frame;
+        } catch {
+            return false;
+        }
+        if (frame.jsonrpc !== undefined || frame.type !== "register") return false;
+        if (frame.aggregate === true) {
+            void this._aggregateServer?.addProvider(name);
+        }
+        return true;
     }
 
     private _onClientConnect(ws: WebSocket, providerName: string): void {
@@ -941,7 +1084,7 @@ export class WsTunnel implements BrokerContext {
 
             // Register provider name lazily on first encounter.
             if (!providerNames.has(name)) {
-                if (this._stdioUpstreams.has(name)) {
+                if (this._upstreams.has(name)) {
                     console.warn(
                         `[broker] WARNING: Multiplexed WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
                             `Rename one of them to avoid the conflict.`
@@ -1002,24 +1145,7 @@ export class WsTunnel implements BrokerContext {
                 const state = this._providers.get(name);
                 if (state && state.ws === ws) {
                     state.ws = null;
-                    // Notify pending sinks that the provider is gone.
-                    const error = JSON.stringify({
-                        jsonrpc: "2.0",
-                        id: null,
-                        error: { code: -32000, message: `Provider "${name}" disconnected` },
-                    });
-                    for (const sink of state.pending.values()) {
-                        if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
-                            sink.socket.send(error);
-                        } else if (sink.type === "sse") {
-                            const sseRes = state.sseSessions.get(sink.sessionId);
-                            if (sseRes) this._sendSseEvent(sseRes, error);
-                        } else if (sink.type === "http") {
-                            sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                            sink.res.end(error);
-                        }
-                    }
-                    state.pending.clear();
+                    this._failProviderDisconnected(state, name);
                 }
             }
             this._multiplexSockets.delete(ws);
@@ -1035,10 +1161,10 @@ export class WsTunnel implements BrokerContext {
      * envelope when the provider's WebSocket is a multiplexed connection.
      */
     private _sendToProvider(state: ProviderState, providerName: string, data: string): void {
-        // Stdio upstreams take priority for exact name matches.
-        const stdioUpstream = this._stdioUpstreams.get(providerName);
-        if (stdioUpstream?.isOpen) {
-            stdioUpstream.send(data);
+        // Upstreams (stdio child processes and remote URL servers) take priority.
+        const upstream = this._upstreams.get(providerName);
+        if (upstream?.isOpen) {
+            upstream.send(data);
             return;
         }
 
@@ -1127,6 +1253,8 @@ export class WsTunnel implements BrokerContext {
                     sink.res.end(data);
                 } else if (sink?.type === "stdio") {
                     process.stdout.write(data + "\n");
+                } else if (sink?.type === "internal") {
+                    sink.client.onMessage?.(data);
                 }
                 state.pending.delete(msg.id);
             } else {
@@ -1149,10 +1277,41 @@ export class WsTunnel implements BrokerContext {
         for (const mcpRes of state.mcpGetSessions.values()) {
             this._sendSseEvent(mcpRes, data);
         }
+        for (const ic of state.internalClients) {
+            ic.onMessage?.(data);
+        }
         // Forward notifications to the stdio client if it is watching this provider.
         if (this._stdioClientProvider && this._providers.get(this._stdioClientProvider) === state) {
             process.stdout.write(data + "\n");
         }
+    }
+
+    /**
+     * Notifies every pending sink and internal client that the provider slot
+     * has disconnected, then clears the pending map. Shared by all provider
+     * close handlers (dedicated WS, multiplexed WS, loopback).
+     */
+    private _failProviderDisconnected(state: ProviderState, name: string): void {
+        const error = JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32000, message: `Provider "${name}" disconnected` },
+        });
+        for (const sink of state.pending.values()) {
+            if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
+                sink.socket.send(error);
+            } else if (sink.type === "sse") {
+                const sseRes = state.sseSessions.get(sink.sessionId);
+                if (sseRes) this._sendSseEvent(sseRes, error);
+            } else if (sink.type === "http") {
+                sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                sink.res.end(error);
+            } else if (sink.type === "internal") {
+                sink.client.onMessage?.(error);
+            }
+        }
+        state.pending.clear();
+        for (const ic of state.internalClients) ic.onClose?.();
     }
 
     // -------------------------------------------------------------------------
@@ -1164,7 +1323,7 @@ export class WsTunnel implements BrokerContext {
      * a stdio upstream, or an in-process loopback transport.
      */
     private _isProviderConnected(providerName: string, state: ProviderState): boolean {
-        if (this._stdioUpstreams.get(providerName)?.isOpen) return true;
+        if (this._upstreams.get(providerName)?.isOpen) return true;
         if (this._loopbackProviders.get(providerName)?.isOpen) return true;
         if (state.ws?.readyState === WebSocket.OPEN) return true;
         return false;
@@ -1180,6 +1339,7 @@ export class WsTunnel implements BrokerContext {
                 sseSessions: new Map(),
                 mcpGetSessions: new Map(),
                 wsClients: new Set(),
+                internalClients: new Set(),
             };
             this._providers.set(name, state);
         }

@@ -81,7 +81,18 @@ export async function startBrokerServer(
 
     const [serverEnd, clientEnd] = LoopbackTransport.createPair();
 
-    const builder = new McpServerBuilder().withName(BROKER_PROVIDER_NAME).withTransport(serverEnd).register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context));
+    // Without an initializer, McpServerBuilder reports `version: "0.0.0"` in the
+    // `initialize` handshake. Supply the real package version from the context.
+    const builder = new McpServerBuilder()
+        .withName(BROKER_PROVIDER_NAME)
+        .withTransport(serverEnd)
+        .withInitializer({
+            initialize: () => ({
+                protocolVersion: "2024-11-05",
+                serverInfo: { name: BROKER_PROVIDER_NAME, version: context.version },
+            }),
+        })
+        .register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context));
 
     // Discover every grammar by scanning two directories:
     //   1. The packaged grammars shipped with the broker.

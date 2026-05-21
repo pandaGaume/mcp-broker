@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { WsTunnel, type WsTunnelOptions, type StaticMount } from "./ws.tunnel.js";
 import type { StdioUpstreamConfig } from "./stdio.upstream.js";
+import type { RemoteUpstreamConfig } from "./remote.upstream.js";
 
 /**
  * Fluent builder that constructs a configured {@link WsTunnel}.
@@ -31,6 +32,7 @@ export class WsTunnelBuilder {
     private _samplesIndexPath = "/__samples_index__";
     private _staticMounts: StaticMount[] = [];
     private _stdioUpstreams: StdioUpstreamConfig[] = [];
+    private _remoteUpstreams: RemoteUpstreamConfig[] = [];
     private _stdioClient: { providerName: string } | undefined = undefined;
     private _tls: { cert: string; key: string } | undefined = undefined;
     private _brokerLocalGrammarsDir: string | undefined = undefined;
@@ -129,19 +131,26 @@ export class WsTunnelBuilder {
     }
 
     /**
-     * Registers a stdio upstream provider. The broker will spawn the given
-     * command and bridge its stdin/stdout as an MCP transport.
-     * Clients reach it using `name` directly (e.g. `/<name>/mcp`).
+     * Registers a stdio upstream provider. The broker spawns the configured
+     * command and bridges its stdin/stdout as an MCP transport. Clients reach
+     * it using `config.name` directly (e.g. `/<name>/mcp`).
      *
      * Can be called multiple times to register multiple providers.
-     *
-     * @param name     Provider name (must be unique across all upstream types).
-     * @param command  Executable to spawn.
-     * @param args     Arguments passed to the command.
-     * @param env      Extra environment variables merged with `process.env`.
      */
-    withStdioUpstream(name: string, command: string, args?: string[], env?: NodeJS.ProcessEnv): this {
-        this._stdioUpstreams.push({ name, command, args, env });
+    withStdioUpstream(config: StdioUpstreamConfig): this {
+        this._stdioUpstreams.push(config);
+        return this;
+    }
+
+    /**
+     * Registers a remote MCP server reached by URL. The broker connects out to
+     * it and exposes it as a provider slot named `config.name`, bridging the
+     * Streamable HTTP / SSE / WebSocket transport for the slot's clients.
+     *
+     * Can be called multiple times to register multiple servers.
+     */
+    withRemoteUpstream(config: RemoteUpstreamConfig): this {
+        this._remoteUpstreams.push(config);
         return this;
     }
 
@@ -205,6 +214,7 @@ export class WsTunnelBuilder {
             samplesIndexPath: this._samplesIndexPath,
             staticMounts: this._staticMounts.length > 0 ? [...this._staticMounts] : undefined,
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
+            remoteUpstreams: this._remoteUpstreams.length > 0 ? [...this._remoteUpstreams] : undefined,
             stdioClient: this._stdioClient,
             tls: this._tls,
             brokerLocalGrammarsDir: this._brokerLocalGrammarsDir,

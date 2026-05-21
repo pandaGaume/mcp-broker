@@ -54,6 +54,7 @@
         "copy:assets": "node scripts/copy-assets.mjs",
         "watch": "tsc -b tsconfig.build.json -w",
         "start": "node dist/bin.js",
+        "pack:mcpb": "npm run build && node scripts/pack-mcpb.mjs",
         "test": "vitest run",
         "test:watch": "vitest",
         "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",

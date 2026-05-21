@@ -1,0 +1,74 @@
+{
+    "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+    "manifest_version": "0.3",
+    "name": "mcp-broker",
+    "display_name": "MCP Broker",
+    "version": "0.2.0",
+    "description": "Run the MCP Broker as a local server and talk to its built-in introspection tools.",
+    "long_description": "Packages @cyanmycelium/mcp-broker as an installable MCP bundle. On launch the broker starts and the host is bridged over stdio to the reserved `_broker` slot, exposing the broker's own MCP server (broker_info, providers_list, provider_status). The broker also keeps listening on its configured port, so other MCP servers can tunnel in over WebSocket and become reachable to clients on the Streamable HTTP, SSE and raw WebSocket transports. This bundle exposes only the broker's meta tools over stdio; aggregated providers are reached by other clients on the network transports.",
+    "author": {
+        "name": "Guillaume Pelletier (CyanMycelium)",
+        "url": "https://github.com/pandaGaume/mcp-broker"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/pandaGaume/mcp-broker"
+    },
+    "homepage": "https://github.com/pandaGaume/mcp-broker#readme",
+    "documentation": "https://github.com/pandaGaume/mcp-broker/tree/main/docs",
+    "support": "https://github.com/pandaGaume/mcp-broker/issues",
+    "icon": "icon.png",
+    "license": "Apache-2.0",
+    "keywords": ["mcp", "model-context-protocol", "broker", "tunnel", "websocket", "jsonrpc"],
+    "server": {
+        "type": "node",
+        "entry_point": "dist/bin.js",
+        "mcp_config": {
+            "command": "node",
+            "args": ["${__dirname}/dist/bin.js"],
+            "env": {
+                "MCP_BROKER_STDIO_PROVIDER": "_broker",
+                "MCP_BROKER_PORT": "${user_config.port}",
+                "MCP_BROKER_HOST": "${user_config.host}",
+                "MCP_BROKER_LOCALE": "${user_config.locale}"
+            }
+        }
+    },
+    "tools": [
+        { "name": "broker_info", "description": "Report the broker's identity, version and configuration." },
+        { "name": "providers_list", "description": "List the provider slots currently registered with the broker." },
+        { "name": "provider_status", "description": "Report the connection status of a given provider slot." }
+    ],
+    "user_config": {
+        "port": {
+            "type": "number",
+            "title": "Broker port",
+            "description": "TCP port the broker listens on for provider tunnels and client transports.",
+            "default": 3000,
+            "min": 1,
+            "max": 65535,
+            "required": false
+        },
+        "host": {
+            "type": "string",
+            "title": "Bind address",
+            "description": "Network interface to bind. 127.0.0.1 keeps the broker private to this machine; 0.0.0.0 exposes it on the local network.",
+            "default": "127.0.0.1",
+            "required": false
+        },
+        "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Locale for the broker's tool descriptions (ISO 639-1 base, e.g. en, fr).",
+            "default": "en",
+            "required": false
+        }
+    },
+    "compatibility": {
+        "claude_desktop": ">=0.10.0",
+        "platforms": ["darwin", "win32", "linux"],
+        "runtimes": {
+            "node": ">=20.11.0"
+        }
+    }
+}

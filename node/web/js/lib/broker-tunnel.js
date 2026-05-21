@@ -38,10 +38,14 @@
 export class BrokerTunnelTransport {
     /**
      * @param {string} url Full provider URL, e.g. `ws://host:3000/provider/<name>`.
+     * @param {{ aggregate?: boolean }} [options] When `aggregate` is true, the
+     *   transport sends a broker registration frame on open so this server
+     *   joins the broker's `_all` aggregate slot.
      */
-    constructor(url) {
+    constructor(url, options = {}) {
         this.url = url;
         this._ws = null;
+        this._aggregate = options.aggregate === true;
 
         // Set by the MCP SDK inside Server.connect() — do not assign these yourself.
         this.onmessage = null;
@@ -80,6 +84,11 @@ export class BrokerTunnelTransport {
 
             ws.onopen = () => {
                 opened = true;
+                // Optional broker registration frame — it MUST precede any MCP
+                // traffic, so it is sent here before start() resolves.
+                if (this._aggregate) {
+                    ws.send(JSON.stringify({ type: "register", aggregate: true }));
+                }
                 this.onTunnelOpen?.();
                 resolve();
             };

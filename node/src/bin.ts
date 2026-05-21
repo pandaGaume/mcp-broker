@@ -168,7 +168,20 @@ async function main(): Promise<void> {
     // ── Stdio upstreams ──────────────────────────────────────────────────────
     if (config.stdioUpstreams) {
         for (const u of config.stdioUpstreams) {
-            builder.withStdioUpstream(u.name, u.command, u.args, u.env as NodeJS.ProcessEnv | undefined);
+            builder.withStdioUpstream({
+                name: u.name,
+                command: u.command,
+                args: u.args,
+                env: u.env as NodeJS.ProcessEnv | undefined,
+                aggregate: u.aggregate,
+            });
+        }
+    }
+
+    // ── Remote MCP server upstreams (reached by URL) ─────────────────────────
+    if (config.mcpServers) {
+        for (const s of config.mcpServers) {
+            builder.withRemoteUpstream(s);
         }
     }
 
