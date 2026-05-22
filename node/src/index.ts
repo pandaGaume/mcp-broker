@@ -7,6 +7,11 @@ export { RemoteUpstream } from "./remote.upstream.js";
 export type { RemoteUpstreamConfig } from "./remote.upstream.js";
 export type { Upstream } from "./upstream.js";
 
+// `.mcpb` bundle loading — verifies + unpacks a bundle into a stdio upstream.
+export { loadMcpbBundle } from "./mcpb.loader.js";
+export type { McpbBundleConfig } from "./mcpb.loader.js";
+export { unzipMcpb } from "./mcpb.unzip.js";
+
 // Broker introspection — tier 1.
 export { BrokerInfoBehavior, BrokerProvidersBehavior, startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
 export type { StartBrokerServerOptions } from "./broker/index.js";

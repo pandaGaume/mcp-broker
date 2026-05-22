@@ -115,16 +115,20 @@ describe("aggregate _all slot", () => {
 
         await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
 
-        // Poll tools/list until both providers finished their handshake.
+        // `_all` also aggregates the broker's own `_broker` slot; filter it out
+        // when asserting the external providers' tool set.
+        const externalNames = (tools: Record<string, unknown>[]): string[] => tools.map((t) => String(t.name)).filter((n) => !n.startsWith("_broker-"));
+
+        // Poll tools/list until both external providers finished their handshake.
         let tools: Record<string, unknown>[] = [];
-        for (let i = 0; i < 60 && tools.length < 2; i++) {
+        for (let i = 0; i < 60 && externalNames(tools).length < 2; i++) {
             const res = await client.request("tools/list", {});
             tools = (res.result?.tools as Record<string, unknown>[]) ?? [];
-            if (tools.length < 2) await delay(50);
+            if (externalNames(tools).length < 2) await delay(50);
         }
 
         // Names are provider-prefixed with the `-` separator.
-        expect(tools.map((t) => t.name).sort()).toEqual(["db-query", "weather-forecast"]);
+        expect(externalNames(tools).sort()).toEqual(["db-query", "weather-forecast"]);
 
         // Descriptions carry the provider tag.
         const forecast = tools.find((t) => t.name === "weather-forecast");
@@ -160,5 +164,26 @@ describe("aggregate _all slot", () => {
         expect(tools.some((t) => t.name === "weather-forecast")).toBe(false);
         expect(tools.some((t) => t.name === "db-query")).toBe(true);
         expect(client.notifications).toContain("notifications/tools/list_changed");
+    });
+
+    it("aggregates the broker's own introspection tools into `_all`", async () => {
+        const client = await rpcClient(`${BASE}/_all`);
+        sockets.push(client.ws);
+
+        await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+
+        let brokerTools: string[] = [];
+        for (let i = 0; i < 60 && brokerTools.length < 3; i++) {
+            const tools = ((await client.request("tools/list", {})).result?.tools as Record<string, unknown>[]) ?? [];
+            brokerTools = tools.map((t) => String(t.name)).filter((n) => n.startsWith("_broker-"));
+            if (brokerTools.length < 3) await delay(50);
+        }
+
+        expect(brokerTools.sort()).toEqual(["_broker-broker_info", "_broker-provider_status", "_broker-providers_list"]);
+
+        // The aggregated call routes back into the broker's own server.
+        const call = await client.request("tools/call", { name: "_broker-broker_info", arguments: {} });
+        expect(call.error).toBeUndefined();
+        expect(call.result).toBeTruthy();
     });
 });

@@ -669,6 +669,11 @@ export class WsTunnel implements BrokerContext {
         });
         this._brokerServer = server;
         this.registerLoopbackProvider(BROKER_PROVIDER_NAME, clientTransport);
+
+        // Aggregate the broker's own introspection tools into `_all`, so a stdio
+        // host pinned to `_all` still reaches broker_info / providers_list /
+        // provider_status alongside the other aggregated providers.
+        void this._aggregateServer?.addProvider(BROKER_PROVIDER_NAME);
     }
 
     /**

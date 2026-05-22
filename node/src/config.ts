@@ -87,7 +87,28 @@ export interface BrokerConfig {
         url: string;
         transport?: "streamable-http" | "sse" | "websocket";
         headers?: Record<string, string>;
-        /** When `true`, the upstream joins the `_all` aggregate slot once connected. */
+        /** Defaults to `true`; set to `false` to exclude this upstream from the `_all` aggregate slot. */
+        aggregate?: boolean;
+    }>;
+
+    /**
+     * Local `.mcpb` bundles the broker loads at startup and runs as stdio
+     * provider slots. A bundle is a ZIP with a `manifest.json`; the broker
+     * verifies a detached signature against a trusted public key before
+     * unpacking and spawning it.
+     */
+    mcpbBundles?: Array<{
+        /** Provider slot name the bundle is bound to. */
+        name: string;
+        /** Path to the `.mcpb` file (resolved against the config file's directory). */
+        path: string;
+        /** Path to the trusted public key (PEM) used to verify the detached signature. */
+        publicKey: string;
+        /** Path to the detached signature file. Defaults to `<path>.sig`. */
+        signature?: string;
+        /** Values substituted into the manifest's `${user_config.*}` placeholders. */
+        userConfig?: Record<string, string | number | boolean | Array<string | number>>;
+        /** Defaults to `true`; set to `false` to exclude this bundle from the `_all` aggregate slot. */
         aggregate?: boolean;
     }>;
 }

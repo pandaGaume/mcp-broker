@@ -15,8 +15,8 @@
  *
  * - Env-var paths (`MCP_BROKER_*_DIR`, `MCP_BROKER_TLS_*`) are resolved
  *   against `process.cwd()`.
- * - Config-file paths (`tls.cert`, `www.mounts[*].dir`, `stdioUpstreams[*]`)
- *   are resolved against the **config file's directory** — so a config in
+ * - Config-file paths (`tls.cert`, `www.mounts[*].dir`, `stdioUpstreams[*]`,
+ *   `mcpbBundles[*]`) are resolved against the **config file's directory** — so a config in
  *   `./.mcp-broker/config.json` referring to `"certs/cert.pem"` points at
  *   `./.mcp-broker/certs/cert.pem`. The folder is self-contained.
  *
@@ -54,6 +54,7 @@ import * as path from "path";
 import open from "open";
 import { WsTunnelBuilder } from "./index.js";
 import { loadBrokerConfig } from "./config.js";
+import { loadMcpbBundle } from "./mcpb.loader.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -179,9 +180,24 @@ async function main(): Promise<void> {
     }
 
     // ── Remote MCP server upstreams (reached by URL) ─────────────────────────
+    // Config-discovered remote servers join the `_all` aggregate by default;
+    // an explicit `aggregate: false` opts an entry out.
     if (config.mcpServers) {
         for (const s of config.mcpServers) {
-            builder.withRemoteUpstream(s);
+            builder.withRemoteUpstream({ ...s, aggregate: s.aggregate ?? true });
+        }
+    }
+
+    // ── Local `.mcpb` bundles ────────────────────────────────────────────────
+    // Each bundle is signature-verified and unpacked before it is wired in as a
+    // stdio upstream. A refused bundle is skipped (loadMcpbBundle logs why); it
+    // never spawns a process. Bundles join `_all` by default (opt-out per entry).
+    if (config.mcpbBundles) {
+        for (const b of config.mcpbBundles) {
+            const upstream = await loadMcpbBundle(b, baseDir);
+            if (upstream) {
+                builder.withStdioUpstream(upstream);
+            }
         }
     }
 

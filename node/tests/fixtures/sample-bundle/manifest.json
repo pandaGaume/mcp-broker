@@ -1,0 +1,16 @@
+{
+    "manifest_version": "0.3",
+    "name": "sample-bundle",
+    "version": "0.0.1",
+    "description": "Minimal .mcpb fixture used by the broker's bundle-loader tests.",
+    "author": { "name": "mcp-broker tests" },
+    "server": {
+        "type": "node",
+        "entry_point": "server.js",
+        "mcp_config": {
+            "command": "node",
+            "args": ["${__dirname}/server.js", "${user_config.greeting}"],
+            "env": { "SAMPLE_BUNDLE_DIR": "${__dirname}" }
+        }
+    }
+}

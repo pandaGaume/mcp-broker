@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Broker self-MCP · @cyanmycelium/mcp-broker</title>
+  <meta name="description" content="The broker is itself an MCP server: the _broker introspection slot, the _all aggregate, and loading signed .mcpb bundles." />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    /* The hero here is an explainer header, a touch shorter than the docs hero. */
+    .hero { padding: 72px 0 56px; }
+    .hero-mark { margin-bottom: 20px; }
+    .hero-mark img { width: 72px; height: 72px; }
+
+    /* Endpoints — quick reference grid, shared look with the launcher page. */
+    .endpoints {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .endpoint {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 14px 16px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+    }
+    .endpoint .label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--blue);
+      text-transform: uppercase;
+    }
+    .endpoint .url {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--fg);
+      word-break: break-all;
+    }
+
+    /* Tool list — the broker's three built-in introspection tools. */
+    .tools {
+      display: grid;
+      gap: 10px;
+      margin: 24px 0 8px;
+    }
+    .tool {
+      display: grid;
+      grid-template-columns: minmax(0, 220px) 1fr;
+      gap: 16px;
+      padding: 14px 16px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      align-items: baseline;
+    }
+    .tool .name {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--blue);
+      word-break: break-all;
+    }
+    .tool .desc { color: var(--fg-muted); font-size: 14px; line-height: 1.5; }
+    @media (max-width: 640px) {
+      .tool { grid-template-columns: 1fr; gap: 4px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================== TOPBAR ============================== -->
+<header class="topbar">
+  <div class="shell topbar-inner">
+    <a class="brand" href="/">
+      <img class="brand-mark" src="assets/logo.png" alt="" aria-hidden="true" />
+      <span>@cyanmycelium/mcp-broker</span>
+    </a>
+    <nav class="topbar-links">
+      <a href="/">← Back to launcher</a>
+      <a href="#all">The _all slot</a>
+      <a href="#bundles">.mcpb bundles</a>
+      <a href="demos/broker-explorer/">Explorer demo</a>
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- ================================ HERO =============================== -->
+<section class="hero">
+  <div class="shell">
+    <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
+
+    <div class="eyebrow"><span class="dot"></span>broker · self-mcp</div>
+
+    <h1 class="hero-title">The broker is its own MCP server.</h1>
+
+    <p class="hero-sub">
+      Beyond tunnelling other servers, the broker exposes a reserved slot,
+      <code class="inline">_broker</code>, that answers MCP itself — and an
+      aggregate slot, <code class="inline">_all</code>, that unions every
+      connected provider into one server.
+    </p>
+
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="demos/broker-explorer/">Open the explorer demo →</a>
+      <a class="btn btn-secondary" href="https://github.com/pandaGaume/mcp-broker/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ _broker SLOT =========================== -->
+<section id="broker">
+  <div class="shell">
+    <div class="section-num">01 - The _broker slot</div>
+    <h2>Introspect the broker over MCP</h2>
+
+    <p class="intro">
+      The reserved <code class="inline">_broker</code> slot is an in-process MCP
+      server. Point any MCP client at it — MCP Inspector, Claude, your own — to
+      inspect the broker's identity and the providers currently tunnelled in.
+    </p>
+
+    <div class="tools">
+      <div class="tool">
+        <span class="name">broker_info</span>
+        <span class="desc">Reports the broker's identity, version and configuration.</span>
+      </div>
+      <div class="tool">
+        <span class="name">providers_list</span>
+        <span class="desc">Lists the provider slots currently registered with the broker.</span>
+      </div>
+      <div class="tool">
+        <span class="name">provider_status</span>
+        <span class="desc">Reports the connection status of a given provider slot.</span>
+      </div>
+    </div>
+
+    <p class="caption">Reachable on every client transport — see the endpoints below.</p>
+  </div>
+</section>
+
+<!-- ============================== _all SLOT ============================ -->
+<section id="all">
+  <div class="shell">
+    <div class="section-num">02 - The _all aggregate</div>
+    <h2>One slot, every provider</h2>
+
+    <p class="intro">
+      The reserved <code class="inline">_all</code> slot presents the union of
+      every opted-in provider's tools and prompts as a single MCP server.
+      Aggregated names are provider-prefixed with a <code class="inline">-</code>
+      separator, so a <code class="inline">forecast</code> tool from a
+      <code class="inline">weather</code> provider appears as
+      <code class="inline">weather-forecast</code>.
+    </p>
+
+    <p>
+      The broker's own introspection tools are aggregated in too: under
+      <code class="inline">_all</code> they appear as
+      <code class="inline">_broker-broker_info</code>,
+      <code class="inline">_broker-providers_list</code> and
+      <code class="inline">_broker-provider_status</code>. A client pinned to
+      <code class="inline">_all</code> therefore sees the whole broker — its
+      meta tools plus every tunnelled provider — through one connection.
+    </p>
+
+    <div class="conclusion">
+      Config-discovered upstreams (<code class="inline">mcpServers</code> and
+      <code class="inline">mcpbBundles</code>) join <code class="inline">_all</code>
+      automatically. Set <code class="inline">"aggregate": false</code> on an
+      entry to keep it on its own slot only.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ .mcpb BUNDLES =========================== -->
+<section id="bundles">
+  <div class="shell">
+    <div class="section-num">03 - Loading .mcpb bundles</div>
+    <h2>Run a packaged server as a provider</h2>
+
+    <p class="intro">
+      The broker loads local <code class="inline">.mcpb</code> bundles listed in
+      its config and runs them as stdio provider slots. Before a bundle is
+      unpacked or spawned, the broker verifies a <strong>detached signature</strong>
+      against a trusted public key — an unverified bundle is refused, never run.
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">JSON · .mcp-broker/config.json</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-pu">{</span>
+  <span class="tk-p">"mcpbBundles"</span><span class="tk-pu">: [{</span>
+    <span class="tk-p">"name"</span><span class="tk-pu">:</span>       <span class="tk-s">"weather"</span><span class="tk-pu">,</span>
+    <span class="tk-p">"path"</span><span class="tk-pu">:</span>       <span class="tk-s">"bundles/weather.mcpb"</span><span class="tk-pu">,</span>
+    <span class="tk-p">"publicKey"</span><span class="tk-pu">:</span>  <span class="tk-s">"bundles/mcpb-signing.pub.pem"</span><span class="tk-pu">,</span>
+    <span class="tk-p">"signature"</span><span class="tk-pu">:</span>  <span class="tk-s">"bundles/weather.mcpb.sig"</span><span class="tk-pu">,</span>
+    <span class="tk-p">"aggregate"</span><span class="tk-pu">:</span>  <span class="tk-k">true</span>             <span class="tk-c">// default; false keeps it off _all</span>
+  <span class="tk-pu">}]</span>
+<span class="tk-pu">}</span>
+</code></pre>
+    </div>
+
+    <p>
+      Sign bundles with the bundled helper — Node built-ins only, no OpenSSL
+      and no dependency on Anthropic's <code class="inline">mcpb</code> CLI:
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-head">
+        <span class="lang">Bash · from node/</span>
+        <button class="copy-btn" data-copy-block>Copy</button>
+      </div>
+<pre><code><span class="tk-c"># generate an Ed25519 signing key pair</span>
+node scripts/sign-bundle.mjs keygen bundles
+
+<span class="tk-c"># produce the detached signature next to the bundle</span>
+node scripts/sign-bundle.mjs sign bundles/weather.mcpb bundles/mcpb-signing.key.pem
+</code></pre>
+    </div>
+
+    <p class="caption">
+      Keep the private key out of version control. The broker only ever needs
+      the public key referenced by <code class="inline">publicKey</code>.
+    </p>
+  </div>
+</section>
+
+<!-- ============================ ENDPOINTS ============================== -->
+<section id="endpoints">
+  <div class="shell">
+    <div class="section-num">04 - Endpoints</div>
+    <h2>Where to connect</h2>
+
+    <p class="intro">
+      Both reserved slots are reachable on every client transport. Swap
+      <code class="inline">_broker</code> for <code class="inline">_all</code>
+      (or any provider slot name) in the paths below.
+    </p>
+
+    <div class="endpoints">
+      <div class="endpoint">
+        <span class="label">Broker · Streamable HTTP</span>
+        <span class="url">http://localhost:3000/_broker/mcp</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Aggregate · Streamable HTTP</span>
+        <span class="url">http://localhost:3000/_all/mcp</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Broker · Raw WebSocket</span>
+        <span class="url">ws://localhost:3000/_broker</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Aggregate · Raw WebSocket</span>
+        <span class="url">ws://localhost:3000/_all</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Broker · Legacy SSE</span>
+        <span class="url">http://localhost:3000/_broker/sse</span>
+      </div>
+      <div class="endpoint">
+        <span class="label">Aggregate · Legacy SSE</span>
+        <span class="url">http://localhost:3000/_all/sse</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ================================ FOOTER ============================= -->
+<footer>
+  <div class="shell footer-inner">
+    <div class="footer-links">
+      <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">github.com/pandaGaume/mcp-broker</a>
+      <a href="https://npmjs.com/package/@cyanmycelium/mcp-broker" target="_blank" rel="noopener">npmjs.com/package/@cyanmycelium/mcp-broker</a>
+      <a href="https://github.com/pandaGaume/mcp-broker/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+    </div>
+    <div>© CyanMycelium · Apache-2.0</div>
+  </div>
+</footer>
+
+<div class="toast" id="toast">Copied to clipboard</div>
+
+<script>
+  /* ---- toast + copy plumbing (mirrors the launcher page) ----------- */
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg || 'Copied to clipboard';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+  }
+
+  document.querySelectorAll('[data-copy-block]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const wrap = btn.closest('.code-wrap');
+      const pre = wrap.querySelector('pre');
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        btn.classList.add('copied');
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+      } catch (e) {
+        showToast('Copy failed');
+      }
+    });
+  });
+
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (!el) return;
+      e.preventDefault();
+      window.scrollTo({ top: el.offsetTop - 70, behavior: 'smooth' });
+      history.replaceState(null, '', '#' + id);
+    });
+  });
+</script>
+
+</body>
+</html>

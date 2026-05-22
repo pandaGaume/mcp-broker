@@ -28,5 +28,16 @@
             "command": "npx",
             "args":    ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
         }
+    ],
+
+    "mcpbBundles": [
+        {
+            "name":       "weather",
+            "path":       "bundles/weather.mcpb",
+            "publicKey":  "bundles/mcpb-signing.pub.pem",
+            "signature":  "bundles/weather.mcpb.sig",
+            "userConfig": { "apiKey": "your-key-here" },
+            "aggregate":  true
+        }
     ]
 }

@@ -8,6 +8,7 @@ served as-is over the broker's static mount.
 ```
 web/
 ├── index.html                  ← launcher: shown when the broker starts
+├── broker-self-mcp.html        ← explainer: the _broker slot, _all aggregate, .mcpb bundles
 ├── css/
 │   └── styles.css              ← common stylesheet (shared by all pages)
 ├── js/
@@ -17,19 +18,29 @@ web/
 │   └── logo.png
 └── demos/
     ├── DemoPlaceholder.html      ← stand-in for demos not bundled yet
-    └── provider-tunnel/         ← one self-contained folder per demo
+    ├── provider-tunnel/         ← one self-contained folder per demo
+    │   ├── index.html
+    │   ├── css/
+    │   │   └── app.css
+    │   └── js/
+    │       ├── app.js
+    │       └── toolbox-server.js
+    └── broker-explorer/         ← MCP client connecting to a broker slot
         ├── index.html
         ├── css/
         │   └── app.css
         └── js/
             ├── app.js
-            └── toolbox-server.js
+            └── mcp-ws-client.js
 ```
 
 ## Conventions
 
 - **`index.html`** is the launcher. The broker opens it on start (`www.open`).
   It links the bundled demos and the broker's own endpoints.
+- **`broker-self-mcp.html`** is a root-level explainer page (not a demo): the
+  `_broker` introspection slot, the `_all` aggregate, and loading signed
+  `.mcpb` bundles. Linked from the launcher's "Broker self-MCP" card.
 - **`css/` and `js/` at the root hold only common, shared assets.**
   `css/styles.css` is the sitewide stylesheet; `js/lib/broker-tunnel.js` is
   the reusable, zero-dependency broker connection module.
@@ -46,6 +57,10 @@ web/
   Proves the broker is implementation-agnostic: a server built with the
   reference SDK tunnels through unchanged. The only broker-specific code is
   `js/lib/broker-tunnel.js`.
+- **`demos/broker-explorer/`** — the client side: connects a browser MCP
+  client to a broker slot (`_broker`, `_all`, or any provider), lists its
+  tools and calls them live. The MCP-over-WebSocket client is isolated in
+  `js/mcp-ws-client.js`. Paired with the `broker-self-mcp.html` explainer.
 
 ## Serving it
 

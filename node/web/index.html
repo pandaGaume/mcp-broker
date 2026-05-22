@@ -335,7 +335,7 @@
     <div class="section-num">01 - Endpoints</div>
     <h2>Where to connect from</h2>
 
-    <p class="intro">Four transports are mounted on the same host. Replace <code class="inline">&lt;name&gt;</code> with one of your provider slot names — or use <code class="inline">_broker</code> to talk to the broker itself.</p>
+    <p class="intro">Four transports are mounted on the same host. Replace <code class="inline">&lt;name&gt;</code> with one of your provider slot names — or use <code class="inline">_broker</code> to talk to the broker itself, or <code class="inline">_all</code> for the aggregate of every provider.</p>
 
     <div class="endpoints">
       <div class="endpoint">
@@ -386,13 +386,22 @@
         <span class="ex-path">demos/babylon-scene/ <span class="arrow">→</span></span>
       </a>
 
-      <a class="example" href="demos/DemoPlaceholder.html?slot=_broker">
+      <a class="example" href="broker-self-mcp.html">
         <div class="ex-head">
           <span class="ex-title">Broker self-MCP</span>
-          <span class="ex-tag tool">tools/call</span>
+          <span class="ex-tag tool">explainer</span>
         </div>
-        <p class="ex-desc">The broker is itself an MCP server. Point Inspector here to list providers, read <code class="inline">broker_info</code> and explore broker resources.</p>
-        <span class="ex-path">/_broker/mcp <span class="arrow">→</span></span>
+        <p class="ex-desc">The broker is itself an MCP server. Read about the <code class="inline">_broker</code> introspection slot, the <code class="inline">_all</code> aggregate, and loading signed <code class="inline">.mcpb</code> bundles.</p>
+        <span class="ex-path">broker-self-mcp.html <span class="arrow">→</span></span>
+      </a>
+
+      <a class="example" href="demos/broker-explorer/">
+        <div class="ex-head">
+          <span class="ex-title">Broker Explorer</span>
+          <span class="ex-tag live">live</span>
+        </div>
+        <p class="ex-desc">Connect a browser MCP client to the broker's <code class="inline">_broker</code> or <code class="inline">_all</code> slot, list its tools and call them live.</p>
+        <span class="ex-path">demos/broker-explorer/ <span class="arrow">→</span></span>
       </a>
 
     </div>
