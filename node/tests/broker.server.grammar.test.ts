@@ -195,11 +195,13 @@ describe("startBrokerServer — client requests a grammar version via capabiliti
         // Drop a versioned grammar in a temp local override directory. The
         // broker's iterBrokerGrammarsFrom parses <locale>@<version>.json and
         // composes the key `default:fr@v2`, matching mcp-core's chain.
-        const dir = makeTempGrammarDir([{
-            userAgent: "default",
-            filename:  "fr@v2.json",
-            data: { tools: { broker_info: { description: "FR v2 explicit description" } } },
-        }]);
+        const dir = makeTempGrammarDir([
+            {
+                userAgent: "default",
+                filename: "fr@v2.json",
+                data: { tools: { broker_info: { description: "FR v2 explicit description" } } },
+            },
+        ]);
 
         const { rpcClient } = await bootBroker({
             localGrammarsDir: dir,
@@ -211,7 +213,7 @@ describe("startBrokerServer — client requests a grammar version via capabiliti
 
         // Client explicitly asks for v2 by declaring it in capabilities.
         await rpcClient.request("initialize", {
-            clientInfo:   { name: "test-client", version: "0.0.0" },
+            clientInfo: { name: "test-client", version: "0.0.0" },
             capabilities: { grammarVersion: "v2" },
         });
         const list = await rpcClient.request("tools/list");
@@ -230,7 +232,7 @@ describe("startBrokerServer — client requests a grammar version via capabiliti
         });
 
         await rpcClient.request("initialize", {
-            clientInfo:   { name: "test-client", version: "0.0.0" },
+            clientInfo: { name: "test-client", version: "0.0.0" },
             capabilities: { grammarVersion: "v2" },
         });
         const list = await rpcClient.request("tools/list");
@@ -246,11 +248,13 @@ describe("startBrokerServer — client requests a grammar version via capabiliti
         // Same wiring as above (versionFrom configured), but the client does
         // not put grammarVersion in capabilities. versionFrom returns undefined
         // → the version dimension is bypassed → chain emits non-versioned keys.
-        const dir = makeTempGrammarDir([{
-            userAgent: "default",
-            filename:  "fr@v2.json",
-            data: { tools: { broker_info: { description: "FR v2 should NOT appear" } } },
-        }]);
+        const dir = makeTempGrammarDir([
+            {
+                userAgent: "default",
+                filename: "fr@v2.json",
+                data: { tools: { broker_info: { description: "FR v2 should NOT appear" } } },
+            },
+        ]);
 
         const { rpcClient } = await bootBroker({
             localGrammarsDir: dir,
@@ -261,7 +265,7 @@ describe("startBrokerServer — client requests a grammar version via capabiliti
         });
 
         await rpcClient.request("initialize", {
-            clientInfo:   { name: "test-client", version: "0.0.0" },
+            clientInfo: { name: "test-client", version: "0.0.0" },
             capabilities: {},
         });
         const list = await rpcClient.request("tools/list");

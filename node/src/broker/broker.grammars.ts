@@ -136,12 +136,12 @@ export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLoca
  */
 export interface BrokerGrammarEntry {
     userAgent: BrokerUserAgent;
-    locale:    BrokerLocale;
+    locale: BrokerLocale;
     /** Set only for filenames carrying an `@<version>` suffix. */
-    version?:  string;
+    version?: string;
     /** Composed via {@link brokerGrammarKey} from the three segments above. */
-    key:       string;
-    grammar:   McpGrammar;
+    key: string;
+    grammar: McpGrammar;
 }
 
 export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<BrokerGrammarEntry> {

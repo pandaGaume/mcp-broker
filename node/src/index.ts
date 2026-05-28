@@ -15,12 +15,7 @@ export { unzipMcpb } from "./mcpb.unzip.js";
 // Broker introspection — tier 1.
 export { BrokerInfoBehavior, BrokerProvidersBehavior, startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
 export type { StartBrokerServerOptions } from "./broker/index.js";
-export {
-    brokerGrammarKey,
-    iterAvailableBrokerGrammars,
-    iterBrokerGrammarsFrom,
-    loadBrokerGrammar,
-} from "./broker/index.js";
+export { brokerGrammarKey, iterAvailableBrokerGrammars, iterBrokerGrammarsFrom, loadBrokerGrammar } from "./broker/index.js";
 export type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport, BrokerLocale, BrokerUserAgent } from "./broker/index.js";
 
 export { VERSION, PACKAGE_NAME } from "./version.js";
