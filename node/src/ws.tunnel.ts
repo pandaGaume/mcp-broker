@@ -5,12 +5,12 @@ import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
+import type { GrammarResolverOptions, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioUpstream, type StdioUpstreamConfig } from "./stdio.upstream.js";
 import { RemoteUpstream, type RemoteUpstreamConfig } from "./remote.upstream.js";
 import type { Upstream } from "./upstream.js";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
-import type { BrokerContext, BrokerLocaleResolver, BrokerProviderInfo, BrokerProviderTransport, BrokerUserAgentResolver } from "./broker/index.js";
+import type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker/index.js";
 import { AggregateServer } from "./broker/aggregate/aggregate.server.js";
 import { VERSION, PACKAGE_NAME } from "./version.js";
 
@@ -257,30 +257,26 @@ export interface WsTunnelOptions {
     brokerName?: string;
 
     /**
-     * Custom resolver picking the grammar locale for the embedded broker
-     * server. Defaults to `defaultBrokerLocaleResolver` (keeps the ISO 639-1
-     * prefix of a BCP-47 tag read from `MCP_BROKER_LOCALE`).
+     * Overrides for the embedded broker server's grammar resolver — passed
+     * straight through to `mcp-core`'s `grammarResolverFromOptions`. The
+     * broker installs its own default `localeSource` (reads
+     * `process.env.MCP_BROKER_LOCALE`); anything you set here wins.
+     *
+     * Use this to inject a custom `localeSource` (e.g. read from an HTTP
+     * header proxied by your transport), enable the optional `versionFrom`
+     * dimension, or extend the `agents` map with additional LLM families.
      */
-    brokerLocaleResolver?: BrokerLocaleResolver;
-
-    /**
-     * Custom resolver mapping a connecting client's identity to a user-agent
-     * family. Defaults to `defaultBrokerUserAgentResolver` (substring match on
-     * `clientInfo.name` against known LLM families).
-     */
-    brokerUserAgentResolver?: BrokerUserAgentResolver;
-
-    /**
-     * Custom source of the raw locale string fed to the locale resolver.
-     * Defaults to `() => process.env.MCP_BROKER_LOCALE`. Override when the
-     * locale should come from a config file, HTTP header, etc.
-     */
-    brokerLocaleSource?: () => string | undefined;
+    brokerGrammarResolverOptions?: Partial<GrammarResolverOptions>;
 
     /**
      * Path to a user-supplied grammars directory whose `<userAgent>/<locale>.json`
-     * files are merged **on top of** the packaged grammars used by the embedded
-     * broker server. Typically pointed at `.mcp-broker/grammars/`.
+     * files are registered alongside the packaged grammars used by the
+     * embedded broker server. Typically pointed at `.mcp-broker/grammars/`.
+     *
+     * The candidate-chain resolution in `McpServer.initialize`
+     * (mcp-core@0.3.0) handles cascade across user-agent and locale
+     * dimensions, so partial files no longer need to be pre-merged with a
+     * baseline.
      */
     brokerLocalGrammarsDir?: string;
 }
@@ -662,9 +658,7 @@ export class WsTunnel implements BrokerContext {
     private async _maybeStartBrokerServer(): Promise<void> {
         if (this._options.enableBrokerProvider === false) return;
         const { server, clientTransport } = await startBrokerServer(this, {
-            localeResolver: this._options.brokerLocaleResolver,
-            userAgentResolver: this._options.brokerUserAgentResolver,
-            localeSource: this._options.brokerLocaleSource,
+            grammarResolverOptions: this._options.brokerGrammarResolverOptions,
             localGrammarsDir: this._options.brokerLocalGrammarsDir,
         });
         this._brokerServer = server;

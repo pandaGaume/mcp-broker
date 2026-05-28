@@ -66,12 +66,21 @@ vars are deploy-time overrides injected by the surrounding environment.
 
 ### Grammar overrides
 
-When `.mcp-broker/grammars/` exists, every `<userAgent>/<locale>.json` file
-in it is **merged on top of** the packaged grammar with the same key. Local
-entries win on conflicts; missing entries fall through to the packaged
-values.
+When `.mcp-broker/grammars/` exists, every grammar JSON file in it is
+registered alongside the packaged grammar with the same key. The file
+naming convention encodes the resolver key directly:
 
-Concrete example:
+| File path | Resolver key |
+|---|---|
+| `<userAgent>/<locale>.json` | `<userAgent>:<locale>` |
+| `<userAgent>/<locale>@<version>.json` | `<userAgent>:<locale>@<version>` |
+
+Both layers are composed by the candidate-chain resolver in
+`@cyanmycelium/mcp-core@0.3.0` at session time, so partial files only need
+to declare the entries they want to change — the rest cascades from the
+packaged values.
+
+Concrete example (per-agent locale override):
 
 ```
 .mcp-broker/grammars/claude/fr.json
@@ -88,8 +97,41 @@ Concrete example:
 ```
 
 For everything else in the `claude:fr` grammar (other tools, resources,
-templates), the packaged values apply. You only override what you want to
-customize.
+templates), the packaged values apply.
+
+Concrete example (version-pinned override):
+
+```
+.mcp-broker/grammars/default/fr@v2.json
+```
+
+```json
+{
+    "tools": {
+        "broker_info": { "description": "FR description for v2 clients only." }
+    }
+}
+```
+
+A client that puts `capabilities.grammarVersion: "v2"` in its `initialize`
+request (and the host wiring `versionFrom: (_, caps) => caps?.grammarVersion`
+in `brokerGrammarResolverOptions`) sees this file's content. Clients that
+don't ask for v2 fall back to `default:fr` or further down the chain.
+
+> Pre-0.4 broker used to pre-merge `default:<locale>` into every
+> `<ua>:<locale>` at boot, because `mcp-core` could only look up a single
+> grammar key per session. As of mcp-core@0.3.0, the server walks a
+> candidate chain (e.g. `claude:fr@v2 → claude:fr → default:fr@v2 → default:fr → default:en`)
+> and merges every matching layer (behavior / adapter / static / store),
+> so the broker no longer needs that pre-merge step and gained the
+> version dimension naturally.
+
+> Pre-0.4 broker used to pre-merge `default:<locale>` into every
+> `<ua>:<locale>` at boot, because `mcp-core` could only look up a single
+> grammar key per session. As of mcp-core@0.3.0, the server walks a
+> candidate chain (`claude:fr-CA → claude:fr → default:fr-CA → default:fr
+> → default:en`) and merges every matching layer (behavior / adapter /
+> static / store), so the broker no longer needs that pre-merge step.
 
 ---
 

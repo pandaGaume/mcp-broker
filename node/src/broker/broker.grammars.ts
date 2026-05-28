@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { McpClientInfo } from "@cyanmycelium/mcp-core";
 import { McpGrammar } from "@cyanmycelium/mcp-core";
 
 // ---------------------------------------------------------------------------
@@ -10,131 +9,67 @@ import { McpGrammar } from "@cyanmycelium/mcp-core";
 
 /**
  * Locale identifier used to look up a grammar JSON file under
- * `<userAgent>/<locale>.json`. Open string: an application can introduce any
- * value its custom resolver and JSON resources support.
+ * `<userAgent>/<locale>.json`. Open string: a host application can use any
+ * value its grammar resources support.
  *
- * The {@link defaultBrokerLocaleResolver} returns the ISO 639-1 prefix of a
- * BCP-47 tag (`"fr-CA"` → `"fr"`, `"zh-Hans"` → `"zh"`).
+ * The broker registers each `(userAgent, locale)` pair found on disk as a
+ * separate `McpGrammar` keyed by {@link brokerGrammarKey}. The actual
+ * resolution of "which key to use for this session" is delegated to
+ * `@cyanmycelium/mcp-core@0.3.0`'s `grammarResolverFromOptions`, which
+ * handles BCP-47 narrowing (`fr-CA` → `fr` → `en`), agent-family fallback,
+ * and the optional version dimension natively.
  */
 export type BrokerLocale = string;
 
 /**
  * User-agent family identifier used to look up a grammar JSON file under
- * `<userAgent>/<locale>.json`. Open string. The {@link defaultBrokerUserAgentResolver}
- * recognizes the common LLM families and returns `"default"` for everything else.
+ * `<userAgent>/<locale>.json`. Open string. Conventional values follow
+ * the defaults emitted by `grammarResolverFromOptions`: `claude`, `gpt`,
+ * `mistral`, `copilot`, plus the universal `default`. Custom families
+ * are supported by passing a custom `agents` map in
+ * `StartBrokerServerOptions.grammarResolverOptions`.
  */
 export type BrokerUserAgent = string;
-
-// ---------------------------------------------------------------------------
-// Resolver function types
-// ---------------------------------------------------------------------------
-
-/**
- * Picks an **ordered fallback chain** of {@link BrokerLocale} values from a raw
- * input. Typically the raw input is `process.env.MCP_BROKER_LOCALE`, but any
- * string source works (HTTP header, session metadata, etc.).
- *
- * The returned array is consumed by the broker server most-specific-first, so
- * the resolver controls the BCP-47 narrowing policy. The default resolver
- * follows the standard `lang-region` → `lang` → `en` shape:
- *
- * ```
- *   raw = "fr-CA"  →  ["fr-ca", "fr", "en"]
- *   raw = "en-US"  →  ["en-us", "en"]
- *   raw = "zh"     →  ["zh", "en"]
- *   raw = ""       →  ["en"]
- * ```
- *
- * A custom resolver may shape the chain however it wants — e.g. inject a
- * project-specific dialect first, skip the bare language prefix, or pull
- * candidates from a session config.
- */
-export type BrokerLocaleResolver = (raw: string | undefined) => BrokerLocale[];
-
-/**
- * Picks a {@link BrokerUserAgent} from the connecting client's identity. Called
- * by the embedded broker `McpServer` once per session, during the MCP
- * `initialize` handshake.
- */
-export type BrokerUserAgentResolver = (clientInfo: McpClientInfo | undefined) => BrokerUserAgent;
-
-// ---------------------------------------------------------------------------
-// Default resolvers
-// ---------------------------------------------------------------------------
-
-/**
- * Default locale resolver — emits the BCP-47 narrowing chain for a raw locale
- * tag, from most specific to least specific, always ending with the universal
- * `"en"` fallback.
- *
- * Steps for an input `raw`:
- * 1. Lowercase the input.
- * 2. Push it as the most-specific candidate (only if non-empty).
- * 3. If it contains a `-` separator, push its bare language prefix next.
- * 4. Always push `"en"` last as the universal fallback.
- *
- * The broker server tries each candidate in turn against `<userAgent>/<locale>.json`
- * — so dropping a `claude/fr-ca.json` lets Canadian-French Claude clients
- * pick up that specific dialect, while clients with `fr` or `fr-FR` fall back
- * to `claude/fr.json` or `default/fr.json` automatically.
- *
- * Examples:
- * - `"fr-CA"`  → `["fr-ca", "fr", "en"]`
- * - `"fr"`     → `["fr", "en"]`
- * - `"zh-CN"`  → `["zh-cn", "zh", "en"]`
- * - `"en-US"`  → `["en-us", "en"]`
- * - `""` / `undefined` → `["en"]`
- */
-export const defaultBrokerLocaleResolver: BrokerLocaleResolver = (raw) => {
-    const a = [];
-    if (raw) {
-        const sep = "-";
-        raw = raw.toLowerCase();
-        a.push(raw);
-        if (raw.indexOf(sep) !== -1) {
-            a.push(raw.split(sep)[0]);
-        }
-    }
-    a.push("en");
-    return a;
-};
-
-/**
- * Default user-agent resolver — substring match on `clientInfo.name` against
- * a list of known LLM family hints. Unknown clients fall through to
- * `"default"` which is the universal baseline.
- *
- * This is intentionally a heuristic: MCP does not yet standardize an
- * agent-family field in `clientInfo`. Override the resolver in the broker
- * options if you need richer logic (header inspection, allow-list, etc.).
- */
-export const defaultBrokerUserAgentResolver: BrokerUserAgentResolver = (clientInfo) => {
-    const n = (clientInfo?.name ?? "").toLowerCase();
-    if (n.includes("claude")) return "claude";
-    if (n.includes("gpt") || n.includes("openai")) return "gpt";
-    if (n.includes("mistral")) return "mistral";
-    if (n.includes("copilot")) return "copilot";
-    return "default";
-};
-
-/** @deprecated Use {@link defaultBrokerLocaleResolver}. Kept as backward-compat alias. */
-export const resolveBrokerLocale = defaultBrokerLocaleResolver;
-/** @deprecated Use {@link defaultBrokerUserAgentResolver}. Kept as backward-compat alias. */
-export const resolveBrokerUserAgent: (clientName: string | undefined) => BrokerUserAgent = (clientName) => defaultBrokerUserAgentResolver({ name: clientName ?? "", version: "" });
 
 // ---------------------------------------------------------------------------
 // Canonical grammar key
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the canonical grammar key for the `(userAgent, locale)` matrix.
+ * Builds the canonical grammar key for the `(userAgent, locale, version?)`
+ * matrix the broker registers on disk.
  *
- * Pattern: `"<userAgent>:<locale>"` — e.g. `"claude:fr"`, `"default:en"`.
- * The colon separator is reserved for this composition and never appears in
- * user-agent or locale identifiers.
+ * Pattern:
+ *   - `"<userAgent>:<locale>"` (no version) — e.g. `"claude:fr"`, `"default:en"`
+ *   - `"<userAgent>:<locale>@<version>"` (versioned) — e.g. `"claude:fr@v2"`
+ *
+ * The colon separator is reserved for the `<ua>:<locale>` composition; the
+ * `@` separator is reserved for the optional version suffix. Neither
+ * character is allowed inside the identifier segments. This matches the
+ * default `composeKey` of `grammarResolverFromOptions` exactly, so a
+ * broker-loaded grammar at `claude/fr@v2.json` is automatically picked up
+ * when a Claude session resolves to the `claude:fr@v2` candidate.
  */
-export function brokerGrammarKey(userAgent: BrokerUserAgent, locale: BrokerLocale): string {
-    return `${userAgent}:${locale}`;
+export function brokerGrammarKey(userAgent: BrokerUserAgent, locale: BrokerLocale, version?: string): string {
+    const base = `${userAgent}:${locale}`;
+    return version ? `${base}@${version}` : base;
+}
+
+/**
+ * Parses a grammar JSON filename of the form `<locale>.json` or
+ * `<locale>@<version>.json` (without the `.json` suffix) into its
+ * components. The first `@` (if any) separates locale from version; any
+ * additional `@` is folded into the version string.
+ *
+ * Returns `null` when the input cannot be split into a usable locale.
+ */
+export function parseBrokerGrammarStem(stem: string): { locale: BrokerLocale; version?: string } | null {
+    const at = stem.indexOf("@");
+    if (at < 0) return stem.length > 0 ? { locale: stem } : null;
+    const locale = stem.slice(0, at);
+    const version = stem.slice(at + 1);
+    if (locale.length === 0 || version.length === 0) return null;
+    return { locale, version };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,16 +101,21 @@ const GRAMMARS_DIR = join(dirname(fileURLToPath(import.meta.url)), "grammars");
 const _cache = new Map<string, McpGrammar>();
 
 /**
- * Loads and caches the grammar for a given `(userAgent, locale)` combination.
- * Returns `undefined` (instead of throwing) when the resource file is missing,
- * so the caller can implement a fallback chain.
+ * Loads and caches the grammar for a given `(userAgent, locale, version?)`
+ * combination. Returns `undefined` (instead of throwing) when the resource
+ * file is missing, so the caller can implement a fallback chain.
+ *
+ * Filename convention on disk:
+ *   - `<userAgent>/<locale>.json` (no version)
+ *   - `<userAgent>/<locale>@<version>.json` (versioned)
  */
-export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLocale): McpGrammar | undefined {
-    const key = brokerGrammarKey(userAgent, locale);
+export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLocale, version?: string): McpGrammar | undefined {
+    const key = brokerGrammarKey(userAgent, locale, version);
     const cached = _cache.get(key);
     if (cached) return cached;
 
-    const path = join(GRAMMARS_DIR, userAgent, `${locale}.json`);
+    const filename = version ? `${locale}@${version}.json` : `${locale}.json`;
+    const path = join(GRAMMARS_DIR, userAgent, filename);
     if (!existsSync(path)) return undefined;
 
     const raw = readFileSync(path, "utf-8");
@@ -194,12 +134,17 @@ export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLoca
  * grammars and any local overrides. No hard-coded list of supported
  * user-agents or locales — adding a new grammar is dropping a JSON file.
  */
-export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<{
+export interface BrokerGrammarEntry {
     userAgent: BrokerUserAgent;
-    locale: BrokerLocale;
-    key: string;
-    grammar: McpGrammar;
-}> {
+    locale:    BrokerLocale;
+    /** Set only for filenames carrying an `@<version>` suffix. */
+    version?:  string;
+    /** Composed via {@link brokerGrammarKey} from the three segments above. */
+    key:       string;
+    grammar:   McpGrammar;
+}
+
+export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<BrokerGrammarEntry> {
     if (!existsSync(grammarsDir)) return;
 
     const userAgents = readdirSync(grammarsDir).sort();
@@ -210,13 +155,25 @@ export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<{
         const files = readdirSync(uaDir).sort();
         for (const file of files) {
             if (!file.endsWith(".json")) continue;
-            const locale = file.slice(0, -".json".length);
+            const stem = file.slice(0, -".json".length);
+            const parsed = parseBrokerGrammarStem(stem);
+            if (!parsed) {
+                process.stderr.write(`[mcp-broker] Skipping unparseable grammar filename ${file} in ${uaDir}\n`);
+                continue;
+            }
+            const { locale, version } = parsed;
             const path = join(uaDir, file);
             try {
                 const raw = readFileSync(path, "utf-8");
                 const data = JSON.parse(raw);
                 const grammar = McpGrammar.fromJSON(data);
-                yield { userAgent, locale, key: brokerGrammarKey(userAgent, locale), grammar };
+                yield {
+                    userAgent,
+                    locale,
+                    version,
+                    key: brokerGrammarKey(userAgent, locale, version),
+                    grammar,
+                };
             } catch (err) {
                 process.stderr.write(`[mcp-broker] Failed to load grammar ${path}: ${(err as Error).message}\n`);
             }
@@ -231,12 +188,7 @@ export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<{
  * For local user overrides, see {@link iterBrokerGrammarsFrom} with a custom
  * directory — typically `.mcp-broker/grammars/` next to the config file.
  */
-export function* iterAvailableBrokerGrammars(): Generator<{
-    userAgent: BrokerUserAgent;
-    locale: BrokerLocale;
-    key: string;
-    grammar: McpGrammar;
-}> {
+export function* iterAvailableBrokerGrammars(): Generator<BrokerGrammarEntry> {
     yield* iterBrokerGrammarsFrom(GRAMMARS_DIR);
 }
 

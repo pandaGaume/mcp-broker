@@ -13,12 +13,10 @@ export {
     brokerBaselineResourceTemplateName,
     brokerBaselineToolDescription,
     brokerGrammarKey,
-    defaultBrokerLocaleResolver,
-    defaultBrokerUserAgentResolver,
     iterAvailableBrokerGrammars,
+    iterBrokerGrammarsFrom,
     loadBrokerGrammar,
-    resolveBrokerLocale,
-    resolveBrokerUserAgent,
+    parseBrokerGrammarStem,
 } from "./broker.grammars.js";
-export type { BrokerLocale, BrokerLocaleResolver, BrokerUserAgent, BrokerUserAgentResolver } from "./broker.grammars.js";
+export type { BrokerGrammarEntry, BrokerLocale, BrokerUserAgent } from "./broker.grammars.js";
 export type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker.context.js";

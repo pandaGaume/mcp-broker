@@ -17,14 +17,11 @@ export { BrokerInfoBehavior, BrokerProvidersBehavior, startBrokerServer, BROKER_
 export type { StartBrokerServerOptions } from "./broker/index.js";
 export {
     brokerGrammarKey,
-    defaultBrokerLocaleResolver,
-    defaultBrokerUserAgentResolver,
     iterAvailableBrokerGrammars,
+    iterBrokerGrammarsFrom,
     loadBrokerGrammar,
-    resolveBrokerLocale,
-    resolveBrokerUserAgent,
 } from "./broker/index.js";
-export type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport, BrokerLocale, BrokerLocaleResolver, BrokerUserAgent, BrokerUserAgentResolver } from "./broker/index.js";
+export type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport, BrokerLocale, BrokerUserAgent } from "./broker/index.js";
 
 export { VERSION, PACKAGE_NAME } from "./version.js";
 

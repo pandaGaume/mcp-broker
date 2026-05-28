@@ -1,9 +1,8 @@
-import { McpGrammar, McpServerBuilder, LoopbackTransport } from "@cyanmycelium/mcp-core";
-import type { IMcpServer, IMessageTransport } from "@cyanmycelium/mcp-core";
+import { McpServerBuilder, LoopbackTransport } from "@cyanmycelium/mcp-core";
+import type { GrammarResolverOptions, IMcpServer, IMessageTransport } from "@cyanmycelium/mcp-core";
 import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info.js";
 import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers.js";
-import { brokerGrammarKey, defaultBrokerLocaleResolver, defaultBrokerUserAgentResolver, iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars.js";
-import type { BrokerLocaleResolver, BrokerUserAgent, BrokerUserAgentResolver } from "./broker.grammars.js";
+import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars.js";
 import type { BrokerContext } from "./broker.context.js";
 
 /**
@@ -22,32 +21,33 @@ export const BROKER_PROVIDER_NAME = "_broker";
  */
 export interface StartBrokerServerOptions {
     /**
-     * Picks a locale (BCP-47 base language, by convention) for the current
-     * session. Defaults to {@link defaultBrokerLocaleResolver} which reads
-     * `MCP_BROKER_LOCALE` and keeps the ISO 639-1 prefix.
+     * Overrides for the built-in grammar resolver from `@cyanmycelium/mcp-core`.
+     *
+     * The broker installs sensible defaults: `localeSource` reads
+     * `process.env.MCP_BROKER_LOCALE`, the `agents` map uses the mcp-core
+     * defaults (`claude`, `gpt`, `mistral`, `copilot`, `default`), the
+     * narrowing chain is BCP-47-style, and `fallbackKey` is `default:en`
+     * so the baseline grammar always matches as last resort.
+     *
+     * Pass partial overrides here to inject a custom `localeSource` (e.g.
+     * pull from an HTTP header proxied by your transport), enable the
+     * `versionFrom` dimension, or extend the `agents` map with additional
+     * LLM families. Anything you omit keeps the broker default.
      */
-    localeResolver?: BrokerLocaleResolver;
-
-    /**
-     * Picks a user-agent family for the connecting client. Defaults to
-     * {@link defaultBrokerUserAgentResolver} which substring-matches
-     * `clientInfo.name` against known LLM families.
-     */
-    userAgentResolver?: BrokerUserAgentResolver;
-
-    /**
-     * Source of the raw locale string fed to the locale resolver. Defaults
-     * to `process.env.MCP_BROKER_LOCALE`. Override when the locale lives
-     * somewhere else (config file, session metadata, HTTP header proxy, ...).
-     */
-    localeSource?: () => string | undefined;
+    grammarResolverOptions?: Partial<GrammarResolverOptions>;
 
     /**
      * Path to a user-supplied grammars directory whose `<userAgent>/<locale>.json`
-     * files are merged **on top of** the packaged grammars. Local entries win
-     * on conflicts; missing entries fall through to the packaged values.
+     * files are registered **in addition to** the packaged grammars.
      *
-     * When `undefined` (default), only the packaged grammars are used.
+     * Both packaged and local entries are registered raw against the server
+     * via `withGrammar(brokerGrammarKey(ua, locale), grammar)`. The
+     * candidate-chain resolution implemented by `McpServer.initialize` in
+     * mcp-core@0.3.0 then walks the chain and merges the four layers
+     * (behavior, adapter, static, store) for the first matching key —
+     * the old hand-rolled pre-merge cascade is no longer needed.
+     *
+     * When `undefined` (default), only the packaged grammars are loaded.
      */
     localGrammarsDir?: string;
 }
@@ -75,10 +75,6 @@ export async function startBrokerServer(
     server: IMcpServer;
     clientTransport: IMessageTransport;
 }> {
-    const localeResolver = options.localeResolver ?? defaultBrokerLocaleResolver;
-    const userAgentResolver = options.userAgentResolver ?? defaultBrokerUserAgentResolver;
-    const localeSource = options.localeSource ?? (() => process.env["MCP_BROKER_LOCALE"]);
-
     const [serverEnd, clientEnd] = LoopbackTransport.createPair();
 
     // Without an initializer, McpServerBuilder reports `version: "0.0.0"` in the
@@ -94,79 +90,30 @@ export async function startBrokerServer(
         })
         .register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context));
 
-    // Discover every grammar by scanning two directories:
-    //   1. The packaged grammars shipped with the broker.
-    //   2. Optionally, a user-supplied directory whose entries are merged
-    //      ON TOP of the packaged ones (local wins on conflicts).
-    //
-    // Then build the (userAgent × locale) matrix. Within each user-agent,
-    // the grammar cascades on top of "default:<locale>" so per-user-agent
-    // files can stay partial.
-    const defaults = new Map<string, McpGrammar>(); // locale → grammar
-    const overrides = new Map<BrokerUserAgent, Map<string, McpGrammar>>(); // userAgent → locale → grammar
-
-    function ingest(entry: { userAgent: BrokerUserAgent; locale: string; grammar: McpGrammar }, isOverride: boolean): void {
-        if (entry.userAgent === "default") {
-            const existing = defaults.get(entry.locale);
-            const merged = existing && isOverride ? McpGrammar.merge(existing, entry.grammar) : entry.grammar;
-            defaults.set(entry.locale, merged);
-        } else {
-            let byLocale = overrides.get(entry.userAgent);
-            if (!byLocale) {
-                byLocale = new Map();
-                overrides.set(entry.userAgent, byLocale);
-            }
-            const existing = byLocale.get(entry.locale);
-            const merged = existing && isOverride ? McpGrammar.merge(existing, entry.grammar) : entry.grammar;
-            byLocale.set(entry.locale, merged);
-        }
+    // Register every `(userAgent, locale)` JSON found on disk as a raw
+    // grammar layer. The candidate-chain resolution in
+    // McpServer.initialize (mcp-core@0.3.0) walks the resolver's chain
+    // and merges all matching layers — so partial user-agent files no
+    // longer need to be pre-merged with the default-locale baseline at
+    // boot. Local overrides come after packaged entries; identical keys
+    // get overlaid via the registry's last-write-wins.
+    for (const entry of iterAvailableBrokerGrammars()) {
+        builder.withGrammar(entry.key, entry.grammar);
     }
-
-    for (const entry of iterAvailableBrokerGrammars()) ingest(entry, false);
     if (options.localGrammarsDir) {
-        for (const entry of iterBrokerGrammarsFrom(options.localGrammarsDir)) ingest(entry, true);
-    }
-
-    const availableKeys = new Set<string>();
-
-    // Register every "default:<locale>" as-is.
-    for (const [locale, grammar] of defaults) {
-        const key = brokerGrammarKey("default", locale);
-        builder.withGrammar(key, grammar);
-        availableKeys.add(key);
-    }
-
-    // Register every "<userAgent>:<locale>" as merge(default:<locale>, ua:<locale>).
-    // The user-agent grammar wins per entry; missing entries cascade from default.
-    for (const [agent, byLocale] of overrides) {
-        for (const [locale, uaGrammar] of byLocale) {
-            const baseline = defaults.get(locale);
-            const merged = baseline ? McpGrammar.merge(baseline, uaGrammar) : uaGrammar;
-            const key = brokerGrammarKey(agent, locale);
-            builder.withGrammar(key, merged);
-            availableKeys.add(key);
+        for (const entry of iterBrokerGrammarsFrom(options.localGrammarsDir)) {
+            builder.withGrammar(entry.key, entry.grammar);
         }
     }
 
-    builder.withGrammarResolver((clientInfo) => {
-        // localeResolver returns the full fallback chain (most specific first),
-        // ending with the universal "en". The user-agent axis is the broker's
-        // own concern: per locale, prefer the user-agent-specific grammar, then
-        // fall back to the "default" agent.
-        const locales = localeResolver(localeSource());
-        const userAgent = userAgentResolver(clientInfo);
-        const userAgents = userAgent === "default" ? ["default"] : [userAgent, "default"];
-
-        for (const locale of locales) {
-            for (const ua of userAgents) {
-                const key = brokerGrammarKey(ua, locale);
-                if (availableKeys.has(key)) return key;
-            }
-        }
-
-        // None of the candidates is on disk → return an empty key. McpServer
-        // then falls back to the behavior's baseline descriptions (English).
-        return "";
+    // Wire the resolver via mcp-core's declarative helper. The broker
+    // ships sensible defaults (locale from MCP_BROKER_LOCALE env, agents
+    // from mcp-core's catalogue, BCP-47 narrowing, default:en fallback);
+    // anything the host application sets via `grammarResolverOptions`
+    // takes precedence.
+    builder.withGrammarResolver({
+        localeSource: () => process.env["MCP_BROKER_LOCALE"],
+        ...(options.grammarResolverOptions ?? {}),
     });
 
     // No reconnect policy → the McpServer does not attempt to reopen the loopback

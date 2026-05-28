@@ -1,6 +1,6 @@
 {
     "name": "@cyanmycelium/mcp-broker",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "WebSocket-based Model Context Protocol broker. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports.",
     "type": "module",
     "license": "Apache-2.0",
@@ -65,7 +65,7 @@
         "prepublishOnly": "npm run lint && npm run build && npm test"
     },
     "dependencies": {
-        "@cyanmycelium/mcp-core": "^0.2.1",
+        "@cyanmycelium/mcp-core": "^0.3.0",
         "open": "^11.0.0",
         "ws": "^8.18.0"
     },
