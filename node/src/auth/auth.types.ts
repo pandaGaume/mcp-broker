@@ -77,6 +77,14 @@ export interface Principal {
 }
 
 /**
+ * Decides, per authenticated caller, whether a given provider is visible in the
+ * `_all` aggregate. This is the content-confidentiality enforcement point: a
+ * client only sees (and can call) tools/prompts from providers it is authorized
+ * for. Return `true` to include the provider for this principal.
+ */
+export type AggregateScopeFilter = (principal: Principal, providerName: string) => boolean;
+
+/**
  * A fully resolved authorization configuration, ready for the enforcement
  * layer. Built either from JSON config (via `buildJwtAuth`) or supplied
  * directly by an embedder with a custom {@link TokenValidator}.
@@ -97,6 +105,12 @@ export interface ResolvedAuth {
     requiredScopes?: string[];
     /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
     perSlotScopes?: Record<string, string[]>;
+    /**
+     * Per-caller filter for the `_all` aggregate. When set, a client's view of
+     * `_all` is narrowed to the providers this returns `true` for. When absent,
+     * every authenticated caller sees the full aggregate.
+     */
+    aggregateScopeFilter?: AggregateScopeFilter;
 }
 
 /**

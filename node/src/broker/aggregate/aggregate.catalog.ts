@@ -74,6 +74,22 @@ export class AggregateCatalog {
         if (this._providers.delete(provider)) this._rebuild();
     }
 
+    /** The merged tool list restricted to providers `allow` returns `true` for. */
+    toolsFor(allow: (provider: string) => boolean): CatalogTool[] {
+        return this._tools.filter((tool) => {
+            const route = this._toolRoutes.get(tool.name);
+            return route ? allow(route.provider) : false;
+        });
+    }
+
+    /** The merged prompt list restricted to providers `allow` returns `true` for. */
+    promptsFor(allow: (provider: string) => boolean): CatalogPrompt[] {
+        return this._prompts.filter((prompt) => {
+            const route = this._promptRoutes.get(prompt.name);
+            return route ? allow(route.provider) : false;
+        });
+    }
+
     /** Resolves an aggregated tool name to its origin, or `undefined` if unknown. */
     resolveTool(name: string): Route | undefined {
         return this._toolRoutes.get(name);

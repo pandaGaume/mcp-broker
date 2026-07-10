@@ -1,5 +1,6 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import type { InternalClient } from "../../ws.tunnel.js";
+import type { AggregateScopeFilter, Principal } from "../../auth/index.js";
 import { AggregateCatalog } from "./aggregate.catalog.js";
 import { ProviderClientSession } from "./provider.client.session.js";
 
@@ -37,6 +38,8 @@ export class AggregateServer implements IMessageTransport {
     private readonly _sessions = new Map<string, ProviderClientSession>();
     private readonly _openClient: InternalClientFactory;
     private _running = false;
+    /** Per-caller provider visibility filter; `null` ⇒ every caller sees all. */
+    private _scopeFilter: AggregateScopeFilter | null = null;
 
     onMessage: ((data: string) => void) | null = null;
     onOpen: (() => void) | null = null;
@@ -61,9 +64,22 @@ export class AggregateServer implements IMessageTransport {
         this._running = true;
     }
 
-    /** WsTunnel hands a client request for the `_all` slot here. */
+    /** Sets the per-caller provider visibility filter. `null` disables filtering. */
+    setScopeFilter(filter: AggregateScopeFilter | null): void {
+        this._scopeFilter = filter;
+    }
+
+    /** WsTunnel hands a client request for the `_all` slot here (no principal). */
     send(data: string): void {
-        void this._handleClientMessage(data);
+        void this._handleClientMessage(data, null);
+    }
+
+    /**
+     * Like {@link send}, but carries the authenticated caller so the aggregate
+     * narrows the catalog and routing to the providers the caller may see.
+     */
+    sendAs(data: string, principal: Principal | null): void {
+        void this._handleClientMessage(data, principal);
     }
 
     /** Closes every provider session and the aggregate transport. */
@@ -109,7 +125,14 @@ export class AggregateServer implements IMessageTransport {
         this._emitListChanged();
     }
 
-    private async _handleClientMessage(data: string): Promise<void> {
+    /** Builds a provider-visibility predicate for a caller (allow-all when unfiltered). */
+    private _allow(principal: Principal | null): (provider: string) => boolean {
+        const filter = this._scopeFilter;
+        if (!filter || !principal) return () => true;
+        return (provider) => filter(principal, provider);
+    }
+
+    private async _handleClientMessage(data: string, principal: Principal | null): Promise<void> {
         let msg: ClientMessage;
         try {
             msg = JSON.parse(data) as ClientMessage;
@@ -118,6 +141,8 @@ export class AggregateServer implements IMessageTransport {
         }
         const id = msg.id;
         if (id == null) return; // client notification — nothing to answer
+
+        const allow = this._allow(principal);
 
         switch (msg.method) {
             case "initialize":
@@ -133,26 +158,28 @@ export class AggregateServer implements IMessageTransport {
                 this._reply(id, { result: {} });
                 break;
             case "tools/list":
-                this._reply(id, { result: { tools: this._catalog.tools } });
+                this._reply(id, { result: { tools: this._catalog.toolsFor(allow) } });
                 break;
             case "prompts/list":
-                this._reply(id, { result: { prompts: this._catalog.prompts } });
+                this._reply(id, { result: { prompts: this._catalog.promptsFor(allow) } });
                 break;
             case "tools/call":
-                await this._route(id, msg.params, "tool");
+                await this._route(id, msg.params, "tool", allow);
                 break;
             case "prompts/get":
-                await this._route(id, msg.params, "prompt");
+                await this._route(id, msg.params, "prompt", allow);
                 break;
             default:
                 this._reply(id, { error: { code: -32601, message: `Method not found: ${msg.method ?? "(none)"}` } });
         }
     }
 
-    private async _route(id: string | number, params: unknown, kind: "tool" | "prompt"): Promise<void> {
+    private async _route(id: string | number, params: unknown, kind: "tool" | "prompt", allow: (provider: string) => boolean): Promise<void> {
         const p = (params ?? {}) as CallParams;
         const route = p.name ? (kind === "tool" ? this._catalog.resolveTool(p.name) : this._catalog.resolvePrompt(p.name)) : undefined;
-        if (!route) {
+        // Treat a provider the caller may not see as if it did not exist — do not
+        // leak its presence through a distinct "forbidden" error.
+        if (!route || !allow(route.provider)) {
             this._reply(id, { error: { code: -32602, message: `Unknown aggregated ${kind}: ${p.name ?? "(none)"}` } });
             return;
         }

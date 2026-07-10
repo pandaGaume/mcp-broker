@@ -240,6 +240,7 @@ async function main(): Promise<void> {
             scopesSupported: config.auth?.scopesSupported,
             requiredScopes: config.auth?.requiredScopes,
             perSlotScopes: config.auth?.perSlotScopes,
+            providerScopes: config.auth?.providerScopes,
         });
     }
 

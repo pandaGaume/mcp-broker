@@ -1,5 +1,5 @@
 import { JwtTokenValidator } from "./jwt.validator.js";
-import type { ResolvedAuth } from "./auth.types.js";
+import type { AggregateScopeFilter, ResolvedAuth } from "./auth.types.js";
 
 /**
  * High-level options for the default JWT/JWKS resource-server setup. Mirrors the
@@ -21,8 +21,24 @@ export interface JwtAuthOptions {
     requiredScopes?: string[];
     /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
     perSlotScopes?: Record<string, string[]>;
+    /**
+     * Per-provider scope requirements for the `_all` aggregate. A caller sees a
+     * provider in `_all` only if it holds at least one of the listed scopes.
+     * Providers not listed here stay visible to every authenticated caller.
+     * Turned into an {@link AggregateScopeFilter} automatically.
+     */
+    providerScopes?: Record<string, string[]>;
     /** Leeway in seconds for token `exp`/`nbf` checks. */
     clockToleranceSec?: number;
+}
+
+/** Builds the default aggregate filter from a per-provider scope map. */
+function makeProviderScopeFilter(providerScopes: Record<string, string[]>): AggregateScopeFilter {
+    return (principal, providerName) => {
+        const required = providerScopes[providerName];
+        if (!required || required.length === 0) return true; // unlisted ⇒ visible to all
+        return required.some((scope) => principal.scopes.has(scope));
+    };
 }
 
 /** Removes a single trailing slash so resource URIs concatenate cleanly. */
@@ -63,5 +79,8 @@ export function buildJwtAuth(options: JwtAuthOptions): ResolvedAuth {
     if (options.scopesSupported) resolved.scopesSupported = options.scopesSupported;
     if (options.requiredScopes) resolved.requiredScopes = options.requiredScopes;
     if (options.perSlotScopes) resolved.perSlotScopes = options.perSlotScopes;
+    if (options.providerScopes && Object.keys(options.providerScopes).length > 0) {
+        resolved.aggregateScopeFilter = makeProviderScopeFilter(options.providerScopes);
+    }
     return resolved;
 }

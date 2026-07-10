@@ -32,6 +32,7 @@ export type {
     ProtectedResourceMetadata,
     JwtAuthOptions,
     ProviderAuthenticator,
+    AggregateScopeFilter,
 } from "./auth/index.js";
 
 // JSON config file used by `bin.ts` at startup. Exported so a programmatic

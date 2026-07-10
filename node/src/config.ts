@@ -65,6 +65,12 @@ export interface BrokerConfig {
         /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
         perSlotScopes?: Record<string, string[]>;
         /**
+         * Per-provider scope requirements for the `_all` aggregate. A caller sees
+         * a provider in `_all` only if it holds at least one of the listed scopes.
+         * Providers not listed stay visible to every authenticated caller.
+         */
+        providerScopes?: Record<string, string[]>;
+        /**
          * Shared secret every provider must present to occupy a slot (via
          * `X-Provider-Token` or `Authorization: Bearer`). Independent of client
          * auth. Also settable via `MCP_BROKER_PROVIDER_SECRET` (which wins).
