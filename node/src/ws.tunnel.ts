@@ -12,6 +12,7 @@ import type { Upstream } from "./upstream.js";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
 import type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker/index.js";
 import { AggregateServer } from "./broker/aggregate/aggregate.server.js";
+import { HttpAuthGuard, AuthError, type ResolvedAuth } from "./auth/index.js";
 import { VERSION, PACKAGE_NAME } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,9 @@ type ResponseSink =
     | { type: "http"; res: ServerResponse }
     | { type: "stdio" }
     | { type: "internal"; client: InternalClient };
+
+/** The four HTTP client-transport handlers a provider route can resolve to. */
+type McpEndpointKind = "mcp-get" | "mcp-post" | "sse-connect" | "sse-message";
 
 /**
  * All mutable state for one named provider slot.
@@ -279,6 +283,18 @@ export interface WsTunnelOptions {
      * baseline.
      */
     brokerLocalGrammarsDir?: string;
+
+    /**
+     * OAuth 2.1 resource-server authorization. When set, every HTTP client
+     * request to a slot (`/<slot>/mcp`, `/<slot>/sse`, `/<slot>/messages`) must
+     * carry a valid `Authorization: Bearer` token issued for that slot, and the
+     * broker publishes Protected Resource Metadata (RFC 9728) under
+     * `/.well-known/oauth-protected-resource/<slot>/<mcp>`.
+     *
+     * When `undefined` (default), the broker performs **no** authentication —
+     * appropriate only behind a trusted network boundary.
+     */
+    auth?: ResolvedAuth;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,8 +362,12 @@ export class WsTunnel implements BrokerContext {
     /** Timestamp of the most recent successful `start()`. */
     private _startedAt: Date | null = null;
 
+    /** HTTP resource-server enforcement point, or `null` when auth is disabled. */
+    private readonly _authGuard: HttpAuthGuard | null;
+
     constructor(options: WsTunnelOptions) {
         this._options = options;
+        this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
     }
 
     // -------------------------------------------------------------------------
@@ -763,30 +783,34 @@ export class WsTunnel implements BrokerContext {
             return;
         }
 
+        // Protected Resource Metadata (RFC 9728) — public discovery data, served
+        // unauthenticated so a client can find the authorization server after a 401.
+        if (this._authGuard && method === "GET") {
+            const metaSlot = this._authGuard.matchMetadataRequest(rawUrl);
+            if (metaSlot) {
+                res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                res.end(JSON.stringify(this._authGuard.metadataFor(metaSlot)));
+                return;
+            }
+        }
+
         // Route /<providerName>/<endpoint>
         const route = this._parseProviderRoute(rawUrl);
         if (route) {
             const { providerName, endpoint } = route;
-            const mcpSuffix = (this._options.mcpPath ?? "/mcp").replace(/^\//, "");
-            const sseSuffix = (this._options.ssePath ?? "/sse").replace(/^\//, "");
-            const messagesSuffix = (this._options.messagesPath ?? "/messages").replace(/^\//, "");
-
-            if (endpoint === mcpSuffix) {
-                if (method === "GET") {
-                    this._handleMcpGetStream(req, res, providerName);
-                    return;
+            const kind = this._mcpEndpointKind(endpoint, method);
+            if (kind) {
+                if (this._authGuard) {
+                    // Gate on a valid bearer token issued for this slot before touching
+                    // the provider. On failure, emit an RFC 9728 challenge / 500.
+                    const guard = this._authGuard;
+                    void guard.authorize(req, providerName).then(
+                        () => this._dispatchMcpEndpoint(kind, req, res, providerName),
+                        (err: unknown) => this._handleAuthFailure(guard, res, providerName, err)
+                    );
+                } else {
+                    this._dispatchMcpEndpoint(kind, req, res, providerName);
                 }
-                if (method === "POST") {
-                    this._handleMcpPost(req, res, providerName);
-                    return;
-                }
-            }
-            if (endpoint === sseSuffix && method === "GET") {
-                this._handleSseConnect(req, res, providerName);
-                return;
-            }
-            if (endpoint === messagesSuffix && method === "POST") {
-                this._handleSseMessage(req, res, providerName);
                 return;
             }
         }
@@ -811,6 +835,53 @@ export class WsTunnel implements BrokerContext {
         const endpoint = decodeURIComponent(parts[1]);
         if (!providerName || !endpoint) return null;
         return { providerName, endpoint };
+    }
+
+    /**
+     * Classifies a `(endpoint, method)` pair as one of the four MCP/SSE client
+     * handlers, or `null` when it is not a client transport request (the caller
+     * then falls through to static-file serving, preserving prior behavior).
+     */
+    private _mcpEndpointKind(endpoint: string, method: string): McpEndpointKind | null {
+        const mcpSuffix = (this._options.mcpPath ?? "/mcp").replace(/^\//, "");
+        const sseSuffix = (this._options.ssePath ?? "/sse").replace(/^\//, "");
+        const messagesSuffix = (this._options.messagesPath ?? "/messages").replace(/^\//, "");
+        if (endpoint === mcpSuffix && method === "GET") return "mcp-get";
+        if (endpoint === mcpSuffix && method === "POST") return "mcp-post";
+        if (endpoint === sseSuffix && method === "GET") return "sse-connect";
+        if (endpoint === messagesSuffix && method === "POST") return "sse-message";
+        return null;
+    }
+
+    /** Routes an already-authorized (or auth-disabled) request to its handler. */
+    private _dispatchMcpEndpoint(kind: McpEndpointKind, req: IncomingMessage, res: ServerResponse, providerName: string): void {
+        switch (kind) {
+            case "mcp-get":
+                this._handleMcpGetStream(req, res, providerName);
+                return;
+            case "mcp-post":
+                this._handleMcpPost(req, res, providerName);
+                return;
+            case "sse-connect":
+                this._handleSseConnect(req, res, providerName);
+                return;
+            case "sse-message":
+                this._handleSseMessage(req, res, providerName);
+                return;
+        }
+    }
+
+    /** Turns a rejected {@link HttpAuthGuard.authorize} into an HTTP response. */
+    private _handleAuthFailure(guard: HttpAuthGuard, res: ServerResponse, providerName: string, err: unknown): void {
+        if (err instanceof AuthError) {
+            guard.writeChallenge(res, providerName, err);
+            return;
+        }
+        // Not a token failure (e.g. the JWKS endpoint is unreachable) — surface a
+        // 500 rather than a misleading 401.
+        console.error(`[broker] token validation error for "${providerName}":`, err);
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "server_error" }));
     }
 
     // -------------------------------------------------------------------------

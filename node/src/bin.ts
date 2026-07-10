@@ -84,6 +84,10 @@ envFromConfig("MCP_BROKER_PROVIDER_PATH", config.paths?.provider);
 envFromConfig("MCP_BROKER_CLIENT_PATH", config.paths?.client);
 envFromConfig("MCP_BROKER_MCP_PATH", config.paths?.mcp);
 envFromConfig("MCP_BROKER_OPEN", config.www?.open === true ? "1" : undefined);
+envFromConfig("MCP_BROKER_AUTH_ENABLED", config.auth?.enabled === true ? "1" : undefined);
+envFromConfig("MCP_BROKER_PUBLIC_BASE_URL", config.auth?.publicBaseUrl);
+envFromConfig("MCP_BROKER_JWKS", config.auth?.jwks);
+envFromConfig("MCP_BROKER_ISSUER", config.auth?.issuer);
 
 const stdioProvider = process.env["MCP_BROKER_STDIO_PROVIDER"];
 
@@ -209,6 +213,35 @@ async function main(): Promise<void> {
         builder.withBrokerLocalGrammarsDir(localGrammarsDir);
     }
 
+    // ── Authorization (OAuth 2.1 resource server) ────────────────────────────
+    // Opt-in: only wired when MCP_BROKER_AUTH_ENABLED / config.auth.enabled is on.
+    // Env scalars win over config; array/object fields are read from config.
+    const authEnabledEnv = process.env["MCP_BROKER_AUTH_ENABLED"];
+    const authEnabled = authEnabledEnv === "1" || authEnabledEnv === "true";
+    if (authEnabled) {
+        const publicBaseUrl = process.env["MCP_BROKER_PUBLIC_BASE_URL"];
+        const jwks = process.env["MCP_BROKER_JWKS"];
+        const issuer = process.env["MCP_BROKER_ISSUER"];
+        const authorizationServers = config.auth?.authorizationServers ?? (issuer ? [issuer] : []);
+        if (!publicBaseUrl || !jwks || authorizationServers.length === 0) {
+            console.error(
+                "[mcp-broker] auth.enabled requires publicBaseUrl, jwks, and at least one " +
+                    "authorizationServers entry (or issuer). Set them via config.auth or " +
+                    "MCP_BROKER_PUBLIC_BASE_URL / MCP_BROKER_JWKS / MCP_BROKER_ISSUER."
+            );
+            process.exit(1);
+        }
+        builder.withJwtAuth({
+            publicBaseUrl,
+            authorizationServers,
+            jwksUri: jwks,
+            issuer,
+            scopesSupported: config.auth?.scopesSupported,
+            requiredScopes: config.auth?.requiredScopes,
+            perSlotScopes: config.auth?.perSlotScopes,
+        });
+    }
+
     const tunnel = builder.build();
     await tunnel.start();
 
@@ -230,6 +263,7 @@ async function main(): Promise<void> {
     if (hasLocalGrammars) {
         console.log(`🌐  Local grammars        ${localGrammarsDir}`);
     }
+    console.log(`🔐  Authorization         ${authEnabled ? "OAuth 2.1 (Bearer required)" : "disabled (trusted network only)"}`);
     console.log(hr);
     console.log(`   Press Ctrl+C to stop.`);
     console.log();

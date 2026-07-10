@@ -37,6 +37,35 @@ export interface BrokerConfig {
     /** Logical broker name reported by `broker_info`. */
     brokerName?: string;
 
+    /**
+     * OAuth 2.1 resource-server authorization. When `enabled` is `true`, every
+     * HTTP client request to a slot must carry a valid `Authorization: Bearer`
+     * token issued for that slot, and the broker publishes Protected Resource
+     * Metadata (RFC 9728). Absent/`false` ⇒ no authentication (trusted-network
+     * mode, the historical behavior).
+     *
+     * Scalars also map to env vars (which win): `MCP_BROKER_AUTH_ENABLED`,
+     * `MCP_BROKER_PUBLIC_BASE_URL`, `MCP_BROKER_JWKS`, `MCP_BROKER_ISSUER`.
+     */
+    auth?: {
+        /** Master switch. Absent/`false` keeps the broker unauthenticated. */
+        enabled?: boolean;
+        /** Public origin the broker is reached at (e.g. `https://mcp.example.com`). */
+        publicBaseUrl?: string;
+        /** Authorization server issuer URL(s) advertised in the metadata. */
+        authorizationServers?: string[];
+        /** URL of the authorization server's JWKS document. */
+        jwks?: string;
+        /** Expected token issuer. Defaults to the sole `authorizationServers` entry. */
+        issuer?: string;
+        /** Scopes advertised in the metadata `scopes_supported`. */
+        scopesSupported?: string[];
+        /** Baseline scope(s) required to reach any slot. */
+        requiredScopes?: string[];
+        /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
+        perSlotScopes?: Record<string, string[]>;
+    };
+
     /** URL paths (override the defaults). */
     paths?: {
         provider?: string;

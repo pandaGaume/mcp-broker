@@ -1,0 +1,67 @@
+import { JwtTokenValidator } from "./jwt.validator.js";
+import type { ResolvedAuth } from "./auth.types.js";
+
+/**
+ * High-level options for the default JWT/JWKS resource-server setup. Mirrors the
+ * `auth` block of the broker JSON config and is turned into a fully
+ * {@link ResolvedAuth} (with a {@link JwtTokenValidator}) by {@link buildJwtAuth}.
+ */
+export interface JwtAuthOptions {
+    /** Public origin the broker is reached at (e.g. `https://mcp.example.com`). */
+    publicBaseUrl: string;
+    /** Authorization server issuer URL(s) advertised in the PRM. At least one. */
+    authorizationServers: string[];
+    /** URL of the authorization server's JWKS document. */
+    jwksUri: string;
+    /** Expected token issuer(s). Defaults to the sole authorization server. */
+    issuer?: string | string[];
+    /** Scopes advertised in the PRM `scopes_supported`. */
+    scopesSupported?: string[];
+    /** Baseline scope(s) required to reach any slot. */
+    requiredScopes?: string[];
+    /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
+    perSlotScopes?: Record<string, string[]>;
+    /** Leeway in seconds for token `exp`/`nbf` checks. */
+    clockToleranceSec?: number;
+}
+
+/** Removes a single trailing slash so resource URIs concatenate cleanly. */
+function stripTrailingSlash(url: string): string {
+    return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+/**
+ * Builds a {@link ResolvedAuth} backed by a {@link JwtTokenValidator}. Validates
+ * the required inputs up front and throws a descriptive error on misconfig, so
+ * an operator sees the problem at boot rather than as opaque `401`s later.
+ */
+export function buildJwtAuth(options: JwtAuthOptions): ResolvedAuth {
+    if (!options.publicBaseUrl) {
+        throw new Error("auth: publicBaseUrl is required.");
+    }
+    if (!options.authorizationServers || options.authorizationServers.length === 0) {
+        throw new Error("auth: at least one authorizationServers entry is required.");
+    }
+    if (!options.jwksUri) {
+        throw new Error("auth: jwksUri is required.");
+    }
+
+    const publicBaseUrl = stripTrailingSlash(options.publicBaseUrl);
+    const issuer = options.issuer ?? (options.authorizationServers.length === 1 ? options.authorizationServers[0] : undefined);
+
+    const validator = new JwtTokenValidator({
+        jwksUri: options.jwksUri,
+        issuer,
+        clockToleranceSec: options.clockToleranceSec,
+    });
+
+    const resolved: ResolvedAuth = {
+        publicBaseUrl,
+        authorizationServers: options.authorizationServers,
+        validator,
+    };
+    if (options.scopesSupported) resolved.scopesSupported = options.scopesSupported;
+    if (options.requiredScopes) resolved.requiredScopes = options.requiredScopes;
+    if (options.perSlotScopes) resolved.perSlotScopes = options.perSlotScopes;
+    return resolved;
+}

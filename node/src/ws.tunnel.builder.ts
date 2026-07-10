@@ -2,6 +2,7 @@ import * as fs from "fs";
 import { WsTunnel, type WsTunnelOptions, type StaticMount } from "./ws.tunnel.js";
 import type { StdioUpstreamConfig } from "./stdio.upstream.js";
 import type { RemoteUpstreamConfig } from "./remote.upstream.js";
+import { buildJwtAuth, type JwtAuthOptions, type ResolvedAuth } from "./auth/index.js";
 
 /**
  * Fluent builder that constructs a configured {@link WsTunnel}.
@@ -36,6 +37,7 @@ export class WsTunnelBuilder {
     private _stdioClient: { providerName: string } | undefined = undefined;
     private _tls: { cert: string; key: string } | undefined = undefined;
     private _brokerLocalGrammarsDir: string | undefined = undefined;
+    private _auth: ResolvedAuth | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -200,6 +202,28 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /**
+     * Enables OAuth 2.1 resource-server authorization with a pre-resolved config
+     * (e.g. a custom {@link ResolvedAuth} carrying your own `TokenValidator`).
+     * Prefer {@link withJwtAuth} for the standard JWKS-backed setup.
+     */
+    withAuth(auth: ResolvedAuth): this {
+        this._auth = auth;
+        return this;
+    }
+
+    /**
+     * Enables OAuth 2.1 authorization with the default stateless JWT validator:
+     * the broker verifies each bearer token's signature against the authorization
+     * server's JWKS and its audience against the slot's canonical resource URI.
+     *
+     * @throws if `publicBaseUrl`, `authorizationServers`, or `jwksUri` are missing.
+     */
+    withJwtAuth(options: JwtAuthOptions): this {
+        this._auth = buildJwtAuth(options);
+        return this;
+    }
+
     /** Constructs and returns a configured {@link WsTunnel}. */
     build(): WsTunnel {
         const options: WsTunnelOptions = {
@@ -218,6 +242,7 @@ export class WsTunnelBuilder {
             stdioClient: this._stdioClient,
             tls: this._tls,
             brokerLocalGrammarsDir: this._brokerLocalGrammarsDir,
+            auth: this._auth,
         };
         return new WsTunnel(options);
     }
