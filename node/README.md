@@ -96,6 +96,50 @@ Full reference (every field, defaults, recipes, grammar overrides): **[docs/conf
 | `MCP_BROKER_TLS_KEY` | (unset) | Path to a PEM private key. Enables HTTPS/WSS |
 | `MCP_BROKER_PROTOCOL` | auto | `http` forces plain, `https` forces TLS, unset auto-detects from cert+key |
 | `MCP_BROKER_STDIO_PROVIDER` | (unset) | When set, bridge stdin/stdout JSON-RPC to this provider (Claude Desktop integration) |
+| `MCP_BROKER_AUTH_ENABLED` | (unset) | `1` to turn on the OAuth 2.1 resource server (requires the three below) |
+| `MCP_BROKER_PUBLIC_BASE_URL` | (unset) | Public origin used to build canonical resource URIs, e.g. `https://mcp.example.com` |
+| `MCP_BROKER_JWKS` | (unset) | Authorization server's JWKS URL, used to verify token signatures |
+| `MCP_BROKER_ISSUER` | (unset) | Expected token issuer (defaults to the sole authorization server) |
+| `MCP_BROKER_PROVIDER_SECRET` | (unset) | Shared secret every provider must present to occupy a slot |
+
+## Authorization (OAuth 2.1)
+
+By default the broker performs **no** authentication. That is fine behind a
+trusted network boundary, but do not expose it publicly as-is. Turn on the OAuth 2.1
+resource server to require a bearer token on every client request, authenticate
+providers, and filter the `_all` aggregate per caller.
+
+Enabled via the `auth` config block (or env vars). Minimal `.mcp-broker/config.json`:
+
+```json
+{
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "https://mcp.example.com",
+        "authorizationServers": ["https://auth.example.com"],
+        "jwks": "https://auth.example.com/.well-known/jwks.json",
+        "requiredScopes": ["mcp:call"],
+        "perSlotScopes": { "_broker": ["broker:admin"] },
+        "providerScopes": { "weather": ["see:weather"] },
+        "providerSecret": "change-me"
+    }
+}
+```
+
+With this on:
+
+- `POST /<slot>/mcp` (and `/sse`, `/messages`, `ws://…/<slot>`) require
+  `Authorization: Bearer <token>`; the token's audience must be
+  `https://mcp.example.com/<slot>/mcp`.
+- Clients discover the authorization server via
+  `GET /.well-known/oauth-protected-resource/<slot>/mcp` (RFC 9728), advertised
+  in the `401` challenge.
+- Providers must present `providerSecret` (via `X-Provider-Token` or
+  `Authorization: Bearer`) to connect to `/provider/<slot>` or `/providers`.
+- `_all` only shows a caller the providers its token is scoped for.
+
+Full model, flows, scopes, and endpoints: **[../docs/authorization.md](../docs/authorization.md)**.
+Config field reference: **[docs/config.md](docs/config.md#auth-oauth-21-authorization)**.
 
 ## Programmatic API
 
@@ -111,12 +155,21 @@ const broker = new WsTunnelBuilder()
     .withStdioUpstream("my-server", "node", ["./my-server.js"])
     // Optional: serve a dev harness at /
     .withStaticMount("/", "/abs/path/to/www")
+    // Optional: enable the OAuth 2.1 resource server + provider auth
+    .withJwtAuth({
+        publicBaseUrl: "https://mcp.example.com",
+        authorizationServers: ["https://auth.example.com"],
+        jwksUri: "https://auth.example.com/.well-known/jwks.json",
+        requiredScopes: ["mcp:call"],
+        providerScopes: { weather: ["see:weather"] },
+    })
+    .withProviderSecret(process.env.PROVIDER_SECRET!)
     .build();
 
 await broker.start();
 ```
 
-All builder methods are documented inline. The full options interface is `WsTunnelOptions`, also exported.
+All builder methods are documented inline. The full options interface is `WsTunnelOptions`, also exported. For a custom token validator (e.g. RFC 7662 introspection) or provider authenticator, use `withAuth(resolvedAuth)` / `withProviderAuth(authenticator)` with your own `TokenValidator` / `ProviderAuthenticator` (both interfaces are exported).
 
 ## TLS for local development
 

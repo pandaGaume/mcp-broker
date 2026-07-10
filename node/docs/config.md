@@ -257,6 +257,48 @@ File-only. Each entry spawns a child process at broker start.
 | `args` | `string[]` | no | Arguments passed to the command |
 | `env` | `Record<string, string>` | no | Extra env vars merged with the parent process env |
 
+### `auth` (OAuth 2.1 authorization)
+
+Opt-in. Absent or `enabled: false` ⇒ the broker performs **no** authentication
+(trusted-network mode, the historical behavior). When `enabled: true`, the
+broker becomes an OAuth 2.1 resource server: client requests need a bearer token
+and the broker publishes Protected Resource Metadata (RFC 9728). See the
+language-neutral [authorization guide](../../docs/authorization.md) for the full
+model, flows, and endpoints.
+
+| Field | Type | Env var | Notes |
+|---|---|---|---|
+| `auth.enabled` | `boolean` | `MCP_BROKER_AUTH_ENABLED` (`1`/`true`) | Master switch. Requires `publicBaseUrl`, `jwks`, and an issuer/AS when on |
+| `auth.publicBaseUrl` | `string` | `MCP_BROKER_PUBLIC_BASE_URL` | Public origin, e.g. `https://mcp.example.com`. Builds canonical resource URIs |
+| `auth.authorizationServers` | `string[]` | (file-only) | AS issuer URL(s) advertised in the metadata. Defaults to `[issuer]` |
+| `auth.jwks` | `string` | `MCP_BROKER_JWKS` | AS JWKS URL, used to verify token signatures |
+| `auth.issuer` | `string` | `MCP_BROKER_ISSUER` | Expected token `iss`. Defaults to the sole `authorizationServers` entry |
+| `auth.scopesSupported` | `string[]` | (file-only) | Advertised in the metadata `scopes_supported` |
+| `auth.requiredScopes` | `string[]` | (file-only) | Baseline scope(s) any caller must hold. Empty ⇒ any valid token |
+| `auth.perSlotScopes` | `Record<string,string[]>` | (file-only) | Per-slot scope overrides (e.g. an admin scope for `_broker`) |
+| `auth.providerScopes` | `Record<string,string[]>` | (file-only) | Per-provider scopes narrowing the `_all` aggregate view |
+| `auth.providerSecret` | `string` | `MCP_BROKER_PROVIDER_SECRET` | Shared secret every provider must present to occupy a slot |
+
+`providerSecret` is independent of client auth: set it alone to authenticate
+providers even without turning on the OAuth resource server.
+
+```json
+{
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "https://mcp.example.com",
+        "authorizationServers": ["https://auth.example.com"],
+        "jwks": "https://auth.example.com/.well-known/jwks.json",
+        "issuer": "https://auth.example.com",
+        "scopesSupported": ["mcp:call", "broker:admin"],
+        "requiredScopes": ["mcp:call"],
+        "perSlotScopes": { "_broker": ["broker:admin"] },
+        "providerScopes": { "weather": ["see:weather"] },
+        "providerSecret": "change-me"
+    }
+}
+```
+
 ---
 
 ## Common patterns
@@ -306,6 +348,29 @@ Self-contained — moving `.mcp-broker/` to another machine carries the certs.
 ```
 
 `http://localhost:3000/fs/mcp` proxies to that child process.
+
+### Expose the broker publicly (OAuth 2.1)
+
+Never expose the default (unauthenticated) broker to an untrusted network. Turn
+on the resource server and provider auth:
+
+```json
+{
+    "tls": { "cert": "certs/cert.pem", "key": "certs/key.pem" },
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "https://mcp.example.com",
+        "authorizationServers": ["https://auth.example.com"],
+        "jwks": "https://auth.example.com/.well-known/jwks.json",
+        "requiredScopes": ["mcp:call"],
+        "providerSecret": "change-me"
+    }
+}
+```
+
+Clients now need a bearer token whose audience is `https://mcp.example.com/<slot>/mcp`;
+providers need the shared secret. Full details in the
+[authorization guide](../../docs/authorization.md).
 
 ### Customize tool descriptions for your org
 

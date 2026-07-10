@@ -57,6 +57,7 @@ Full instructions, environment variables, and programmatic API in [node/README.m
 - [docs/architecture.md](docs/architecture.md) — overview, roles, request flow, the reserved `_broker` slot
 - [docs/protocol.md](docs/protocol.md) — provider WebSocket framing, JSON-RPC envelopes
 - [docs/endpoints.md](docs/endpoints.md) — every HTTP and WS endpoint exposed by the broker
+- [docs/authorization.md](docs/authorization.md): OAuth 2.1 resource server, provider auth, `_all` scope filtering (opt-in)
 
 ## License
 

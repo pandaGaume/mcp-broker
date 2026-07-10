@@ -2,24 +2,41 @@
 
 A reference list of every URL the broker exposes by default. All paths are configurable; defaults shown here.
 
+> **Authorization.** By default the broker performs **no** authentication: the
+> table below describes the open, trusted-network mode. When the OAuth 2.1
+> resource server is enabled, client endpoints require a bearer token, provider
+> endpoints require a shared secret, and a discovery endpoint is added. The
+> "Auth" column notes what is required in that mode. See
+> [authorization.md](authorization.md) for the full model.
+
 ## Provider side (incoming)
 
-| Method | Path | Purpose |
-|---|---|---|
-| WS | `/provider/<encodedName>` | Dedicated WebSocket. One provider per socket. |
-| WS | `/providers` | Multiplexed WebSocket. Carries N providers via `{ provider, payload }` envelope. |
+| Method | Path | Purpose | Auth (when enabled) |
+|---|---|---|---|
+| WS | `/provider/<encodedName>` | Dedicated WebSocket. One provider per socket. | Provider shared secret |
+| WS | `/providers` | Multiplexed WebSocket. Carries N providers via `{ provider, payload }` envelope. | Provider shared secret |
 
 ## Client side (outgoing)
 
 For each connected provider slot `<name>`:
 
+| Method | Path | Purpose | Auth (when enabled) |
+|---|---|---|---|
+| WS | `/<encodedName>` | Raw WebSocket transport. | Client bearer token (at upgrade) |
+| POST | `/<encodedName>/mcp` | Streamable HTTP request. Holds the response until the provider replies. | Client bearer token |
+| GET | `/<encodedName>/mcp` | Streamable HTTP notification stream (long-lived). | Client bearer token |
+| GET | `/<encodedName>/sse` | Legacy SSE notification stream. Emits one `endpoint` event with the messages URL. | Client bearer token |
+| POST | `/<encodedName>/messages?sessionId=<uuid>` | Legacy SSE request channel. | Client bearer token |
+
+## Authorization (when the resource server is enabled)
+
 | Method | Path | Purpose |
 |---|---|---|
-| WS | `/<encodedName>` | Raw WebSocket transport. |
-| POST | `/<encodedName>/mcp` | Streamable HTTP request. Holds the response until the provider replies. |
-| GET | `/<encodedName>/mcp` | Streamable HTTP notification stream (long-lived). |
-| GET | `/<encodedName>/sse` | Legacy SSE notification stream. Emits one `endpoint` event with the messages URL. |
-| POST | `/<encodedName>/messages?sessionId=<uuid>` | Legacy SSE request channel. |
+| GET | `/.well-known/oauth-protected-resource/<encodedName>/mcp` | Protected Resource Metadata (RFC 9728) for the slot. Public, unauthenticated. Advertises the authorization server(s). |
+
+A missing/invalid client token yields `401` with a
+`WWW-Authenticate: Bearer resource_metadata="…"` header; an insufficient scope
+yields `403`. See [authorization.md](authorization.md).
 
 ## Reserved `_broker` slot — self-introspection
 
@@ -35,6 +52,10 @@ The same client-side endpoints apply, with `<encodedName>` = `_broker`:
 The broker's MCP server is in-process and connected to the routing layer via
 a loopback transport — there is no real network hop. Reachable through every
 client-side transport the broker exposes, just like a regular provider slot.
+
+Because `_broker` is a regular slot, it rides the same client authorization gate
+when auth is enabled: `/_broker/mcp` then needs a bearer token, and it can be
+placed behind a dedicated admin scope. See [authorization.md](authorization.md).
 
 ## Utility
 
