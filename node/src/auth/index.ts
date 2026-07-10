@@ -11,3 +11,5 @@ export type { ProtectedResourceMetadata } from "./resource.metadata.js";
 export { HttpAuthGuard } from "./http.auth.js";
 export { buildJwtAuth } from "./auth.config.js";
 export type { JwtAuthOptions } from "./auth.config.js";
+export { SharedSecretProviderAuthenticator } from "./provider.auth.js";
+export type { ProviderAuthenticator } from "./provider.auth.js";

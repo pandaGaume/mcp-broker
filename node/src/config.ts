@@ -64,6 +64,12 @@ export interface BrokerConfig {
         requiredScopes?: string[];
         /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
         perSlotScopes?: Record<string, string[]>;
+        /**
+         * Shared secret every provider must present to occupy a slot (via
+         * `X-Provider-Token` or `Authorization: Bearer`). Independent of client
+         * auth. Also settable via `MCP_BROKER_PROVIDER_SECRET` (which wins).
+         */
+        providerSecret?: string;
     };
 
     /** URL paths (override the defaults). */

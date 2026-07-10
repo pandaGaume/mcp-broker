@@ -21,8 +21,18 @@ export type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport, Broker
 export { VERSION, PACKAGE_NAME } from "./version.js";
 
 // OAuth 2.1 resource-server authorization.
-export { AuthError, scopesOf, JwtTokenValidator, buildResourceMetadata, HttpAuthGuard, buildJwtAuth } from "./auth/index.js";
-export type { AccessTokenClaims, TokenValidator, AuthErrorCode, Principal, ResolvedAuth, JwtValidatorOptions, ProtectedResourceMetadata, JwtAuthOptions } from "./auth/index.js";
+export { AuthError, scopesOf, JwtTokenValidator, buildResourceMetadata, HttpAuthGuard, buildJwtAuth, SharedSecretProviderAuthenticator } from "./auth/index.js";
+export type {
+    AccessTokenClaims,
+    TokenValidator,
+    AuthErrorCode,
+    Principal,
+    ResolvedAuth,
+    JwtValidatorOptions,
+    ProtectedResourceMetadata,
+    JwtAuthOptions,
+    ProviderAuthenticator,
+} from "./auth/index.js";
 
 // JSON config file used by `bin.ts` at startup. Exported so a programmatic
 // embedder can re-use the same loader against a custom path.

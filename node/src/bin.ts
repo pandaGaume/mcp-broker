@@ -88,6 +88,7 @@ envFromConfig("MCP_BROKER_AUTH_ENABLED", config.auth?.enabled === true ? "1" : u
 envFromConfig("MCP_BROKER_PUBLIC_BASE_URL", config.auth?.publicBaseUrl);
 envFromConfig("MCP_BROKER_JWKS", config.auth?.jwks);
 envFromConfig("MCP_BROKER_ISSUER", config.auth?.issuer);
+envFromConfig("MCP_BROKER_PROVIDER_SECRET", config.auth?.providerSecret);
 
 const stdioProvider = process.env["MCP_BROKER_STDIO_PROVIDER"];
 
@@ -242,6 +243,14 @@ async function main(): Promise<void> {
         });
     }
 
+    // ── Provider authentication (independent of client OAuth) ────────────────
+    // Requires every provider connecting to /provider/<slot> or /providers to
+    // present the shared secret — closes off slot occupation by strangers.
+    const providerSecret = process.env["MCP_BROKER_PROVIDER_SECRET"];
+    if (providerSecret) {
+        builder.withProviderSecret(providerSecret);
+    }
+
     const tunnel = builder.build();
     await tunnel.start();
 
@@ -264,6 +273,7 @@ async function main(): Promise<void> {
         console.log(`🌐  Local grammars        ${localGrammarsDir}`);
     }
     console.log(`🔐  Authorization         ${authEnabled ? "OAuth 2.1 (Bearer required)" : "disabled (trusted network only)"}`);
+    console.log(`🛡️   Provider auth         ${providerSecret ? "shared secret required" : "disabled"}`);
     console.log(hr);
     console.log(`   Press Ctrl+C to stop.`);
     console.log();

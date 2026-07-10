@@ -12,7 +12,7 @@ import type { Upstream } from "./upstream.js";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
 import type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker/index.js";
 import { AggregateServer } from "./broker/aggregate/aggregate.server.js";
-import { HttpAuthGuard, AuthError, type ResolvedAuth } from "./auth/index.js";
+import { HttpAuthGuard, AuthError, type ResolvedAuth, type ProviderAuthenticator } from "./auth/index.js";
 import { VERSION, PACKAGE_NAME } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -295,6 +295,16 @@ export interface WsTunnelOptions {
      * appropriate only behind a trusted network boundary.
      */
     auth?: ResolvedAuth;
+
+    /**
+     * Authenticates **providers** (engines) connecting to `/provider/<slot>` and
+     * the multiplexed `/providers` socket. Independent of {@link auth} (which
+     * guards clients): set this to stop strangers from occupying a free slot and
+     * impersonating the real engine.
+     *
+     * When `undefined` (default), provider connections are **not** authenticated.
+     */
+    providerAuth?: ProviderAuthenticator;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,9 +375,13 @@ export class WsTunnel implements BrokerContext {
     /** HTTP resource-server enforcement point, or `null` when auth is disabled. */
     private readonly _authGuard: HttpAuthGuard | null;
 
+    /** Provider (engine) authenticator, or `null` when provider auth is disabled. */
+    private readonly _providerAuth: ProviderAuthenticator | null;
+
     constructor(options: WsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
+        this._providerAuth = options.providerAuth ?? null;
     }
 
     // -------------------------------------------------------------------------
@@ -885,31 +899,53 @@ export class WsTunnel implements BrokerContext {
     }
 
     /**
-     * Builds the `ws` verifyClient hook that authenticates **raw WebSocket MCP
-     * clients** during the upgrade handshake, returning a real `401` (with the
-     * RFC 9728 `WWW-Authenticate` challenge) before the connection is accepted.
+     * Builds the `ws` verifyClient hook that authenticates every WebSocket
+     * upgrade before the connection is accepted, returning a real `401`/`403`
+     * during the handshake rather than a post-handshake close:
      *
-     * Provider-facing upgrades (`/provider/*`, `/providers`) are passed through
-     * untouched here — the provider side has its own authentication. Returns
-     * `undefined` when auth is disabled, leaving the handshake ungated.
+     * - **Raw MCP clients** (`/<slot>`) are gated by the OAuth 2.1 resource
+     *   server ({@link _authGuard}) with the RFC 9728 `WWW-Authenticate` challenge.
+     * - **Providers** (`/provider/<slot>`, `/providers`) are gated by the
+     *   {@link _providerAuth} shared-secret / custom authenticator.
+     *
+     * Each side is independent: a branch with no authenticator configured is let
+     * through unchanged. Returns `undefined` (no hook) when neither is set.
      */
     private _makeVerifyClient(): VerifyClientCallbackAsync | undefined {
         const guard = this._authGuard;
-        if (!guard) return undefined;
+        const providerAuth = this._providerAuth;
+        if (!guard && !providerAuth) return undefined;
 
         const providerPath = this._options.providerPath ?? "/provider";
         const providersPath = this._options.providersPath ?? "/providers";
 
         return (info, cb) => {
             const url = info.req.url ?? "/";
+            const isMultiplex = url === providersPath || url.startsWith(providersPath + "?");
+            const isDedicated = url.startsWith(providerPath + "/") || url === providerPath;
 
-            // Provider connections authenticate separately; let them through.
-            if (url === providersPath || url.startsWith(providersPath + "?") || url.startsWith(providerPath + "/") || url === providerPath) {
-                cb(true);
+            if (isMultiplex || isDedicated) {
+                // Provider (engine) upgrade — shared-secret / custom authenticator.
+                if (!providerAuth) {
+                    cb(true);
+                    return;
+                }
+                const slot = isDedicated ? decodeURIComponent(url.slice(providerPath.length).replace(/^\//, "").split("?")[0]) || undefined : undefined;
+                Promise.resolve(providerAuth.authenticate(info.req, slot)).then(
+                    (ok) => (ok ? cb(true) : cb(false, 401, "Unauthorized", { "WWW-Authenticate": 'Bearer realm="provider"' })),
+                    (err: unknown) => {
+                        console.error(`[broker] provider authentication error for "${slot ?? "(multiplex)"}":`, err);
+                        cb(false, 500, "server_error");
+                    }
+                );
                 return;
             }
 
-            // Raw WS MCP client: require a valid bearer for the target slot.
+            // Raw WS MCP client upgrade — OAuth 2.1 resource server.
+            if (!guard) {
+                cb(true);
+                return;
+            }
             const slot = decodeURIComponent(url.replace(/^\//, "").split("?")[0]);
             void guard.authorize(info.req, slot).then(
                 () => cb(true),

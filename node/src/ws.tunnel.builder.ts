@@ -2,7 +2,7 @@ import * as fs from "fs";
 import { WsTunnel, type WsTunnelOptions, type StaticMount } from "./ws.tunnel.js";
 import type { StdioUpstreamConfig } from "./stdio.upstream.js";
 import type { RemoteUpstreamConfig } from "./remote.upstream.js";
-import { buildJwtAuth, type JwtAuthOptions, type ResolvedAuth } from "./auth/index.js";
+import { buildJwtAuth, SharedSecretProviderAuthenticator, type JwtAuthOptions, type ResolvedAuth, type ProviderAuthenticator } from "./auth/index.js";
 
 /**
  * Fluent builder that constructs a configured {@link WsTunnel}.
@@ -38,6 +38,7 @@ export class WsTunnelBuilder {
     private _tls: { cert: string; key: string } | undefined = undefined;
     private _brokerLocalGrammarsDir: string | undefined = undefined;
     private _auth: ResolvedAuth | undefined = undefined;
+    private _providerAuth: ProviderAuthenticator | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -224,6 +225,25 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /**
+     * Authenticates providers (engines) with a custom {@link ProviderAuthenticator}.
+     * Prefer {@link withProviderSecret} for the standard shared-secret setup.
+     */
+    withProviderAuth(authenticator: ProviderAuthenticator): this {
+        this._providerAuth = authenticator;
+        return this;
+    }
+
+    /**
+     * Requires every provider connecting to `/provider/<slot>` or `/providers` to
+     * present the given shared secret (via `X-Provider-Token` or `Authorization:
+     * Bearer`). Closes off slot occupation by strangers.
+     */
+    withProviderSecret(secret: string): this {
+        this._providerAuth = new SharedSecretProviderAuthenticator(secret);
+        return this;
+    }
+
     /** Constructs and returns a configured {@link WsTunnel}. */
     build(): WsTunnel {
         const options: WsTunnelOptions = {
@@ -243,6 +263,7 @@ export class WsTunnelBuilder {
             tls: this._tls,
             brokerLocalGrammarsDir: this._brokerLocalGrammarsDir,
             auth: this._auth,
+            providerAuth: this._providerAuth,
         };
         return new WsTunnel(options);
     }
