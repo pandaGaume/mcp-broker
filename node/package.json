@@ -66,6 +66,7 @@
     },
     "dependencies": {
         "@cyanmycelium/mcp-core": "^0.3.0",
+        "jose": "^6.2.3",
         "open": "^11.0.0",
         "ws": "^8.18.0"
     },
