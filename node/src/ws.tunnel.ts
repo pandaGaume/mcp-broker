@@ -4,7 +4,7 @@ import * as https from "https";
 import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
 import type { GrammarResolverOptions, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioUpstream, type StdioUpstreamConfig } from "./stdio.upstream.js";
 import { RemoteUpstream, type RemoteUpstreamConfig } from "./remote.upstream.js";
@@ -579,7 +579,7 @@ export class WsTunnel implements BrokerContext {
             // Disable perMessageDeflate: payloads may be large base64-encoded blobs
             // (snapshots, images) that are already compressed. Deflating them wastes
             // CPU without reducing size, and caused multi-second stalls in practice.
-            this._wss = new WebSocketServer({ server: this._httpServer, perMessageDeflate: false });
+            this._wss = new WebSocketServer({ server: this._httpServer, perMessageDeflate: false, verifyClient: this._makeVerifyClient() });
 
             this._wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 const url = req.url ?? "/";
@@ -882,6 +882,47 @@ export class WsTunnel implements BrokerContext {
         console.error(`[broker] token validation error for "${providerName}":`, err);
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: "server_error" }));
+    }
+
+    /**
+     * Builds the `ws` verifyClient hook that authenticates **raw WebSocket MCP
+     * clients** during the upgrade handshake, returning a real `401` (with the
+     * RFC 9728 `WWW-Authenticate` challenge) before the connection is accepted.
+     *
+     * Provider-facing upgrades (`/provider/*`, `/providers`) are passed through
+     * untouched here — the provider side has its own authentication. Returns
+     * `undefined` when auth is disabled, leaving the handshake ungated.
+     */
+    private _makeVerifyClient(): VerifyClientCallbackAsync | undefined {
+        const guard = this._authGuard;
+        if (!guard) return undefined;
+
+        const providerPath = this._options.providerPath ?? "/provider";
+        const providersPath = this._options.providersPath ?? "/providers";
+
+        return (info, cb) => {
+            const url = info.req.url ?? "/";
+
+            // Provider connections authenticate separately; let them through.
+            if (url === providersPath || url.startsWith(providersPath + "?") || url.startsWith(providerPath + "/") || url === providerPath) {
+                cb(true);
+                return;
+            }
+
+            // Raw WS MCP client: require a valid bearer for the target slot.
+            const slot = decodeURIComponent(url.replace(/^\//, "").split("?")[0]);
+            void guard.authorize(info.req, slot).then(
+                () => cb(true),
+                (err: unknown) => {
+                    if (err instanceof AuthError) {
+                        cb(false, err.status, err.code, { "WWW-Authenticate": guard.challengeHeader(slot, err) });
+                    } else {
+                        console.error(`[broker] token validation error for WS client "${slot}":`, err);
+                        cb(false, 500, "server_error");
+                    }
+                }
+            );
+        };
     }
 
     // -------------------------------------------------------------------------

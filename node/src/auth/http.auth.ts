@@ -98,16 +98,23 @@ export class HttpAuthGuard {
     }
 
     /**
-     * Writes an RFC 9728 §5.1 `WWW-Authenticate` challenge and the matching
-     * status. Always points the client at the slot's metadata URL so it can
-     * discover the authorization server and retry.
+     * Builds the RFC 9728 §5.1 `WWW-Authenticate` header value for a challenge.
+     * Always points the client at the slot's metadata URL so it can discover the
+     * authorization server and retry. Shared by the HTTP and WebSocket paths.
      */
-    writeChallenge(res: ServerResponse, slot: string, err: AuthError): void {
+    challengeHeader(slot: string, err: AuthError): string {
         const params = [`resource_metadata="${this.metadataUrlFor(slot)}"`, `error="${err.code}"`];
         if (err.description) params.push(`error_description="${headerSafe(err.description)}"`);
         if (err.scope) params.push(`scope="${headerSafe(err.scope)}"`);
+        return `Bearer ${params.join(", ")}`;
+    }
 
-        res.setHeader("WWW-Authenticate", `Bearer ${params.join(", ")}`);
+    /**
+     * Writes an RFC 9728 §5.1 `WWW-Authenticate` challenge and the matching
+     * status to an HTTP response.
+     */
+    writeChallenge(res: ServerResponse, slot: string, err: AuthError): void {
+        res.setHeader("WWW-Authenticate", this.challengeHeader(slot, err));
         res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: err.code, error_description: err.description }));
     }
