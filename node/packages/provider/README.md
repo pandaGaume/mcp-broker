@@ -41,9 +41,33 @@ Beyond the envelope it also covers:
 
 Malformed frames decode to `undefined` rather than throwing: a tunnel socket is a public surface, and a peer sending garbage must not take the receiver down.
 
+## Transports
+
+| Transport | Use case |
+|---|---|
+| `MultiplexTransport` | Several servers published by one application. A single socket carries them all, keyed by slot name |
+| `DirectTransport` | One server, one socket, on `ws://<broker>/provider/<name>` |
+
+```ts
+import { McpServerBuilder } from "@cyanmycelium/mcp-core/server";
+import { MultiplexTransport } from "@cyanmycelium/mcp-broker-provider";
+
+const server = new McpServerBuilder()
+    .withName("scene-1")
+    .withTransport(MultiplexTransport.create("scene-1", "ws://localhost:3000/providers"))
+    .register(behavior)
+    .build();
+
+await server.start();
+```
+
+Transports created for the same tunnel URL share one WebSocket, whichever order they are opened in. Reconnection is handled by that shared socket, with exponential back-off and jitter; individual transports never reconnect on their own.
+
+`@cyanmycelium/mcp-core` is a peer dependency: the transports import its `IMessageTransport` type and nothing else at runtime, so your application keeps a single copy of it.
+
 ## Status
 
-`0.1.0` ships the protocol module. `DirectTransport` and `MultiplexTransport` move here from `@cyanmycelium/mcp-core` in the next release.
+`0.1.0` ships the protocol module and both transports. They still exist in `@cyanmycelium/mcp-core@0.4.x` as well, and are removed there in `0.5.0` — migrate your imports before upgrading.
 
 The protocol is shared with the broker and, later, with the consumer side, so it is expected to graduate into its own `@cyanmycelium/mcp-broker-core` package. Import it through the `./protocol` subpath rather than the package root and that move will cost you one line.
 

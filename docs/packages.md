@@ -85,7 +85,7 @@ The first line matters most. MCP defines stdio and Streamable HTTP; those transp
 | Package | Folder | Tag series | State |
 |---|---|---|---|
 | server | `node/packages/broker` | `node-v*` | Published, in production |
-| provider | `node/packages/provider` | `provider-v*` | Written but unpublished. Holds the envelope codec today; receives `DirectTransport` and `MultiplexTransport` next, from `@cyanmycelium/mcp-core` |
+| provider | `node/packages/provider` | `provider-v*` | Written but unpublished: envelope codec, `DirectTransport`, `MultiplexTransport`. The transports still exist in `@cyanmycelium/mcp-core@0.4.x` too, and leave it in `0.5.0` |
 | core | not created yet | `core-v*` | The envelope codec lives in `provider/src/protocol` for now, exposed as the `./protocol` subpath |
 | consumer | not created yet | `consumer-v*` | Scope to be designed; nothing exists to move into it |
 

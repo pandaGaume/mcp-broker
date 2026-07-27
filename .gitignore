@@ -27,6 +27,11 @@ certs/
 .env.local
 .env.*.local
 
+# ── Credentials ─────────────────────────────────────────────────────────────
+# Temporary npm config used for the one-off bootstrap publish of a brand-new
+# package. It contains an access token and must never be committed.
+.npmrc.bootstrap
+
 # ── IDE / OS ────────────────────────────────────────────────────────────────
 .idea/
 *.swp
