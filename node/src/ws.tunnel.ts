@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
 import type { GrammarResolverOptions, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
+import { StdioTransport } from "@cyanmycelium/mcp-core/node";
 import { StdioUpstream, type IStdioUpstreamConfig } from "./stdio.upstream.js";
 import { RemoteUpstream, type IRemoteUpstreamConfig } from "./remote.upstream.js";
 import type { IUpstream } from "./upstream.js";
@@ -401,8 +402,8 @@ export class WsTunnel implements IBrokerContext {
     /** Provider name that the stdio client transport is bridged to, or null when disabled. */
     private _stdioClientProvider: string | null = null;
 
-    /** Buffered partial line from stdin (stdio client transport). */
-    private _stdioClientBuffer = "";
+    /** mcp-core transport connected to the broker process stdin/stdout. */
+    private _stdioClientTransport: StdioTransport | null = null;
 
     /** Timestamp of the most recent successful `start()`. */
     private _startedAt: Date | null = null;
@@ -706,22 +707,19 @@ export class WsTunnel implements IBrokerContext {
                 // stdin carries Claude Desktop's JSON-RPC requests; stdout carries responses.
                 if (this._options.stdioClient) {
                     this._stdioClientProvider = this._options.stdioClient.providerName;
-                    process.stdin.setEncoding("utf8");
-                    process.stdin.on("data", (chunk: string) => {
-                        this._stdioClientBuffer += chunk;
-                        let nl: number;
-                        while ((nl = this._stdioClientBuffer.indexOf("\n")) !== -1) {
-                            const line = this._stdioClientBuffer.slice(0, nl).trim();
-                            this._stdioClientBuffer = this._stdioClientBuffer.slice(nl + 1);
-                            if (line) {
-                                const state = this._getOrCreateProviderState(this._stdioClientProvider!);
-                                this._routeFromStdioClient(state, line);
-                            }
-                        }
-                    });
-                    process.stdin.on("end", () => {
+                    const transport = new StdioTransport();
+                    this._stdioClientTransport = transport;
+                    transport.onMessage = (data: string): void => {
+                        const state = this._getOrCreateProviderState(this._stdioClientProvider!);
+                        this._routeFromStdioClient(state, data);
+                    };
+                    transport.onError = (err: Error): void => {
+                        console.error(`[broker] stdio client transport: ${err.message}`);
+                    };
+                    transport.onClose = (): void => {
                         // Client disconnected — nothing to clean up; pending sinks will time out.
-                    });
+                    };
+                    transport.connect();
                 }
 
                 this._startedAt = new Date();
@@ -806,6 +804,10 @@ export class WsTunnel implements IBrokerContext {
                 /* best-effort; continue tearing down */
             }
         }
+
+        this._stdioClientTransport?.close();
+        this._stdioClientTransport = null;
+        this._stdioClientProvider = null;
 
         return new Promise((resolve, reject) => {
             for (const state of this._providers.values()) {
@@ -1613,12 +1615,12 @@ export class WsTunnel implements IBrokerContext {
                 /* */
             }
             if (errId != null) {
-                process.stdout.write(
+                this._stdioClientTransport?.send(
                     JSON.stringify({
                         jsonrpc: "2.0",
                         id: errId,
                         error: { code: -32000, message: `Provider "${this._stdioClientProvider}" not connected` },
-                    }) + "\n"
+                    })
                 );
             }
         }
@@ -1667,7 +1669,7 @@ export class WsTunnel implements IBrokerContext {
                     sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
                     sink.res.end(data);
                 } else if (sink?.type === "stdio") {
-                    process.stdout.write(data + "\n");
+                    this._stdioClientTransport?.send(data);
                 } else if (sink?.type === "internal") {
                     sink.client.onMessage?.(data);
                 }
@@ -1706,7 +1708,7 @@ export class WsTunnel implements IBrokerContext {
         }
         // Forward notifications to the stdio client if it is watching this provider.
         if (this._stdioClientProvider && this._providers.get(this._stdioClientProvider) === state) {
-            process.stdout.write(data + "\n");
+            this._stdioClientTransport?.send(data);
         }
     }
 
@@ -1730,6 +1732,8 @@ export class WsTunnel implements IBrokerContext {
             } else if (sink.type === "http") {
                 sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
                 sink.res.end(error);
+            } else if (sink.type === "stdio") {
+                this._stdioClientTransport?.send(error);
             } else if (sink.type === "internal") {
                 sink.client.onMessage?.(error);
             }

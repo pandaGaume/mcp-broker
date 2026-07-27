@@ -3,6 +3,12 @@
 A self-contained browser demonstration of the broker's OAuth 2.1 resource
 server and hierarchical authorization features.
 
+Its industrial resource paths use the compact ISA-95 / IEC 62264-aligned
+profile documented in the
+[hierarchical authorization guide](../../../../docs/hierarchical-authorization.md).
+The policy engine remains domain-neutral and does not claim full ISA-95
+compliance.
+
 ## Run
 
 From the `node/` directory:

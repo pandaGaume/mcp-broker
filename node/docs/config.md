@@ -268,7 +268,9 @@ Opt-in. Absent or `enabled: false` ⇒ the broker performs **no** authentication
 broker becomes an OAuth 2.1 resource server: client requests need a bearer token
 and the broker publishes Protected Resource Metadata (RFC 9728). See the
 language-neutral [authorization guide](../../docs/authorization.md) for the full
-OAuth model, flows, and endpoints. The domain-neutral namespace model is in
+OAuth model, flows, and endpoints. The domain-neutral namespace model, including
+the recommended ISA-95 / IEC 62264-aligned industrial profile and UMD
+compatibility, is in
 [hierarchical authorization](../../docs/hierarchical-authorization.md).
 
 | Field | Type | Env var | Notes |

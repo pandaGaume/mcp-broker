@@ -19,6 +19,30 @@ The broker remains an OAuth 2.1 resource server and enforcement point. It does
 not issue identities, manage users, or replace the external authorization
 server.
 
+## Industrial profile: ISA-95 aligned
+
+The authorization engine is domain-neutral. For industrial deployments, the
+recommended resource hierarchy is aligned with the equipment model from
+[ISA-95 / IEC 62264](https://www.isa.org/standards-and-publications/isa-standards/isa-95-standard).
+This gives policies a recognized industrial vocabulary while keeping the same
+engine usable in non-manufacturing domains.
+
+The compact paths used in this guide map to ISA-95 concepts as follows:
+
+| Path convention | ISA-95 equipment concept |
+|---|---|
+| `enterprise-*` | Enterprise |
+| `site-*` | Site |
+| `area-*` | Area |
+| `line-*` | Production Line, a Work Center |
+| `cell-*` | Work Cell, a Work Unit |
+| Final asset segment | Project-specific physical asset extension |
+
+This is an **ISA-95-aligned profile**, not a claim of full ISA-95 compliance.
+The broker validates path syntax and authorization semantics, but it does not
+enforce ISA-95 equipment types or containment rules. UMD-style namespaces can
+map to the same paths without changing the policy engine.
+
 ## Resource paths answer "where"
 
 Resource paths are stable identities separated from slot names, transports,
@@ -27,6 +51,10 @@ hostnames, and IP addresses:
 ```text
 /enterprise-a/site-paris/area-utilities/line-3/cell-2/compressor-03
 ```
+
+In this compact example, `line-3` represents a Production Line, `cell-2`
+represents a Work Cell, and `compressor-03` is the project-specific physical
+asset.
 
 Rules:
 

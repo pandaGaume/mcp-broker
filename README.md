@@ -58,7 +58,7 @@ Full instructions, environment variables, and programmatic API in [node/README.m
 - [docs/protocol.md](docs/protocol.md) — provider WebSocket framing, JSON-RPC envelopes
 - [docs/endpoints.md](docs/endpoints.md) — every HTTP and WS endpoint exposed by the broker
 - [docs/authorization.md](docs/authorization.md): OAuth 2.1 resource server, provider auth, `_all` scope filtering (opt-in)
-- [docs/hierarchical-authorization.md](docs/hierarchical-authorization.md): roles, resource paths, inherited permissions, explicit deny, and provider namespaces
+- [docs/hierarchical-authorization.md](docs/hierarchical-authorization.md): roles, ISA-95-aligned resource paths, inherited permissions, explicit deny, and provider namespaces
 
 ## License
 

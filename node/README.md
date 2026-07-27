@@ -111,6 +111,10 @@ providers, and filter the `_all` aggregate per caller.
 
 Enabled via the `auth` config block (or env vars). Minimal `.mcp-broker/config.json`:
 
+The resource paths below use a compact ISA-95 / IEC 62264-aligned industrial
+profile. The engine remains domain-neutral, does not claim full ISA-95
+compliance, and can map UMD-style namespaces through `slotResources`.
+
 ```json
 {
     "auth": {

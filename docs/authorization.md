@@ -165,11 +165,17 @@ JWT subjects + functional capability + resource path -> allow or deny
 
 Roles define what a caller may do. Assignments bind roles to subjects and
 resource subtrees. Explicit denies override every allow. Technical slot names
-can be mapped to stable paths such as:
+can be mapped to stable paths. Industrial examples use a domain-neutral,
+ISA-95 / IEC 62264-aligned profile such as:
 
 ```text
 /enterprise/site/area/line/cell/asset
 ```
+
+Here, `line` and `cell` are compact identifiers for the ISA-95 Production Line
+and Work Cell concepts. The final asset is a project-specific extension. The
+broker does not claim or enforce full ISA-95 compliance, and UMD-style
+namespaces remain mappable to the same resource paths.
 
 The policy engine applies to direct slot transports and to every provider
 exposed through `_all`. Unauthorized aggregate calls use the same error as an
