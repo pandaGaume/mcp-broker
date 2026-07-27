@@ -1,6 +1,6 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
-import type { IInternalClient } from "../../ws/ws.interfaces.js";
-import type { AggregateScopeFilter, IPrincipal } from "../../auth/index.js";
+import type { IInternalClient } from "../../ws/ws.interfaces";
+import type { AggregateScopeFilter, IPrincipal } from "../../auth/index";
 import {
     SubjectMappingError,
     makeAuthorizationAuditEvent,
@@ -9,9 +9,9 @@ import {
     type IAuthorizationSubject,
     type IMcpOperation,
     type IPolicyAuthorization,
-} from "../../authorization/index.js";
-import { AggregateCatalog } from "./aggregate.catalog.js";
-import { ProviderClientSession } from "./provider.client.session.js";
+} from "../../authorization/index";
+import { AggregateCatalog } from "./aggregate.catalog";
+import { ProviderClientSession } from "./provider.client.session";
 
 /** MCP protocol version advertised by the aggregate server. */
 const PROTOCOL_VERSION = "2024-11-05";

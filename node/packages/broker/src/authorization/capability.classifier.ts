@@ -1,4 +1,4 @@
-import { ResourcePath, ResourcePathPattern } from "./resource.path.js";
+import { ResourcePath, ResourcePathPattern } from "./resource.path";
 
 export interface IMcpOperation {
     readonly method?: string;

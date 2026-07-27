@@ -1,4 +1,4 @@
-import { ResourcePath } from "./resource.path.js";
+import { ResourcePath } from "./resource.path";
 
 export interface ISlotResourceResolver {
     resolve(slot: string): ResourcePath | undefined;

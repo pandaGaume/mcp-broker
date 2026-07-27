@@ -1,5 +1,5 @@
-import type { IAuthorizationAuditEvent, IAuthorizationDecision, IAuthorizationSubject } from "./policy.types.js";
-import type { ResourcePath } from "./resource.path.js";
+import type { IAuthorizationAuditEvent, IAuthorizationDecision, IAuthorizationSubject } from "./policy.types";
+import type { ResourcePath } from "./resource.path";
 
 export interface IAuditContext {
     readonly subject: IAuthorizationSubject;

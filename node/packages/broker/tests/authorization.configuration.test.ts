@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConfiguredCapabilityClassifier, DefaultSlotResourceResolver, ResourcePath, compileAuthorizationPolicy, providerMayPublish, type IRoleDefinition } from "../src/index.js";
+import { ConfiguredCapabilityClassifier, DefaultSlotResourceResolver, ResourcePath, compileAuthorizationPolicy, providerMayPublish, type IRoleDefinition } from "../src/index";
 
 describe("slot resource resolution and capability classification", () => {
     it("separates technical slots from resources and reserves broker paths", () => {

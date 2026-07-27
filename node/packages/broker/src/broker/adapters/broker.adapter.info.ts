@@ -1,6 +1,6 @@
 import { McpAdapterBase, McpToolResults } from "@cyanmycelium/mcp-core";
 import type { McpResourceContent, McpToolResult } from "@cyanmycelium/mcp-core";
-import type { IBrokerContext } from "../broker.context.js";
+import type { IBrokerContext } from "../broker.context";
 
 /** URI of the static resource backing the `broker_info` snapshot. */
 export const BROKER_INFO_URI = "broker://info";

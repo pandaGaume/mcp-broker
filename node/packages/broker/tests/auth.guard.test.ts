@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { IncomingMessage, ServerResponse } from "http";
-import { HttpAuthGuard, AuthError, type IResolvedAuth, type ITokenValidator, type IAccessTokenClaims } from "../src/auth/index.js";
+import { HttpAuthGuard, AuthError, type IResolvedAuth, type ITokenValidator, type IAccessTokenClaims } from "../src/auth/index";
 
 /** A stub validator that echoes canned claims keyed by the raw token string. */
 function stubValidator(table: Record<string, IAccessTokenClaims>): ITokenValidator {

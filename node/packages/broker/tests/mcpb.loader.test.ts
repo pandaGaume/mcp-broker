@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { deflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { loadMcpbBundle } from "../src/mcpb.loader.js";
-import { unzipMcpb } from "../src/mcpb.unzip.js";
+import { loadMcpbBundle } from "../src/mcpb/mcpb.loader";
+import { unzipMcpb } from "../src/mcpb/mcpb.unzip";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(here, "fixtures", "sample-bundle");
 
-// ── Minimal ZIP packer (symmetric to src/mcpb.unzip.ts) ─────────────────────
+// ── Minimal ZIP packer (symmetric to src/mcpb/mcpb.unzip.ts) ─────────────────────
 
 function crc32(buf: Buffer): number {
     let crc = 0xffffffff;

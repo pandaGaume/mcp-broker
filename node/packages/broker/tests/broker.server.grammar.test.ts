@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startBrokerServer } from "../src/broker/index.js";
-import type { IBrokerContext } from "../src/broker/index.js";
+import { startBrokerServer } from "../src/broker/index";
+import type { IBrokerContext } from "../src/broker/index";
 import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 
 // ---------------------------------------------------------------------------

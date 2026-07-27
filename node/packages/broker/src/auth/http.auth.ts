@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types.js";
-import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata.js";
-import { SubjectMappingError } from "../authorization/index.js";
+import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types";
+import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata";
+import { SubjectMappingError } from "../authorization/index";
 
 /** Well-known prefix under which per-slot Protected Resource Metadata is served. */
 const PRM_PREFIX = "/.well-known/oauth-protected-resource/";

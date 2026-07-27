@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ResourcePath, ResourcePathPattern } from "../src/index.js";
+import { ResourcePath, ResourcePathPattern } from "../src/index";
 
 describe("ResourcePath", () => {
     it("normalizes a trailing slash deterministically", () => {

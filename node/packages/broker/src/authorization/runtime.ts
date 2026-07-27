@@ -1,8 +1,8 @@
-import { ConfiguredCapabilityClassifier, type ICapabilityClassifier } from "./capability.classifier.js";
-import { ConfigPolicyEngine } from "./policy.engine.js";
-import type { IAuthorizationAuditConfig, IAuthorizationPolicyConfig, IPolicyEngine } from "./policy.types.js";
-import { DefaultSlotResourceResolver, type ISlotResourceResolver } from "./slot.resource.js";
-import { JwtSubjectMapper, type ISubjectMapper } from "./subject.mapper.js";
+import { ConfiguredCapabilityClassifier, type ICapabilityClassifier } from "./capability.classifier";
+import { ConfigPolicyEngine } from "./policy.engine";
+import type { IAuthorizationAuditConfig, IAuthorizationPolicyConfig, IPolicyEngine } from "./policy.types";
+import { DefaultSlotResourceResolver, type ISlotResourceResolver } from "./slot.resource";
+import { JwtSubjectMapper, type ISubjectMapper } from "./subject.mapper";
 
 export interface IPolicyAuthorization {
     readonly engine: IPolicyEngine;

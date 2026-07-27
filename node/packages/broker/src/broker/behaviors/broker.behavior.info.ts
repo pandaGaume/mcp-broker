@@ -1,8 +1,8 @@
 import { McpBehavior } from "@cyanmycelium/mcp-core";
 import type { McpResource, McpTool } from "@cyanmycelium/mcp-core";
-import { BROKER_INFO_URI, BrokerInfoAdapter } from "../adapters/broker.adapter.info.js";
-import { brokerBaselineResourceDescription, brokerBaselineResourceName, brokerBaselineToolDescription } from "../broker.grammars.js";
-import type { IBrokerContext } from "../broker.context.js";
+import { BROKER_INFO_URI, BrokerInfoAdapter } from "../adapters/broker.adapter.info";
+import { brokerBaselineResourceDescription, brokerBaselineResourceName, brokerBaselineToolDescription } from "../broker.grammars";
+import type { IBrokerContext } from "../broker.context";
 
 /**
  * Exposes basic broker identity (name, version, uptime, listening config) as

@@ -52,9 +52,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import open from "open";
-import { WsTunnelBuilder } from "./index.js";
-import { loadBrokerConfig } from "./config.js";
-import { loadMcpbBundle } from "./mcpb.loader.js";
+import { WsTunnelBuilder } from "./index";
+import { loadBrokerConfig } from "./config";
+import { loadMcpbBundle } from "./mcpb/mcpb.loader";
 
 // ---------------------------------------------------------------------------
 // Configuration

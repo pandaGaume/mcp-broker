@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index.js";
+import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index";
 
 const validator: ITokenValidator = {
     async validate(token, resource) {

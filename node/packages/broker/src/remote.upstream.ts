@@ -1,5 +1,5 @@
-import type { IUpstream } from "./upstream.js";
-import { createRemoteTransport, detectTransport, type IRemoteTransport, type RemoteTransportKind } from "./remote.transports.js";
+import type { IUpstream } from "./upstream";
+import { createRemoteTransport, detectTransport, type IRemoteTransport, type RemoteTransportKind } from "./remote.transports";
 
 export interface IRemoteUpstreamConfig {
     /** Provider slot name this upstream is bound to. */

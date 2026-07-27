@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey } from "jose";
-import { AuthError, type IAccessTokenClaims, type ITokenValidator } from "./auth.types.js";
+import { AuthError, type IAccessTokenClaims, type ITokenValidator } from "./auth.types";
 
 /**
  * Options for {@link JwtTokenValidator}. `jwksUri` points at the authorization

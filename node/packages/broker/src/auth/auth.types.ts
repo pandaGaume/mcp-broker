@@ -7,7 +7,7 @@
  * auth module builds on, so a host can drop in a custom {@link ITokenValidator}
  * (e.g. RFC 7662 introspection) without touching the enforcement code.
  */
-import type { IAuthorizationSubject, IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index.js";
+import type { IAuthorizationSubject, IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
 
 /**
  * The subset of OAuth 2.1 / RFC 9068 access-token claims a resource server

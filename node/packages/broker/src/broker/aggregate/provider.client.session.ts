@@ -1,5 +1,5 @@
-import type { IInternalClient } from "../../ws/ws.interfaces.js";
-import type { ICatalogTool, ICatalogPrompt } from "./aggregate.catalog.js";
+import type { IInternalClient } from "../../ws/ws.interfaces";
+import type { ICatalogTool, ICatalogPrompt } from "./aggregate.catalog";
 
 /** MCP protocol version the aggregate sessions negotiate with sub-providers. */
 const PROTOCOL_VERSION = "2024-11-05";

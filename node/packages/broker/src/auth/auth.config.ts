@@ -1,6 +1,6 @@
-import { JwtTokenValidator } from "./jwt.validator.js";
-import type { AggregateScopeFilter, IResolvedAuth } from "./auth.types.js";
-import { compileAuthorizationPolicy, DefaultSlotResourceResolver, hasAuthorizationPolicies, type IAuthorizationPolicyConfig } from "../authorization/index.js";
+import { JwtTokenValidator } from "./jwt.validator";
+import type { AggregateScopeFilter, IResolvedAuth } from "./auth.types";
+import { compileAuthorizationPolicy, DefaultSlotResourceResolver, hasAuthorizationPolicies, type IAuthorizationPolicyConfig } from "../authorization/index";
 
 /**
  * High-level options for the default JWT/JWKS resource-server setup. Mirrors the

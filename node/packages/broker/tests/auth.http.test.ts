@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
-import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index.js";
+import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index";
 
 /** `Response.json()` yields `unknown`; this is the shape these tests assert on. */
 type JsonRpcBody = { result?: { tools?: unknown[] }; error?: { code: number; message: string } };

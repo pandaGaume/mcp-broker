@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConfigPolicyEngine, ResourcePath, type IAuthorizationSubject } from "../src/index.js";
+import { ConfigPolicyEngine, ResourcePath, type IAuthorizationSubject } from "../src/index";
 
 const alice: IAuthorizationSubject = { ids: ["user:alice", "group:maintenance"] };
 const resource = ResourcePath.parse("/enterprise/site/area/line/cell/asset");

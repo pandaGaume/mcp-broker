@@ -49,11 +49,10 @@
         }
     },
     "scripts": {
-        "build": "npm run clean && npm run compile && npm run copy:assets",
-        "clean": "rimraf dist tsconfig.build.tsbuildinfo",
-        "compile": "tsc -b tsconfig.build.json",
+        "build": "tsup && npm run copy:assets",
+        "clean": "rimraf dist",
         "copy:assets": "node scripts/copy-assets.mjs",
-        "watch": "tsc -b tsconfig.build.json -w",
+        "watch": "tsup --watch",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "start": "node dist/bin.js",
         "pack:mcpb": "npm run build && node scripts/pack-mcpb.mjs",
@@ -87,6 +86,7 @@
         "rimraf": "~6.0.1",
         "selfsigned": "^2.4.1",
         "tslib": "^2.8.1",
+        "tsup": "^8.5.1",
         "typescript": "^5.4.0",
         "vitest": "^4.1.9"
     }

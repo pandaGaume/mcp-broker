@@ -11,12 +11,12 @@ import { StdioTransport } from "@cyanmycelium/mcp-core/node";
 // slots — so sharing the provider package's wire contract is the natural way to
 // keep one definition of the envelope rather than two that drift.
 import { decodeEnvelope, encodeEnvelope, encodeErrorEnvelope, envelopeFrame, TunnelErrorCodes } from "@cyanmycelium/mcp-broker-provider/protocol";
-import { StdioUpstream } from "../stdio.upstream.js";
-import { RemoteUpstream } from "../remote.upstream.js";
-import type { IUpstream } from "../upstream.js";
-import { startBrokerServer, BROKER_PROVIDER_NAME } from "../broker/index.js";
-import type { IBrokerContext, IBrokerProviderInfo, BrokerProviderTransport } from "../broker/index.js";
-import { AggregateServer } from "../broker/aggregate/aggregate.server.js";
+import { StdioUpstream } from "../stdio.upstream";
+import { RemoteUpstream } from "../remote.upstream";
+import type { IUpstream } from "../upstream";
+import { startBrokerServer, BROKER_PROVIDER_NAME } from "../broker/index";
+import type { IBrokerContext, IBrokerProviderInfo, BrokerProviderTransport } from "../broker/index";
+import { AggregateServer } from "../broker/aggregate/aggregate.server";
 import {
     HttpAuthGuard,
     AuthError,
@@ -25,7 +25,7 @@ import {
     type IProviderAuthenticator,
     type IPrincipal,
     type IProviderPrincipal,
-} from "../auth/index.js";
+} from "../auth/index";
 import {
     DefaultSlotResourceResolver,
     SubjectMappingError,
@@ -36,9 +36,9 @@ import {
     type IPolicyAuthorization,
     type ResourcePath,
     type ISlotResourceResolver,
-} from "../authorization/index.js";
-import { VERSION, PACKAGE_NAME } from "../version.js";
-import type { IInternalClient, IProviderState, IWsTunnelOptions, McpEndpointKind } from "./ws.interfaces.js";
+} from "../authorization/index";
+import { VERSION, PACKAGE_NAME } from "../version";
+import type { IInternalClient, IProviderState, IWsTunnelOptions, McpEndpointKind } from "./ws.interfaces";
 
 // ---------------------------------------------------------------------------
 // Static-file helpers

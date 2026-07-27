@@ -1,4 +1,4 @@
-import type { IAuthorizationSubject, ISubjectMappingConfig } from "./policy.types.js";
+import type { IAuthorizationSubject, ISubjectMappingConfig } from "./policy.types";
 
 export interface ISubjectMapper {
     map(claims: Readonly<Record<string, unknown>>): IAuthorizationSubject;

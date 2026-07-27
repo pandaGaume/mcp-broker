@@ -1,6 +1,6 @@
 import { McpAdapterBase, McpToolResults } from "@cyanmycelium/mcp-core";
 import type { McpResourceContent, McpToolResult } from "@cyanmycelium/mcp-core";
-import type { IBrokerContext, IBrokerProviderInfo } from "../broker.context.js";
+import type { IBrokerContext, IBrokerProviderInfo } from "../broker.context";
 
 /** URI of the static resource that lists every provider slot. */
 export const PROVIDERS_URI = "broker://providers";

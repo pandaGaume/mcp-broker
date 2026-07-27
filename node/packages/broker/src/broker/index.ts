@@ -1,9 +1,9 @@
-export { BrokerInfoBehavior } from "./behaviors/broker.behavior.info.js";
-export { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers.js";
-export { BrokerInfoAdapter, BROKER_INFO_URI } from "./adapters/broker.adapter.info.js";
-export { BrokerProvidersAdapter, PROVIDERS_URI, PROVIDER_URI_TEMPLATE } from "./adapters/broker.adapter.providers.js";
-export { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker.server.js";
-export type { IStartBrokerServerOptions, StartBrokerServerOptions } from "./broker.server.js";
+export { BrokerInfoBehavior } from "./behaviors/broker.behavior.info";
+export { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers";
+export { BrokerInfoAdapter, BROKER_INFO_URI } from "./adapters/broker.adapter.info";
+export { BrokerProvidersAdapter, PROVIDERS_URI, PROVIDER_URI_TEMPLATE } from "./adapters/broker.adapter.providers";
+export { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker.server";
+export type { IStartBrokerServerOptions, StartBrokerServerOptions } from "./broker.server";
 export {
     brokerBaselineGrammar,
     brokerBaselinePropertyDescription,
@@ -17,6 +17,6 @@ export {
     iterBrokerGrammarsFrom,
     loadBrokerGrammar,
     parseBrokerGrammarStem,
-} from "./broker.grammars.js";
-export type { IBrokerGrammarEntry, BrokerGrammarEntry, BrokerLocale, BrokerUserAgent } from "./broker.grammars.js";
-export type { IBrokerContext, IBrokerProviderInfo, BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker.context.js";
+} from "./broker.grammars";
+export type { IBrokerGrammarEntry, BrokerGrammarEntry, BrokerLocale, BrokerUserAgent } from "./broker.grammars";
+export type { IBrokerContext, IBrokerProviderInfo, BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker.context";

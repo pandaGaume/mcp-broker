@@ -1,10 +1,10 @@
 import type { ServerResponse } from "http";
 import type { WebSocket } from "ws";
 import type { GrammarResolverOptions } from "@cyanmycelium/mcp-core";
-import type { IStdioUpstreamConfig } from "../stdio.upstream.js";
-import type { IRemoteUpstreamConfig } from "../remote.upstream.js";
-import type { IResolvedAuth, IProviderAuthenticator } from "../auth/index.js";
-import type { IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index.js";
+import type { IStdioUpstreamConfig } from "../stdio.upstream";
+import type { IRemoteUpstreamConfig } from "../remote.upstream";
+import type { IResolvedAuth, IProviderAuthenticator } from "../auth/index";
+import type { IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
 
 /**
  * Every type the WebSocket tunnel exchanges or is configured with.

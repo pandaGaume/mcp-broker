@@ -1,6 +1,6 @@
-import { validateCapability } from "./capability.classifier.js";
-import type { IAuthorizationDecision, IAuthorizationRequest, IDenyPolicy, IPolicyAssignment, IPolicyEngine, IRoleDefinition } from "./policy.types.js";
-import { ResourcePathPattern } from "./resource.path.js";
+import { validateCapability } from "./capability.classifier";
+import type { IAuthorizationDecision, IAuthorizationRequest, IDenyPolicy, IPolicyAssignment, IPolicyEngine, IRoleDefinition } from "./policy.types";
+import { ResourcePathPattern } from "./resource.path";
 
 interface ICompiledAssignment {
     readonly id: string;

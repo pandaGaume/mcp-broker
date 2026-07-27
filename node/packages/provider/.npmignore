@@ -7,6 +7,5 @@ tests/
 .prettierrc
 .prettierignore
 tsconfig.json
-tsconfig.build.json
 vitest.config.ts
 .npmrc

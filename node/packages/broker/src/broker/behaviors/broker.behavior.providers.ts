@@ -1,6 +1,6 @@
 import { McpBehavior } from "@cyanmycelium/mcp-core";
 import type { McpResource, McpResourceTemplate, McpTool } from "@cyanmycelium/mcp-core";
-import { BrokerProvidersAdapter, PROVIDERS_URI, PROVIDER_URI_TEMPLATE } from "../adapters/broker.adapter.providers.js";
+import { BrokerProvidersAdapter, PROVIDERS_URI, PROVIDER_URI_TEMPLATE } from "../adapters/broker.adapter.providers";
 import {
     brokerBaselinePropertyDescription,
     brokerBaselineResourceDescription,
@@ -8,8 +8,8 @@ import {
     brokerBaselineResourceTemplateDescription,
     brokerBaselineResourceTemplateName,
     brokerBaselineToolDescription,
-} from "../broker.grammars.js";
-import type { IBrokerContext } from "../broker.context.js";
+} from "../broker.grammars";
+import type { IBrokerContext } from "../broker.context";
 
 /**
  * Exposes the broker's provider slots so an MCP agent can discover what is

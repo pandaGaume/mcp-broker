@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { WebSocket } from "ws";
-import { WsTunnelBuilder } from "../src/index.js";
-import type { WsTunnel } from "../src/ws/ws.tunnel.js";
+import { WsTunnelBuilder } from "../src/index";
+import type { WsTunnel } from "../src/ws/ws.tunnel";
 
 const PORT = 3913;
 const BASE = `ws://127.0.0.1:${PORT}`;

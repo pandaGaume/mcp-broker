@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as http from "node:http";
 import { WebSocket } from "ws";
-import { WsTunnelBuilder } from "../src/index.js";
-import type { WsTunnel } from "../src/ws/ws.tunnel.js";
+import { WsTunnelBuilder } from "../src/index";
+import type { WsTunnel } from "../src/ws/ws.tunnel";
 
 const BROKER_PORT = 3914;
 const FAKE_PORT = 3915;

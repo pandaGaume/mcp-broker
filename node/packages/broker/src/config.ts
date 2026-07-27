@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { IAuthorizationPolicyConfig } from "./authorization/index.js";
+import type { IAuthorizationPolicyConfig } from "./authorization/index";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
     /** Master switch. Absent/`false` keeps the broker unauthenticated. */

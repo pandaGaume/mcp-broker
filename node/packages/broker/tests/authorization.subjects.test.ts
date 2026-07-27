@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { JwtSubjectMapper, SubjectMappingError } from "../src/index.js";
+import { JwtSubjectMapper, SubjectMappingError } from "../src/index";
 
 describe("JwtSubjectMapper", () => {
     const mapper = new JwtSubjectMapper({

@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from "node:child_process";
-import type { IUpstream } from "./upstream.js";
+import type { IUpstream } from "./upstream";
 
 // ---------------------------------------------------------------------------
 // Configuration

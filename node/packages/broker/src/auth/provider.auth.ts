@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "crypto";
 import type { IncomingMessage } from "http";
-import { ResourcePath, ResourcePathPattern } from "../authorization/index.js";
+import { ResourcePath, ResourcePathPattern } from "../authorization/index";
 
 export interface IProviderPrincipal {
     readonly id: string;

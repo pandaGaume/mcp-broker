@@ -1,9 +1,9 @@
 import { McpServerBuilder, LoopbackTransport } from "@cyanmycelium/mcp-core";
 import type { GrammarResolverOptions, IMcpServer, IMessageTransport } from "@cyanmycelium/mcp-core";
-import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info.js";
-import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers.js";
-import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars.js";
-import type { IBrokerContext } from "./broker.context.js";
+import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info";
+import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers";
+import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars";
+import type { IBrokerContext } from "./broker.context";
 
 /**
  * Reserved provider slot name under which the broker exposes itself as an MCP

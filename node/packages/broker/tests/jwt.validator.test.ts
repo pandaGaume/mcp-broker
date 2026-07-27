@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
-import { JwtTokenValidator, AuthError } from "../src/auth/index.js";
+import { JwtTokenValidator, AuthError } from "../src/auth/index";
 
 const ISSUER = "https://as.test";
 const RESOURCE = "https://broker.test/weather/mcp";

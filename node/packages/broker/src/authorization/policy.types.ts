@@ -1,4 +1,4 @@
-import type { ResourcePath } from "./resource.path.js";
+import type { ResourcePath } from "./resource.path";
 
 export interface IAuthorizationSubject {
     readonly ids: readonly string[];

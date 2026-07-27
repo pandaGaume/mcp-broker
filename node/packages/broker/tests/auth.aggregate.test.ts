@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { AggregateServer } from "../src/broker/aggregate/aggregate.server.js";
-import type { IInternalClient } from "../src/ws/ws.interfaces.js";
-import type { AggregateScopeFilter, IPrincipal } from "../src/index.js";
+import { AggregateServer } from "../src/broker/aggregate/aggregate.server";
+import type { IInternalClient } from "../src/ws/ws.interfaces";
+import type { AggregateScopeFilter, IPrincipal } from "../src/index";
 
 /** A fake in-process provider that answers initialize / list / call. */
 function fakeProvider(tools: { name: string }[]): IInternalClient {

@@ -22,8 +22,8 @@ import { createPublicKey, verify, X509Certificate, type KeyObject } from "node:c
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { unzipMcpb } from "./mcpb.unzip.js";
-import type { IStdioUpstreamConfig } from "./stdio.upstream.js";
+import { unzipMcpb } from "./mcpb.unzip";
+import type { IStdioUpstreamConfig } from "../stdio.upstream";
 
 /** A `.mcpb` bundle entry from the broker config file. */
 export interface IMcpbBundleConfig {

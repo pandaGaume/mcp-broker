@@ -12,8 +12,8 @@ import {
     type IResolvedAuth,
     type ITokenValidator,
     type WsTunnel,
-} from "../src/index.js";
-import { AggregateServer } from "../src/broker/aggregate/aggregate.server.js";
+} from "../src/index";
+import { AggregateServer } from "../src/broker/aggregate/aggregate.server";
 
 const validator: ITokenValidator = {
     async validate(token, resource) {

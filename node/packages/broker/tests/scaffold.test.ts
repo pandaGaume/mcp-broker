@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WsTunnelBuilder } from "../src/index.js";
+import { WsTunnelBuilder } from "../src/index";
 
 describe("WsTunnelBuilder", () => {
     it("builds a tunnel without throwing", () => {
