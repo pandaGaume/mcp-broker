@@ -1,6 +1,6 @@
-export { WsTunnel } from "./ws.tunnel.js";
-export { WsTunnelBuilder } from "./ws.tunnel.builder.js";
-export type { IInternalClient, IWsTunnelOptions, IStaticMount, InternalClient, WsTunnelOptions, StaticMount } from "./ws.tunnel.js";
+export { WsTunnel } from "./ws/ws.tunnel.js";
+export { WsTunnelBuilder } from "./ws/ws.tunnel.builder.js";
+export type { IInternalClient, IWsTunnelOptions, IStaticMount, InternalClient, WsTunnelOptions, StaticMount } from "./ws/ws.interfaces.js";
 export { StdioUpstream } from "./stdio.upstream.js";
 export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream.js";
 export { RemoteUpstream } from "./remote.upstream.js";

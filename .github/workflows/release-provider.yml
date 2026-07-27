@@ -43,6 +43,8 @@ jobs:
             - run: npm ci
             - run: npm run lint
             - run: npm run build
+            # Type-checks the test files too, which `build` skips.
+            - run: npm run typecheck
             - run: npm test
 
             - run: npm publish --workspace @cyanmycelium/mcp-broker-provider --access public --provenance

@@ -1,8 +1,9 @@
 import * as fs from "fs";
-import { WsTunnel, type IWsTunnelOptions, type IStaticMount } from "./ws.tunnel.js";
-import type { IStdioUpstreamConfig } from "./stdio.upstream.js";
-import type { IRemoteUpstreamConfig } from "./remote.upstream.js";
-import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "./auth/index.js";
+import { WsTunnel } from "./ws.tunnel.js";
+import type { IStaticMount, IWsTunnelOptions } from "./ws.interfaces.js";
+import type { IStdioUpstreamConfig } from "../stdio.upstream.js";
+import type { IRemoteUpstreamConfig } from "../remote.upstream.js";
+import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "../auth/index.js";
 import {
     authorizationWithEngine,
     compileAuthorizationPolicy,
@@ -10,7 +11,7 @@ import {
     type IPolicyAuthorization,
     type IPolicyEngine,
     type ISlotResourceResolver,
-} from "./authorization/index.js";
+} from "../authorization/index.js";
 
 /**
  * Fluent builder that constructs a configured {@link WsTunnel}.

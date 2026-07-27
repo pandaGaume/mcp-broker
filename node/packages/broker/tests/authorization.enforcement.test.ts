@@ -103,7 +103,8 @@ describe("hierarchical policy enforcement on direct slots", () => {
             body: LIST,
         });
         expect(response.status).toBe(200);
-        expect((await response.json()).error?.message).toContain("not connected");
+        const body = (await response.json()) as { error?: { code: number; message: string } };
+        expect(body.error?.message).toContain("not connected");
     });
 
     it("denies a caller with no matching assignment", async () => {
@@ -114,7 +115,8 @@ describe("hierarchical policy enforcement on direct slots", () => {
             body: LIST,
         });
         expect(response.status).toBe(403);
-        expect((await response.json()).error).toMatchObject({ code: -32001, message: "Forbidden" });
+        const body = (await response.json()) as { error?: { code: number; message: string } };
+        expect(body.error).toMatchObject({ code: -32001, message: "Forbidden" });
     });
 
     it("applies an exact explicit deny over an inherited role grant", async () => {

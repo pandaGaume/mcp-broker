@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index.js";
 
+/** `Response.json()` yields `unknown`; this is the shape these tests assert on. */
+type JsonRpcBody = { result?: { tools?: unknown[] }; error?: { code: number; message: string } };
+
 /** Validator that accepts "good" (with scope) and "noscope"; rejects the rest. */
 const validator: ITokenValidator = {
     async validate(token, resource) {
@@ -71,7 +74,7 @@ describe("resource-server auth over HTTP", () => {
         const base = await start(true);
         const res = await fetch(`${base}/weather/mcp`, { method: "POST", headers: { authorization: "Bearer good" }, body: RPC });
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = (await res.json()) as JsonRpcBody;
         expect(body.error?.code).toBe(-32000);
         expect(String(body.error?.message)).toContain("not connected");
     });
@@ -90,7 +93,7 @@ describe("resource-server auth over HTTP", () => {
         // MCP POST reaches the handler with no token.
         const res = await fetch(`${base}/weather/mcp`, { method: "POST", body: RPC });
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = (await res.json()) as JsonRpcBody;
         expect(body.error?.code).toBe(-32000);
     });
 });

@@ -1,4 +1,4 @@
-import type { IInternalClient } from "../../ws.tunnel.js";
+import type { IInternalClient } from "../../ws/ws.interfaces.js";
 import type { ICatalogTool, ICatalogPrompt } from "./aggregate.catalog.js";
 
 /** MCP protocol version the aggregate sessions negotiate with sub-providers. */

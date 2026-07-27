@@ -43,6 +43,8 @@ jobs:
             - run: npm ci
             - run: npm run lint
             - run: npm run build
+            # Type-checks the test files too, which `build` skips.
+            - run: npm run typecheck
             - run: npm test
 
             # `npm ci` above installs the whole workspace, so target the package

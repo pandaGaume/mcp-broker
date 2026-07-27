@@ -54,6 +54,7 @@
         "compile": "tsc -b tsconfig.build.json",
         "copy:assets": "node scripts/copy-assets.mjs",
         "watch": "tsc -b tsconfig.build.json -w",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
         "start": "node dist/bin.js",
         "pack:mcpb": "npm run build && node scripts/pack-mcpb.mjs",
         "test": "vitest run",
@@ -69,7 +70,7 @@
     },
     "dependencies": {
         "@cyanmycelium/mcp-broker-provider": "^0.1.0",
-        "@cyanmycelium/mcp-core": "^0.4.0",
+        "@cyanmycelium/mcp-core": "^0.5.0",
         "jose": "^6.2.3",
         "open": "^11.0.0",
         "ws": "^8.18.0"

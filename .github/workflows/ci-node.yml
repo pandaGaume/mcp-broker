@@ -37,4 +37,6 @@ jobs:
             - run: npm ci
             - run: npm run lint
             - run: npm run build
+            # Type-checks the test files too, which `build` skips and vitest never verifies.
+            - run: npm run typecheck
             - run: npm test

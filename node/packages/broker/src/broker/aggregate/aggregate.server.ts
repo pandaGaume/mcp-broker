@@ -1,5 +1,5 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
-import type { IInternalClient } from "../../ws.tunnel.js";
+import type { IInternalClient } from "../../ws/ws.interfaces.js";
 import type { AggregateScopeFilter, IPrincipal } from "../../auth/index.js";
 import {
     SubjectMappingError,

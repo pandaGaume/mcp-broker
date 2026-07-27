@@ -121,7 +121,7 @@ describe("_broker introspection is gated once auth is enabled", () => {
         const { port } = await start({ auth });
         const res = await fetch(`http://127.0.0.1:${port}/_broker/mcp`, { method: "POST", headers: { authorization: "Bearer admin" }, body: RPC });
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = (await res.json()) as { result?: { tools?: unknown[] }; error?: unknown };
         // The broker loopback answers for real — a tools/list result, not an error.
         expect(body.result?.tools).toBeDefined();
         expect(body.error).toBeUndefined();

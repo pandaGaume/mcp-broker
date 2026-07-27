@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
-import { SignJWT, exportJWK, generateKeyPair, type KeyLike } from "jose";
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { JwtTokenValidator, AuthError } from "../src/auth/index.js";
 
 const ISSUER = "https://as.test";
@@ -10,7 +10,11 @@ const KID = "test-key-1";
 
 let jwksServer: Server;
 let jwksUri: string;
-let privateKey: KeyLike;
+// Derived from the generator rather than named: jose v6 already dropped the
+// `KeyLike` this used to import, and this form cannot go stale again.
+type GeneratedKey = Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+
+let privateKey: GeneratedKey;
 let validator: JwtTokenValidator;
 
 /** Signs an RS256 JWT for the test key, overriding fields per case. */

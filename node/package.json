@@ -17,6 +17,8 @@
         "build": "npm run build --workspace @cyanmycelium/mcp-broker-provider && npm run build --workspace @cyanmycelium/mcp-broker",
         "clean": "npm run clean --workspaces --if-present",
         "compile": "npm run compile --workspaces --if-present",
+        "//typecheck": "Covers what `compile` cannot: tsconfig.build.json excludes tests, and vitest strips types without checking them, so test files are otherwise never verified.",
+        "typecheck": "npm run typecheck --workspaces --if-present",
         "test": "npm run test --workspaces --if-present",
         "lint": "npm run lint --workspaces --if-present",
         "lint:fix": "npm run lint:fix --workspaces --if-present",
