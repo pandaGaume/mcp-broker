@@ -22,6 +22,92 @@
         ]
     },
 
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "https://mcp.factory.local",
+        "authorizationServers": [
+            "https://identity.factory.local"
+        ],
+        "jwks": "https://identity.factory.local/.well-known/jwks.json",
+        "requiredScopes": ["mcp:call"],
+        "perSlotScopes": {
+            "_broker": ["broker:admin"]
+        },
+        "subjectMapping": {
+            "userClaim": "sub",
+            "groupClaims": ["groups"],
+            "clientClaim": "client_id"
+        },
+        "roles": {
+            "viewer": {
+                "capabilities": [
+                    "mcp.resources.read",
+                    "mcp.tools.list",
+                    "mcp.prompts.read"
+                ]
+            },
+            "maintenance": {
+                "inherits": ["viewer"],
+                "capabilities": [
+                    "mcp.tools.call",
+                    "mcp.tools.diagnose",
+                    "mcp.tools.configure-analysis"
+                ]
+            },
+            "operator": {
+                "inherits": ["viewer"],
+                "capabilities": ["mcp.tools.operate"]
+            },
+            "administrator": {
+                "capabilities": ["*"]
+            }
+        },
+        "assignments": [
+            {
+                "id": "maintenance-area-a",
+                "subject": "group:maintenance-area-a",
+                "role": "maintenance",
+                "resource": "/enterprise-a/site-paris/area-a/**"
+            },
+            {
+                "id": "energy-team",
+                "subject": "group:energy-team",
+                "role": "viewer",
+                "resource": "/enterprise-a/site-paris/**"
+            }
+        ],
+        "denies": [
+            {
+                "id": "protect-critical-furnace",
+                "subject": "group:maintenance-area-a",
+                "capabilities": [
+                    "mcp.tools.configure-analysis",
+                    "mcp.tools.operate"
+                ],
+                "resource": "/enterprise-a/site-paris/area-a/line-2/cell-4/critical-furnace"
+            }
+        ],
+        "slotResources": {
+            "spoony-00452": "/enterprise-a/site-paris/area-a/line-3/cell-2/motor-7",
+            "site-energy": "/enterprise-a/site-paris"
+        },
+        "toolCapabilities": {
+            "get_electrical_state": "mcp.resources.read",
+            "diagnose_motor": "mcp.tools.diagnose",
+            "reset_baseline": "mcp.tools.configure-analysis",
+            "start_motor": "mcp.tools.operate"
+        },
+        "providerToolCapabilities": {
+            "/enterprise-a/site-paris/area-a/**": {
+                "start_motor": "mcp.tools.operate"
+            }
+        },
+        "audit": {
+            "logAllowed": false
+        },
+        "providerSecret": "change-me"
+    },
+
     "stdioUpstreams": [
         {
             "name":    "fs",

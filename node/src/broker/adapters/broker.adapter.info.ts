@@ -1,16 +1,16 @@
 import { McpAdapterBase, McpToolResults } from "@cyanmycelium/mcp-core";
 import type { McpResourceContent, McpToolResult } from "@cyanmycelium/mcp-core";
-import type { BrokerContext } from "../broker.context.js";
+import type { IBrokerContext } from "../broker.context.js";
 
 /** URI of the static resource backing the `broker_info` snapshot. */
 export const BROKER_INFO_URI = "broker://info";
 
 /**
  * Read-only adapter that produces a snapshot of the broker's identity and
- * configuration. Backed by the live {@link BrokerContext}.
+ * configuration. Backed by the live {@link IBrokerContext}.
  */
 export class BrokerInfoAdapter extends McpAdapterBase {
-    constructor(private readonly _context: BrokerContext) {
+    constructor(private readonly _context: IBrokerContext) {
         super("broker");
     }
 

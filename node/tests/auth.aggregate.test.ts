@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { AggregateServer } from "../src/broker/aggregate/aggregate.server.js";
-import type { InternalClient } from "../src/ws.tunnel.js";
-import type { AggregateScopeFilter, Principal } from "../src/index.js";
+import type { IInternalClient } from "../src/ws.tunnel.js";
+import type { AggregateScopeFilter, IPrincipal } from "../src/index.js";
 
 /** A fake in-process provider that answers initialize / list / call. */
-function fakeProvider(tools: { name: string }[]): InternalClient {
-    const client: InternalClient = {
+function fakeProvider(tools: { name: string }[]): IInternalClient {
+    const client: IInternalClient = {
         onMessage: null,
         onClose: null,
         send(message: string) {
@@ -38,15 +38,15 @@ const filter: AggregateScopeFilter = (principal, provider) => {
     return need.some((s) => principal.scopes.has(s));
 };
 
-const alice: Principal = { claims: { sub: "alice" }, scopes: new Set(["see:alpha"]) };
-const bob: Principal = { claims: { sub: "bob" }, scopes: new Set(["see:beta"]) };
+const alice: IPrincipal = { claims: { sub: "alice" }, scopes: new Set(["see:alpha"]) };
+const bob: IPrincipal = { claims: { sub: "bob" }, scopes: new Set(["see:beta"]) };
 
 let agg: AggregateServer;
 let counter = 0;
 const pending = new Map<number, (m: Record<string, unknown>) => void>();
 
 /** Issues a request to the aggregate as `principal` and resolves the reply. */
-function rpc(principal: Principal | null, method: string, params?: unknown): Promise<Record<string, unknown>> {
+function rpc(principal: IPrincipal | null, method: string, params?: unknown): Promise<Record<string, unknown>> {
     return new Promise((resolve) => {
         const id = ++counter;
         pending.set(id, resolve);

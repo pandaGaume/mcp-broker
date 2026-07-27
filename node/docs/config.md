@@ -41,6 +41,10 @@ and adapt:
 cp -r node_modules/@cyanmycelium/mcp-broker/.mcp-broker.example .mcp-broker
 ```
 
+Property-by-property educational guides are available in
+[English](../.mcp-broker.example/CONFIGURATION-EN.md) and
+[French](../.mcp-broker.example/CONFIGURATION-FR.md).
+
 ### Config file discovery
 
 The broker looks in this order:
@@ -264,7 +268,8 @@ Opt-in. Absent or `enabled: false` ⇒ the broker performs **no** authentication
 broker becomes an OAuth 2.1 resource server: client requests need a bearer token
 and the broker publishes Protected Resource Metadata (RFC 9728). See the
 language-neutral [authorization guide](../../docs/authorization.md) for the full
-model, flows, and endpoints.
+OAuth model, flows, and endpoints. The domain-neutral namespace model is in
+[hierarchical authorization](../../docs/hierarchical-authorization.md).
 
 | Field | Type | Env var | Notes |
 |---|---|---|---|
@@ -276,11 +281,24 @@ model, flows, and endpoints.
 | `auth.scopesSupported` | `string[]` | (file-only) | Advertised in the metadata `scopes_supported` |
 | `auth.requiredScopes` | `string[]` | (file-only) | Baseline scope(s) any caller must hold. Empty ⇒ any valid token |
 | `auth.perSlotScopes` | `Record<string,string[]>` | (file-only) | Per-slot scope overrides (e.g. an admin scope for `_broker`) |
-| `auth.providerScopes` | `Record<string,string[]>` | (file-only) | Per-provider scopes narrowing the `_all` aggregate view |
+| `auth.providerScopes` | `Record<string,string[]>` | (file-only) | Deprecated per-provider scope filter. Emits a warning |
 | `auth.providerSecret` | `string` | `MCP_BROKER_PROVIDER_SECRET` | Shared secret every provider must present to occupy a slot |
+| `auth.subjectMapping` | `object` | (file-only) | Maps validated JWT claims to user, group, client, and service subjects |
+| `auth.roles` | `Record<string,Role>` | (file-only) | Stable capability sets with optional `inherits` |
+| `auth.assignments` | `Assignment[]` | (file-only) | Binds subjects and roles to exact or wildcard resource paths |
+| `auth.denies` | `Deny[]` | (file-only) | Explicit capability denies that override grants |
+| `auth.slotResources` | `Record<string,string>` | (file-only) | Maps technical slot names to stable resource paths |
+| `auth.toolCapabilities` | `Record<string,string>` | (file-only) | Global tool to functional capability mapping |
+| `auth.providerToolCapabilities` | `Record<path,Record<tool,capability>>` | (file-only) | Resource-qualified tool mapping |
+| `auth.audit.logAllowed` | `boolean` | (file-only) | Logs allowed decisions when true. Default false |
 
 `providerSecret` is independent of client auth: set it alone to authenticate
 providers even without turning on the OAuth resource server.
+
+Hierarchical policy is enabled only when roles, assignments, or denies are
+present. Without them, legacy OAuth behavior is unchanged. When enabled,
+`requiredScopes` and `perSlotScopes` run first. `providerScopes`, if retained
+during migration, must pass in addition to the hierarchical policy.
 
 ```json
 {
@@ -293,7 +311,38 @@ providers even without turning on the OAuth resource server.
         "scopesSupported": ["mcp:call", "broker:admin"],
         "requiredScopes": ["mcp:call"],
         "perSlotScopes": { "_broker": ["broker:admin"] },
-        "providerScopes": { "weather": ["see:weather"] },
+        "subjectMapping": {
+            "userClaim": "sub",
+            "groupClaims": ["groups"],
+            "clientClaim": "client_id"
+        },
+        "roles": {
+            "viewer": {
+                "capabilities": [
+                    "mcp.resources.read",
+                    "mcp.tools.list",
+                    "mcp.prompts.read"
+                ]
+            },
+            "maintenance": {
+                "inherits": ["viewer"],
+                "capabilities": ["mcp.tools.diagnose"]
+            }
+        },
+        "assignments": [
+            {
+                "id": "site-a-maintenance",
+                "subject": "group:maintenance-site-a",
+                "role": "maintenance",
+                "resource": "/enterprise/site-a/**"
+            }
+        ],
+        "slotResources": {
+            "motor-7": "/enterprise/site-a/area-a/line-3/cell-2/motor-7"
+        },
+        "toolCapabilities": {
+            "diagnose_motor": "mcp.tools.diagnose"
+        },
         "providerSecret": "change-me"
     }
 }
@@ -439,7 +488,7 @@ const tunnel = new WsTunnelBuilder()
 `loadBrokerConfig` never throws; an absent or invalid file returns
 `{ config: {}, baseDir: process.cwd(), sourcePath: null }`.
 
-The `BrokerConfig` and `LoadedBrokerConfig` interfaces are exported for
+The `IBrokerConfig` and `ILoadedBrokerConfig` interfaces are exported for
 static typing of custom loaders.
 
 ---

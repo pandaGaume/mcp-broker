@@ -1,8 +1,16 @@
 import * as fs from "fs";
-import { WsTunnel, type WsTunnelOptions, type StaticMount } from "./ws.tunnel.js";
-import type { StdioUpstreamConfig } from "./stdio.upstream.js";
-import type { RemoteUpstreamConfig } from "./remote.upstream.js";
-import { buildJwtAuth, SharedSecretProviderAuthenticator, type JwtAuthOptions, type ResolvedAuth, type ProviderAuthenticator } from "./auth/index.js";
+import { WsTunnel, type IWsTunnelOptions, type IStaticMount } from "./ws.tunnel.js";
+import type { IStdioUpstreamConfig } from "./stdio.upstream.js";
+import type { IRemoteUpstreamConfig } from "./remote.upstream.js";
+import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "./auth/index.js";
+import {
+    authorizationWithEngine,
+    compileAuthorizationPolicy,
+    type IAuthorizationPolicyConfig,
+    type IPolicyAuthorization,
+    type IPolicyEngine,
+    type ISlotResourceResolver,
+} from "./authorization/index.js";
 
 /**
  * Fluent builder that constructs a configured {@link WsTunnel}.
@@ -31,14 +39,16 @@ export class WsTunnelBuilder {
     private _messagesPath = "/messages";
     private _mcpPath = "/mcp";
     private _samplesIndexPath = "/__samples_index__";
-    private _staticMounts: StaticMount[] = [];
-    private _stdioUpstreams: StdioUpstreamConfig[] = [];
-    private _remoteUpstreams: RemoteUpstreamConfig[] = [];
+    private _staticMounts: IStaticMount[] = [];
+    private _stdioUpstreams: IStdioUpstreamConfig[] = [];
+    private _remoteUpstreams: IRemoteUpstreamConfig[] = [];
     private _stdioClient: { providerName: string } | undefined = undefined;
     private _tls: { cert: string; key: string } | undefined = undefined;
     private _brokerLocalGrammarsDir: string | undefined = undefined;
-    private _auth: ResolvedAuth | undefined = undefined;
-    private _providerAuth: ProviderAuthenticator | undefined = undefined;
+    private _auth: IResolvedAuth | undefined = undefined;
+    private _providerAuth: IProviderAuthenticator | undefined = undefined;
+    private _authorization: IPolicyAuthorization | undefined = undefined;
+    private _slotResourceResolver: ISlotResourceResolver | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -140,7 +150,7 @@ export class WsTunnelBuilder {
      *
      * Can be called multiple times to register multiple providers.
      */
-    withStdioUpstream(config: StdioUpstreamConfig): this {
+    withStdioUpstream(config: IStdioUpstreamConfig): this {
         this._stdioUpstreams.push(config);
         return this;
     }
@@ -152,7 +162,7 @@ export class WsTunnelBuilder {
      *
      * Can be called multiple times to register multiple servers.
      */
-    withRemoteUpstream(config: RemoteUpstreamConfig): this {
+    withRemoteUpstream(config: IRemoteUpstreamConfig): this {
         this._remoteUpstreams.push(config);
         return this;
     }
@@ -205,10 +215,10 @@ export class WsTunnelBuilder {
 
     /**
      * Enables OAuth 2.1 resource-server authorization with a pre-resolved config
-     * (e.g. a custom {@link ResolvedAuth} carrying your own `TokenValidator`).
+     * (e.g. a custom {@link IResolvedAuth} carrying your own `ITokenValidator`).
      * Prefer {@link withJwtAuth} for the standard JWKS-backed setup.
      */
-    withAuth(auth: ResolvedAuth): this {
+    withAuth(auth: IResolvedAuth): this {
         this._auth = auth;
         return this;
     }
@@ -220,16 +230,36 @@ export class WsTunnelBuilder {
      *
      * @throws if `publicBaseUrl`, `authorizationServers`, or `jwksUri` are missing.
      */
-    withJwtAuth(options: JwtAuthOptions): this {
+    withJwtAuth(options: IJwtAuthOptions): this {
         this._auth = buildJwtAuth(options);
         return this;
     }
 
+    /** Installs a custom policy engine behind the broker's transport-neutral API. */
+    withPolicyEngine(engine: IPolicyEngine): this {
+        this._authorization = authorizationWithEngine(engine, {
+            slotResourceResolver: this._slotResourceResolver,
+        });
+        return this;
+    }
+
+    /** Compiles and validates roles, assignments, denies, mappings, and paths. */
+    withAuthorizationPolicy(config: IAuthorizationPolicyConfig): this {
+        this._authorization = compileAuthorizationPolicy(config);
+        return this;
+    }
+
+    /** Overrides the technical slot to hierarchical resource resolution strategy. */
+    withSlotResourceResolver(resolver: ISlotResourceResolver): this {
+        this._slotResourceResolver = resolver;
+        return this;
+    }
+
     /**
-     * Authenticates providers (engines) with a custom {@link ProviderAuthenticator}.
+     * Authenticates providers (engines) with a custom {@link IProviderAuthenticator}.
      * Prefer {@link withProviderSecret} for the standard shared-secret setup.
      */
-    withProviderAuth(authenticator: ProviderAuthenticator): this {
+    withProviderAuth(authenticator: IProviderAuthenticator): this {
         this._providerAuth = authenticator;
         return this;
     }
@@ -246,7 +276,9 @@ export class WsTunnelBuilder {
 
     /** Constructs and returns a configured {@link WsTunnel}. */
     build(): WsTunnel {
-        const options: WsTunnelOptions = {
+        const baseAuthorization = this._authorization ?? this._auth?.authorization;
+        const authorization = baseAuthorization && this._slotResourceResolver ? { ...baseAuthorization, slotResourceResolver: this._slotResourceResolver } : baseAuthorization;
+        const options: IWsTunnelOptions = {
             port: this._port,
             host: this._host,
             providerPath: this._providerPath,
@@ -264,6 +296,8 @@ export class WsTunnelBuilder {
             brokerLocalGrammarsDir: this._brokerLocalGrammarsDir,
             auth: this._auth,
             providerAuth: this._providerAuth,
+            authorization,
+            slotResourceResolver: this._slotResourceResolver ?? authorization?.slotResourceResolver ?? this._auth?.slotResourceResolver,
         };
         return new WsTunnel(options);
     }

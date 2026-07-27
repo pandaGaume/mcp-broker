@@ -9,14 +9,14 @@
  */
 
 /** Minimal shape of an MCP tool entry. Extra fields are preserved as-is. */
-export interface CatalogTool {
+export interface ICatalogTool {
     name: string;
     description?: string;
     [key: string]: unknown;
 }
 
 /** Minimal shape of an MCP prompt entry. Extra fields are preserved as-is. */
-export interface CatalogPrompt {
+export interface ICatalogPrompt {
     name: string;
     title?: string;
     description?: string;
@@ -24,13 +24,13 @@ export interface CatalogPrompt {
 }
 
 /** One provider's raw contribution to the aggregate. */
-export interface ProviderEntry {
-    tools: CatalogTool[];
-    prompts: CatalogPrompt[];
+export interface IProviderEntry {
+    tools: ICatalogTool[];
+    prompts: ICatalogPrompt[];
 }
 
 /** Where an aggregated name routes back to. */
-export interface Route {
+export interface IRoute {
     provider: string;
     original: string;
 }
@@ -42,11 +42,11 @@ const SEPARATOR = "-";
 const MAX_TOOL_NAME_LENGTH = 64;
 
 export class AggregateCatalog {
-    private readonly _providers = new Map<string, ProviderEntry>();
-    private _tools: CatalogTool[] = [];
-    private _prompts: CatalogPrompt[] = [];
-    private _toolRoutes = new Map<string, Route>();
-    private _promptRoutes = new Map<string, Route>();
+    private readonly _providers = new Map<string, IProviderEntry>();
+    private _tools: ICatalogTool[] = [];
+    private _prompts: ICatalogPrompt[] = [];
+    private _toolRoutes = new Map<string, IRoute>();
+    private _promptRoutes = new Map<string, IRoute>();
 
     /** Number of providers currently contributing to the aggregate. */
     get providerCount(): number {
@@ -54,17 +54,17 @@ export class AggregateCatalog {
     }
 
     /** The merged, namespaced tool list. */
-    get tools(): CatalogTool[] {
+    get tools(): ICatalogTool[] {
         return this._tools;
     }
 
     /** The merged, namespaced prompt list. */
-    get prompts(): CatalogPrompt[] {
+    get prompts(): ICatalogPrompt[] {
         return this._prompts;
     }
 
     /** Adds or replaces a provider's contribution, then rebuilds the merged view. */
-    setProvider(provider: string, entry: ProviderEntry): void {
+    setProvider(provider: string, entry: IProviderEntry): void {
         this._providers.set(provider, entry);
         this._rebuild();
     }
@@ -75,7 +75,7 @@ export class AggregateCatalog {
     }
 
     /** The merged tool list restricted to providers `allow` returns `true` for. */
-    toolsFor(allow: (provider: string) => boolean): CatalogTool[] {
+    toolsFor(allow: (provider: string) => boolean): ICatalogTool[] {
         return this._tools.filter((tool) => {
             const route = this._toolRoutes.get(tool.name);
             return route ? allow(route.provider) : false;
@@ -83,7 +83,7 @@ export class AggregateCatalog {
     }
 
     /** The merged prompt list restricted to providers `allow` returns `true` for. */
-    promptsFor(allow: (provider: string) => boolean): CatalogPrompt[] {
+    promptsFor(allow: (provider: string) => boolean): ICatalogPrompt[] {
         return this._prompts.filter((prompt) => {
             const route = this._promptRoutes.get(prompt.name);
             return route ? allow(route.provider) : false;
@@ -91,20 +91,20 @@ export class AggregateCatalog {
     }
 
     /** Resolves an aggregated tool name to its origin, or `undefined` if unknown. */
-    resolveTool(name: string): Route | undefined {
+    resolveTool(name: string): IRoute | undefined {
         return this._toolRoutes.get(name);
     }
 
     /** Resolves an aggregated prompt name to its origin, or `undefined` if unknown. */
-    resolvePrompt(name: string): Route | undefined {
+    resolvePrompt(name: string): IRoute | undefined {
         return this._promptRoutes.get(name);
     }
 
     private _rebuild(): void {
-        const tools: CatalogTool[] = [];
-        const prompts: CatalogPrompt[] = [];
-        const toolRoutes = new Map<string, Route>();
-        const promptRoutes = new Map<string, Route>();
+        const tools: ICatalogTool[] = [];
+        const prompts: ICatalogPrompt[] = [];
+        const toolRoutes = new Map<string, IRoute>();
+        const promptRoutes = new Map<string, IRoute>();
 
         for (const [provider, entry] of this._providers) {
             for (const tool of entry.tools) {
@@ -125,6 +125,18 @@ export class AggregateCatalog {
         this._promptRoutes = promptRoutes;
     }
 }
+
+/** @deprecated Use {@link ICatalogTool}. */
+export type CatalogTool = ICatalogTool;
+
+/** @deprecated Use {@link ICatalogPrompt}. */
+export type CatalogPrompt = ICatalogPrompt;
+
+/** @deprecated Use {@link IProviderEntry}. */
+export type ProviderEntry = IProviderEntry;
+
+/** @deprecated Use {@link IRoute}. */
+export type Route = IRoute;
 
 function prefixed(provider: string, original: string): string {
     return `${provider}${SEPARATOR}${original}`;

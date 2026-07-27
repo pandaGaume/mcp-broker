@@ -7,6 +7,11 @@ broker, then adapt to your needs:
 cp -r .mcp-broker.example .mcp-broker
 ```
 
+Property-by-property educational guides:
+
+- [English](CONFIGURATION-EN.md)
+- [Français](CONFIGURATION-FR.md)
+
 ## Layout
 
 ```

@@ -241,6 +241,14 @@ async function main(): Promise<void> {
             requiredScopes: config.auth?.requiredScopes,
             perSlotScopes: config.auth?.perSlotScopes,
             providerScopes: config.auth?.providerScopes,
+            subjectMapping: config.auth?.subjectMapping,
+            roles: config.auth?.roles,
+            assignments: config.auth?.assignments,
+            denies: config.auth?.denies,
+            slotResources: config.auth?.slotResources,
+            toolCapabilities: config.auth?.toolCapabilities,
+            providerToolCapabilities: config.auth?.providerToolCapabilities,
+            audit: config.auth?.audit,
         });
     }
 

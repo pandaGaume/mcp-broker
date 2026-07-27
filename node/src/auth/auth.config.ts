@@ -1,12 +1,13 @@
 import { JwtTokenValidator } from "./jwt.validator.js";
-import type { AggregateScopeFilter, ResolvedAuth } from "./auth.types.js";
+import type { AggregateScopeFilter, IResolvedAuth } from "./auth.types.js";
+import { compileAuthorizationPolicy, DefaultSlotResourceResolver, hasAuthorizationPolicies, type IAuthorizationPolicyConfig } from "../authorization/index.js";
 
 /**
  * High-level options for the default JWT/JWKS resource-server setup. Mirrors the
  * `auth` block of the broker JSON config and is turned into a fully
- * {@link ResolvedAuth} (with a {@link JwtTokenValidator}) by {@link buildJwtAuth}.
+ * {@link IResolvedAuth} (with a {@link JwtTokenValidator}) by {@link buildJwtAuth}.
  */
-export interface JwtAuthOptions {
+export interface IJwtAuthOptions extends IAuthorizationPolicyConfig {
     /** Public origin the broker is reached at (e.g. `https://mcp.example.com`). */
     publicBaseUrl: string;
     /** Authorization server issuer URL(s) advertised in the PRM. At least one. */
@@ -47,11 +48,11 @@ function stripTrailingSlash(url: string): string {
 }
 
 /**
- * Builds a {@link ResolvedAuth} backed by a {@link JwtTokenValidator}. Validates
+ * Builds an {@link IResolvedAuth} backed by a {@link JwtTokenValidator}. Validates
  * the required inputs up front and throws a descriptive error on misconfig, so
  * an operator sees the problem at boot rather than as opaque `401`s later.
  */
-export function buildJwtAuth(options: JwtAuthOptions): ResolvedAuth {
+export function buildJwtAuth(options: IJwtAuthOptions): IResolvedAuth {
     if (!options.publicBaseUrl) {
         throw new Error("auth: publicBaseUrl is required.");
     }
@@ -71,7 +72,7 @@ export function buildJwtAuth(options: JwtAuthOptions): ResolvedAuth {
         clockToleranceSec: options.clockToleranceSec,
     });
 
-    const resolved: ResolvedAuth = {
+    const resolved: IResolvedAuth = {
         publicBaseUrl,
         authorizationServers: options.authorizationServers,
         validator,
@@ -80,7 +81,18 @@ export function buildJwtAuth(options: JwtAuthOptions): ResolvedAuth {
     if (options.requiredScopes) resolved.requiredScopes = options.requiredScopes;
     if (options.perSlotScopes) resolved.perSlotScopes = options.perSlotScopes;
     if (options.providerScopes && Object.keys(options.providerScopes).length > 0) {
+        console.warn("[mcp-broker] auth.providerScopes is deprecated; migrate to roles and hierarchical assignments.");
         resolved.aggregateScopeFilter = makeProviderScopeFilter(options.providerScopes);
+    }
+    if (options.slotResources && Object.keys(options.slotResources).length > 0) {
+        resolved.slotResourceResolver = new DefaultSlotResourceResolver(options.slotResources);
+    }
+    if (hasAuthorizationPolicies(options)) {
+        resolved.authorization = compileAuthorizationPolicy(options);
+        resolved.slotResourceResolver = resolved.authorization.slotResourceResolver;
     }
     return resolved;
 }
+
+/** @deprecated Use {@link IJwtAuthOptions}. */
+export type JwtAuthOptions = IJwtAuthOptions;

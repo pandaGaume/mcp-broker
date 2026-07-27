@@ -9,7 +9,7 @@ import {
     brokerBaselineResourceTemplateName,
     brokerBaselineToolDescription,
 } from "../broker.grammars.js";
-import type { BrokerContext } from "../broker.context.js";
+import type { IBrokerContext } from "../broker.context.js";
 
 /**
  * Exposes the broker's provider slots so an MCP agent can discover what is
@@ -23,7 +23,7 @@ import type { BrokerContext } from "../broker.context.js";
 export class BrokerProvidersBehavior extends McpBehavior {
     public static readonly NAMESPACE = "broker_providers";
 
-    constructor(context: BrokerContext) {
+    constructor(context: IBrokerContext) {
         super(new BrokerProvidersAdapter(context), {
             namespace: BrokerProvidersBehavior.NAMESPACE,
         });

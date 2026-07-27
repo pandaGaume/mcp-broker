@@ -6,13 +6,33 @@ import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
 import type { GrammarResolverOptions, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
-import { StdioUpstream, type StdioUpstreamConfig } from "./stdio.upstream.js";
-import { RemoteUpstream, type RemoteUpstreamConfig } from "./remote.upstream.js";
-import type { Upstream } from "./upstream.js";
+import { StdioUpstream, type IStdioUpstreamConfig } from "./stdio.upstream.js";
+import { RemoteUpstream, type IRemoteUpstreamConfig } from "./remote.upstream.js";
+import type { IUpstream } from "./upstream.js";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index.js";
-import type { BrokerContext, BrokerProviderInfo, BrokerProviderTransport } from "./broker/index.js";
+import type { IBrokerContext, IBrokerProviderInfo, BrokerProviderTransport } from "./broker/index.js";
 import { AggregateServer } from "./broker/aggregate/aggregate.server.js";
-import { HttpAuthGuard, AuthError, type ResolvedAuth, type ProviderAuthenticator, type Principal } from "./auth/index.js";
+import {
+    HttpAuthGuard,
+    AuthError,
+    normalizeProviderAuthentication,
+    providerMayPublish,
+    type IResolvedAuth,
+    type IProviderAuthenticator,
+    type IPrincipal,
+    type IProviderPrincipal,
+} from "./auth/index.js";
+import {
+    DefaultSlotResourceResolver,
+    SubjectMappingError,
+    makeAuthorizationAuditEvent,
+    writeAuthorizationAuditEvent,
+    type IAuthorizationDecision,
+    type IAuthorizationSubject,
+    type IPolicyAuthorization,
+    type ResourcePath,
+    type ISlotResourceResolver,
+} from "./authorization/index.js";
 import { VERSION, PACKAGE_NAME } from "./version.js";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +70,7 @@ type ResponseSink =
     | { type: "sse"; sessionId: string }
     | { type: "http"; res: ServerResponse }
     | { type: "stdio" }
-    | { type: "internal"; client: InternalClient };
+    | { type: "internal"; client: IInternalClient };
 
 /** The four HTTP client-transport handlers a provider route can resolve to. */
 type McpEndpointKind = "mcp-get" | "mcp-post" | "sse-connect" | "sse-message";
@@ -60,7 +80,7 @@ type McpEndpointKind = "mcp-get" | "mcp-post" | "sse-connect" | "sse-message";
  * Created lazily on first client connection; the WebSocket field is set when
  * the provider actually connects (and cleared on disconnect).
  */
-interface ProviderState {
+interface IProviderState {
     /** The active provider WebSocket, or `null` when the provider is not connected. */
     ws: WebSocket | null;
     /** Pending JSON-RPC request ids → response sinks waiting for a reply. */
@@ -72,7 +92,7 @@ interface ProviderState {
     /** Raw WebSocket MCP clients connected to this provider. */
     readonly wsClients: Set<WebSocket>;
     /** In-process clients (e.g. the aggregate server) attached to this slot. */
-    readonly internalClients: Set<InternalClient>;
+    readonly internalClients: Set<IInternalClient>;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +106,7 @@ interface ProviderState {
  * { urlPrefix: "/",       dir: "/absolute/path/to/www" }
  * { urlPrefix: "/bundle", dir: "/absolute/path/to/bundle" }
  */
-export interface StaticMount {
+export interface IStaticMount {
     /** URL prefix that triggers this mount (e.g. `"/"` or `"/bundle"`). */
     urlPrefix: string;
     /** Absolute path to the directory to serve. */
@@ -100,7 +120,7 @@ export interface StaticMount {
  * receive both the responses and the provider's broadcast notifications,
  * without opening a real network connection.
  */
-export interface InternalClient {
+export interface IInternalClient {
     /**
      * Sends a JSON-RPC message to the provider slot. When the message carries an
      * `id`, the matching response is delivered to {@link onMessage}. When the
@@ -118,7 +138,7 @@ export interface InternalClient {
 /**
  * Configuration options for a {@link WsTunnel} instance.
  */
-export interface WsTunnelOptions {
+export interface IWsTunnelOptions {
     /** TCP port to listen on. */
     port: number;
 
@@ -182,7 +202,7 @@ export interface WsTunnelOptions {
      * Optional static-file mounts served over plain HTTP.
      * Matched by longest URL prefix; directory requests fall back to `index.html`.
      */
-    staticMounts?: StaticMount[];
+    staticMounts?: IStaticMount[];
 
     /**
      * Stdio upstream providers. Each entry spawns a child process and wires its
@@ -193,10 +213,10 @@ export interface WsTunnelOptions {
      * connection is rejected and a warning is logged — stdio takes priority.
      * @default undefined — no stdio providers
      */
-    stdioUpstreams?: StdioUpstreamConfig[];
+    stdioUpstreams?: IStdioUpstreamConfig[];
 
     /** Remote MCP servers reached by URL, exposed as provider slots. */
-    remoteUpstreams?: RemoteUpstreamConfig[];
+    remoteUpstreams?: IRemoteUpstreamConfig[];
 
     /**
      * Stdio client transport. When set, the broker reads JSON-RPC from
@@ -294,7 +314,7 @@ export interface WsTunnelOptions {
      * When `undefined` (default), the broker performs **no** authentication —
      * appropriate only behind a trusted network boundary.
      */
-    auth?: ResolvedAuth;
+    auth?: IResolvedAuth;
 
     /**
      * Authenticates **providers** (engines) connecting to `/provider/<slot>` and
@@ -304,8 +324,23 @@ export interface WsTunnelOptions {
      *
      * When `undefined` (default), provider connections are **not** authenticated.
      */
-    providerAuth?: ProviderAuthenticator;
+    providerAuth?: IProviderAuthenticator;
+
+    /** Hierarchical policy runtime. Absent preserves legacy OAuth behavior. */
+    authorization?: IPolicyAuthorization;
+
+    /** Slot-to-resource resolver also used for provider namespace restrictions. */
+    slotResourceResolver?: ISlotResourceResolver;
 }
+
+/** @deprecated Use {@link IStaticMount}. */
+export type StaticMount = IStaticMount;
+
+/** @deprecated Use {@link IInternalClient}. */
+export type InternalClient = IInternalClient;
+
+/** @deprecated Use {@link IWsTunnelOptions}. */
+export type WsTunnelOptions = IWsTunnelOptions;
 
 // ---------------------------------------------------------------------------
 // WsTunnel
@@ -332,8 +367,8 @@ export interface WsTunnelOptions {
  * Each provider gets its own isolated set of sessions, pending requests, and
  * notification streams. Multiple providers can be connected simultaneously.
  */
-export class WsTunnel implements BrokerContext {
-    private readonly _options: WsTunnelOptions;
+export class WsTunnel implements IBrokerContext {
+    private readonly _options: IWsTunnelOptions;
     private _httpServer: http.Server | https.Server | null = null;
     private _wss: WebSocketServer | null = null;
 
@@ -342,13 +377,13 @@ export class WsTunnel implements BrokerContext {
      * Created lazily: a slot is allocated the first time any client references
      * a provider name, even before the provider WebSocket connects.
      */
-    private readonly _providers = new Map<string, ProviderState>();
+    private readonly _providers = new Map<string, IProviderState>();
 
     /** Maps a multiplexed WebSocket to the set of provider names it feeds. */
     private readonly _multiplexSockets = new Map<WebSocket, Set<string>>();
 
     /** Upstream providers (stdio child processes and remote URL servers), keyed by name. */
-    private readonly _upstreams = new Map<string, Upstream>();
+    private readonly _upstreams = new Map<string, IUpstream>();
 
     /**
      * In-process loopback transports registered as provider slots.
@@ -357,10 +392,10 @@ export class WsTunnel implements BrokerContext {
      */
     private readonly _loopbackProviders = new Map<string, IMessageTransport>();
 
-    /** The embedded broker MCP server, when {@link WsTunnelOptions.enableBrokerProvider} is on. */
+    /** The embedded broker MCP server, when {@link IWsTunnelOptions.enableBrokerProvider} is on. */
     private _brokerServer: IMcpServer | null = null;
 
-    /** The aggregate MCP server (`_all` slot), when {@link WsTunnelOptions.enableAggregateProvider} is on. */
+    /** The aggregate MCP server (`_all` slot), when {@link IWsTunnelOptions.enableAggregateProvider} is on. */
     private _aggregateServer: AggregateServer | null = null;
 
     /** Provider name that the stdio client transport is bridged to, or null when disabled. */
@@ -376,22 +411,38 @@ export class WsTunnel implements BrokerContext {
     private readonly _authGuard: HttpAuthGuard | null;
 
     /** Provider (engine) authenticator, or `null` when provider auth is disabled. */
-    private readonly _providerAuth: ProviderAuthenticator | null;
+    private readonly _providerAuth: IProviderAuthenticator | null;
+
+    /** Compiled hierarchical authorization, or `null` for legacy behavior. */
+    private readonly _authorization: IPolicyAuthorization | null;
+
+    /** Stable technical-slot to hierarchical-resource mapping. */
+    private readonly _slotResourceResolver: ISlotResourceResolver;
 
     /** Principal captured at a client's WS upgrade, keyed by the upgrade request. */
-    private readonly _pendingClientPrincipals = new WeakMap<IncomingMessage, Principal>();
+    private readonly _pendingClientPrincipals = new WeakMap<IncomingMessage, IPrincipal>();
 
     /** Authenticated principal per raw WS client socket, for `_all` scope filtering. */
-    private readonly _clientPrincipals = new WeakMap<WebSocket, Principal>();
+    private readonly _clientPrincipals = new WeakMap<WebSocket, IPrincipal>();
 
-    constructor(options: WsTunnelOptions) {
+    /** Authenticated principal attached to long-lived HTTP/SSE streams. */
+    private readonly _streamPrincipals = new WeakMap<ServerResponse, IPrincipal>();
+
+    /** Provider principals captured during successful WebSocket upgrades. */
+    private readonly _pendingProviderPrincipals = new WeakMap<IncomingMessage, IProviderPrincipal>();
+    private readonly _providerPrincipals = new WeakMap<WebSocket, IProviderPrincipal>();
+
+    constructor(options: IWsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
         this._providerAuth = options.providerAuth ?? null;
+        this._authorization = options.authorization ?? options.auth?.authorization ?? null;
+        this._slotResourceResolver =
+            options.slotResourceResolver ?? this._authorization?.slotResourceResolver ?? options.auth?.slotResourceResolver ?? new DefaultSlotResourceResolver();
     }
 
     // -------------------------------------------------------------------------
-    // BrokerContext implementation
+    // IBrokerContext implementation
     // -------------------------------------------------------------------------
 
     get version(): string {
@@ -423,7 +474,7 @@ export class WsTunnel implements BrokerContext {
         return !!this._options.tls;
     }
 
-    get paths(): BrokerContext["paths"] {
+    get paths(): IBrokerContext["paths"] {
         const o = this._options;
         return {
             provider: o.providerPath ?? "/provider",
@@ -435,21 +486,21 @@ export class WsTunnel implements BrokerContext {
         };
     }
 
-    public getProvidersInfo(): BrokerProviderInfo[] {
-        const out: BrokerProviderInfo[] = [];
+    public getProvidersInfo(): IBrokerProviderInfo[] {
+        const out: IBrokerProviderInfo[] = [];
         for (const [name, state] of this._providers) {
             out.push(this._buildProviderInfo(name, state));
         }
         return out;
     }
 
-    public getProviderInfo(name: string): BrokerProviderInfo | undefined {
+    public getProviderInfo(name: string): IBrokerProviderInfo | undefined {
         const state = this._providers.get(name);
         if (!state) return undefined;
         return this._buildProviderInfo(name, state);
     }
 
-    private _buildProviderInfo(name: string, state: ProviderState): BrokerProviderInfo {
+    private _buildProviderInfo(name: string, state: IProviderState): IBrokerProviderInfo {
         let transport: BrokerProviderTransport;
         let connected: boolean;
 
@@ -499,7 +550,7 @@ export class WsTunnel implements BrokerContext {
         const state = this._getOrCreateProviderState(name);
         this._loopbackProviders.set(name, transport);
 
-        transport.onMessage = (data: string) => this._routeFromProvider(state, data);
+        transport.onMessage = (data: string) => this._routeFromProvider(state, name, data);
         transport.onClose = () => {
             this._loopbackProviders.delete(name);
             this._failProviderDisconnected(state, name);
@@ -515,11 +566,11 @@ export class WsTunnel implements BrokerContext {
      * The slot does not need a provider attached yet — `send` returns a
      * JSON-RPC error while the provider is disconnected.
      */
-    public openInternalClient(providerName: string): InternalClient {
+    public openInternalClient(providerName: string): IInternalClient {
         const state = this._getOrCreateProviderState(providerName);
         let closed = false;
 
-        const client: InternalClient = {
+        const client: IInternalClient = {
             onMessage: null,
             onClose: null,
             send: (message: string): void => {
@@ -608,12 +659,12 @@ export class WsTunnel implements BrokerContext {
 
                 if (url === providersPath || url.startsWith(providersPath + "?")) {
                     // Multiplexed provider: one WebSocket carries N providers via envelopes.
-                    this._onMultiplexProviderConnect(ws);
+                    this._onMultiplexProviderConnect(ws, req);
                 } else if (url.startsWith(providerPath + "/") || url === providerPath) {
                     // Extract name: everything after "<providerPath>/"
                     const raw = url.slice(providerPath.length).replace(/^\//, "");
                     const name = decodeURIComponent(raw.split("?")[0]) || "(unnamed)";
-                    this._onProviderConnect(ws, name);
+                    this._onProviderConnect(ws, name, req);
                 } else {
                     // Raw WS MCP client: URL is "/<providerName>" or "/"
                     const raw = url.replace(/^\//, "").split("?")[0];
@@ -630,10 +681,10 @@ export class WsTunnel implements BrokerContext {
                 // Attach configured upstreams (stdio child processes + remote URL
                 // servers). Both implement the Upstream contract, so the wiring
                 // into a provider slot is identical.
-                const wireUpstream = (cfg: { name: string; aggregate?: boolean }, upstream: Upstream): void => {
+                const wireUpstream = (cfg: { name: string; aggregate?: boolean }, upstream: IUpstream): void => {
                     upstream.onMessage = (data) => {
                         const state = this._getOrCreateProviderState(cfg.name);
-                        this._routeFromProvider(state, data);
+                        this._routeFromProvider(state, cfg.name, data);
                     };
                     upstream.onError = (err) => {
                         console.error(`[broker] ${err.message}`);
@@ -692,7 +743,7 @@ export class WsTunnel implements BrokerContext {
     /**
      * Starts the in-process MCP server that exposes the broker's own behaviors
      * (`broker_info`, `providers_list`, `provider_status`) under the reserved
-     * provider slot `_broker`. No-op when {@link WsTunnelOptions.enableBrokerProvider}
+     * provider slot `_broker`. No-op when {@link IWsTunnelOptions.enableBrokerProvider}
      * is `false`.
      */
     private async _maybeStartBrokerServer(): Promise<void> {
@@ -712,13 +763,14 @@ export class WsTunnel implements BrokerContext {
 
     /**
      * Starts the aggregate MCP server and registers it on the reserved `_all`
-     * slot. No-op when {@link WsTunnelOptions.enableAggregateProvider} is `false`.
+     * slot. No-op when {@link IWsTunnelOptions.enableAggregateProvider} is `false`.
      */
     private _maybeStartAggregateServer(): void {
         if (this._options.enableAggregateProvider === false) return;
         try {
             const server = new AggregateServer((providerName) => this.openInternalClient(providerName));
             server.setScopeFilter(this._options.auth?.aggregateScopeFilter ?? null);
+            server.setPolicyAuthorization(this._authorization);
             server.start();
             this.registerLoopbackProvider(AggregateServer.SLOT, server);
             this._aggregateServer = server;
@@ -774,6 +826,114 @@ export class WsTunnel implements BrokerContext {
             this._startedAt = null;
             this._wss?.close();
             this._httpServer?.close((err) => (err ? reject(err) : resolve()));
+        });
+    }
+
+    private _authorizationSubject(principal: IPrincipal | null): IAuthorizationSubject {
+        if (principal?.subject) return principal.subject;
+        if (!principal) return { ids: [] };
+        try {
+            return (
+                this._authorization?.subjectMapper.map(principal.claims) ?? {
+                    ids: [],
+                    claims: principal.claims,
+                }
+            );
+        } catch (error) {
+            if (!(error instanceof SubjectMappingError)) {
+                console.error("[broker] authorization subject mapping failed.");
+            }
+            return { ids: [], claims: principal.claims };
+        }
+    }
+
+    private _auditDecision(
+        subject: IAuthorizationSubject,
+        slot: string,
+        resource: ResourcePath | undefined,
+        capability: string | undefined,
+        tool: string | undefined,
+        decision: IAuthorizationDecision
+    ): void {
+        const authorization = this._authorization;
+        if (!authorization || (decision.allowed && !authorization.audit.logAllowed)) return;
+        writeAuthorizationAuditEvent(
+            makeAuthorizationAuditEvent(
+                {
+                    subject,
+                    slot,
+                    resource,
+                    capability,
+                    provider: slot,
+                    tool,
+                },
+                decision
+            )
+        );
+    }
+
+    /**
+     * Applies hierarchical policy to the MCP operations carried in one
+     * JSON-RPC frame. `_all` performs provider-specific checks internally.
+     */
+    private _authorizeMcpFrame(providerName: string, data: string, principal: IPrincipal | null): boolean {
+        const authorization = this._authorization;
+        if (!authorization || providerName === AggregateServer.SLOT) return true;
+
+        const subject = this._authorizationSubject(principal);
+        const resource = this._slotResourceResolver.resolve(providerName);
+        if (!resource) {
+            const decision: IAuthorizationDecision = { allowed: false, reason: "unknown-resource" };
+            this._auditDecision(subject, providerName, undefined, undefined, undefined, decision);
+            return false;
+        }
+
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(data) as unknown;
+        } catch {
+            return true;
+        }
+        const operations = Array.isArray(parsed) ? parsed : [parsed];
+        for (const value of operations) {
+            if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+            const operation = value as Readonly<{ method?: string; params?: unknown }>;
+            try {
+                const classified = authorization.capabilityClassifier.classify(operation, resource, providerName);
+                if (!classified) continue;
+                const decision = authorization.engine.authorize({
+                    subject,
+                    capability: classified.capability,
+                    resource,
+                    provider: providerName,
+                    tool: classified.tool,
+                });
+                this._auditDecision(subject, providerName, resource, classified.capability, classified.tool, decision);
+                if (!decision.allowed) return false;
+            } catch {
+                console.error("[broker] policy evaluation failed.");
+                const decision: IAuthorizationDecision = { allowed: false, reason: "no-matching-grant" };
+                this._auditDecision(subject, providerName, resource, undefined, undefined, decision);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private _policyDeniedPayload(data: string): string {
+        let id: string | number | null = null;
+        try {
+            const parsed = JSON.parse(data) as { id?: unknown };
+            if (typeof parsed.id === "string" || typeof parsed.id === "number" || parsed.id === null) {
+                id = parsed.id;
+            }
+        } catch {
+            // A malformed frame has no usable request id.
+        }
+        return JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32001, message: "Forbidden" },
         });
     }
 
@@ -875,16 +1035,16 @@ export class WsTunnel implements BrokerContext {
     }
 
     /** Routes an already-authorized (or auth-disabled) request to its handler. */
-    private _dispatchMcpEndpoint(kind: McpEndpointKind, req: IncomingMessage, res: ServerResponse, providerName: string, principal: Principal | null): void {
+    private _dispatchMcpEndpoint(kind: McpEndpointKind, req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         switch (kind) {
             case "mcp-get":
-                this._handleMcpGetStream(req, res, providerName);
+                this._handleMcpGetStream(req, res, providerName, principal);
                 return;
             case "mcp-post":
                 this._handleMcpPost(req, res, providerName, principal);
                 return;
             case "sse-connect":
-                this._handleSseConnect(req, res, providerName);
+                this._handleSseConnect(req, res, providerName, principal);
                 return;
             case "sse-message":
                 this._handleSseMessage(req, res, providerName, principal);
@@ -939,9 +1099,25 @@ export class WsTunnel implements BrokerContext {
                 }
                 const slot = isDedicated ? decodeURIComponent(url.slice(providerPath.length).replace(/^\//, "").split("?")[0]) || undefined : undefined;
                 Promise.resolve(providerAuth.authenticate(info.req, slot)).then(
-                    (ok) => (ok ? cb(true) : cb(false, 401, "Unauthorized", { "WWW-Authenticate": 'Bearer realm="provider"' })),
-                    (err: unknown) => {
-                        console.error(`[broker] provider authentication error for "${slot ?? "(multiplex)"}":`, err);
+                    (rawResult) => {
+                        const result = normalizeProviderAuthentication(rawResult);
+                        if (!result.authenticated) {
+                            cb(false, 401, "Unauthorized", { "WWW-Authenticate": 'Bearer realm="provider"' });
+                            return;
+                        }
+                        if (slot !== undefined) {
+                            const resource = this._slotResourceResolver.resolve(slot);
+                            if (!resource || !providerMayPublish(result.principal, resource)) {
+                                this._logProviderRegistration(result.principal, slot, resource, false);
+                                cb(false, 403, "Forbidden");
+                                return;
+                            }
+                        }
+                        this._pendingProviderPrincipals.set(info.req, result.principal);
+                        cb(true);
+                    },
+                    () => {
+                        console.error(`[broker] provider authentication error for "${slot ?? "(multiplex)"}".`);
                         cb(false, 500, "server_error");
                     }
                 );
@@ -980,7 +1156,7 @@ export class WsTunnel implements BrokerContext {
      * Handles `GET /<providerName>/sse` — opens a long-lived SSE stream for Claude.
      * Sends an `endpoint` event so Claude knows where to POST its requests.
      */
-    private _handleSseConnect(req: IncomingMessage, res: ServerResponse, providerName: string): void {
+    private _handleSseConnect(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         const sessionId = randomUUID();
         const messagesSuffix = (this._options.messagesPath ?? "/messages").replace(/^\//, "");
         const messagesUrl = `/${encodeURIComponent(providerName)}/${messagesSuffix}`;
@@ -994,6 +1170,7 @@ export class WsTunnel implements BrokerContext {
 
         const state = this._getOrCreateProviderState(providerName);
         state.sseSessions.set(sessionId, res);
+        if (principal) this._streamPrincipals.set(res, principal);
 
         req.on("close", () => {
             state.sseSessions.delete(sessionId);
@@ -1008,7 +1185,7 @@ export class WsTunnel implements BrokerContext {
      * request from Claude and forwards it to the provider.
      * Always responds 202 Accepted; the real response arrives over SSE.
      */
-    private _handleSseMessage(req: IncomingMessage, res: ServerResponse, providerName: string, principal: Principal | null): void {
+    private _handleSseMessage(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         const params = new URL(req.url ?? "", "http://localhost").searchParams;
         const sessionId = params.get("sessionId") ?? "";
         const state = this._getOrCreateProviderState(providerName);
@@ -1024,6 +1201,11 @@ export class WsTunnel implements BrokerContext {
             body += chunk.toString();
         });
         req.on("end", () => {
+            if (!this._authorizeMcpFrame(providerName, body, principal)) {
+                res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                res.end(this._policyDeniedPayload(body));
+                return;
+            }
             try {
                 const msg = JSON.parse(body) as { id?: string | number };
                 if (msg.id != null) state.pending.set(msg.id, { type: "sse", sessionId });
@@ -1063,7 +1245,7 @@ export class WsTunnel implements BrokerContext {
      * Forwards the JSON-RPC request to the provider and holds the HTTP response
      * open until the reply arrives, then writes it as `application/json`.
      */
-    private _handleMcpPost(req: IncomingMessage, res: ServerResponse, providerName: string, principal: Principal | null): void {
+    private _handleMcpPost(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         let body = "";
         req.on("data", (chunk: Buffer) => {
             body += chunk.toString();
@@ -1079,6 +1261,12 @@ export class WsTunnel implements BrokerContext {
             }
 
             const state = this._getOrCreateProviderState(providerName);
+
+            if (!this._authorizeMcpFrame(providerName, body, principal)) {
+                res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                res.end(this._policyDeniedPayload(body));
+                return;
+            }
 
             if (!this._isProviderConnected(providerName, state)) {
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -1110,7 +1298,7 @@ export class WsTunnel implements BrokerContext {
      * Streamable HTTP clients (e.g. MCP Inspector) use this to receive
      * server-initiated notifications without re-polling.
      */
-    private _handleMcpGetStream(req: IncomingMessage, res: ServerResponse, providerName: string): void {
+    private _handleMcpGetStream(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         const sessionId = (req.headers["mcp-session-id"] as string | undefined) ?? randomUUID();
 
         res.writeHead(200, {
@@ -1123,6 +1311,7 @@ export class WsTunnel implements BrokerContext {
 
         const state = this._getOrCreateProviderState(providerName);
         state.mcpGetSessions.set(sessionId, res);
+        if (principal) this._streamPrincipals.set(res, principal);
 
         req.on("close", () => {
             state.mcpGetSessions.delete(sessionId);
@@ -1139,7 +1328,25 @@ export class WsTunnel implements BrokerContext {
     // WebSocket connection handlers
     // -------------------------------------------------------------------------
 
-    private _onProviderConnect(ws: WebSocket, name: string): void {
+    private _logProviderRegistration(principal: IProviderPrincipal, slot: string, resource: ResourcePath | undefined, allowed: boolean): void {
+        const event = {
+            timestamp: new Date().toISOString(),
+            providerId: principal.id,
+            slot,
+            resource: resource?.value,
+            allowed,
+        };
+        const line = `[broker] provider-registration ${JSON.stringify(event)}`;
+        if (allowed) console.info(line);
+        else console.warn(line);
+    }
+
+    private _onProviderConnect(ws: WebSocket, name: string, req: IncomingMessage): void {
+        const providerPrincipal = this._pendingProviderPrincipals.get(req);
+        if (providerPrincipal) {
+            this._pendingProviderPrincipals.delete(req);
+            this._providerPrincipals.set(ws, providerPrincipal);
+        }
         if (this._upstreams.has(name)) {
             console.warn(
                 `[broker] WARNING: WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
@@ -1163,6 +1370,9 @@ export class WsTunnel implements BrokerContext {
 
         const state = this._getOrCreateProviderState(name);
         state.ws = ws;
+        if (providerPrincipal) {
+            this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
+        }
 
         // A provider MAY send a registration control frame as its very first
         // message (see _tryHandleRegistration). Any other first message —
@@ -1175,7 +1385,7 @@ export class WsTunnel implements BrokerContext {
                 registrationChecked = true;
                 if (this._tryHandleRegistration(name, text)) return;
             }
-            this._routeFromProvider(state, text);
+            this._routeFromProvider(state, name, text);
         });
 
         ws.on("close", () => {
@@ -1233,9 +1443,14 @@ export class WsTunnel implements BrokerContext {
      * envelope format `{ provider: string, payload: object }`.
      * Provider names are registered lazily on first message.
      */
-    private _onMultiplexProviderConnect(ws: WebSocket): void {
+    private _onMultiplexProviderConnect(ws: WebSocket, req: IncomingMessage): void {
         const providerNames = new Set<string>();
         this._multiplexSockets.set(ws, providerNames);
+        const providerPrincipal = this._pendingProviderPrincipals.get(req);
+        if (providerPrincipal) {
+            this._pendingProviderPrincipals.delete(req);
+            this._providerPrincipals.set(ws, providerPrincipal);
+        }
 
         ws.on("message", (data: Buffer) => {
             let envelope: { provider?: string; payload?: unknown };
@@ -1250,6 +1465,23 @@ export class WsTunnel implements BrokerContext {
 
             // Register provider name lazily on first encounter.
             if (!providerNames.has(name)) {
+                if (providerPrincipal) {
+                    const resource = this._slotResourceResolver.resolve(name);
+                    if (!resource || !providerMayPublish(providerPrincipal, resource)) {
+                        this._logProviderRegistration(providerPrincipal, name, resource, false);
+                        ws.send(
+                            JSON.stringify({
+                                provider: name,
+                                payload: {
+                                    jsonrpc: "2.0",
+                                    id: null,
+                                    error: { code: -32001, message: "Provider registration forbidden" },
+                                },
+                            })
+                        );
+                        return;
+                    }
+                }
                 if (this._upstreams.has(name)) {
                     console.warn(
                         `[broker] WARNING: Multiplexed WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
@@ -1300,10 +1532,13 @@ export class WsTunnel implements BrokerContext {
                 providerNames.add(name);
                 const state = this._getOrCreateProviderState(name);
                 state.ws = ws;
+                if (providerPrincipal) {
+                    this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
+                }
             }
 
             const state = this._providers.get(name)!;
-            this._routeFromProvider(state, JSON.stringify(envelope.payload));
+            this._routeFromProvider(state, name, JSON.stringify(envelope.payload));
         });
 
         ws.on("close", () => {
@@ -1326,7 +1561,7 @@ export class WsTunnel implements BrokerContext {
      * Sends a raw JSON-RPC message to a provider, wrapping it in a multiplex
      * envelope when the provider's WebSocket is a multiplexed connection.
      */
-    private _sendToProvider(state: ProviderState, providerName: string, data: string, principal: Principal | null = null): void {
+    private _sendToProvider(state: IProviderState, providerName: string, data: string, principal: IPrincipal | null = null): void {
         // The `_all` aggregate is a loopback, but it needs the caller's principal
         // to scope its catalog/routing — hand it off directly rather than through
         // the generic transport, which would drop the context.
@@ -1360,7 +1595,7 @@ export class WsTunnel implements BrokerContext {
         }
     }
 
-    private _routeFromStdioClient(state: ProviderState, data: string): void {
+    private _routeFromStdioClient(state: IProviderState, data: string): void {
         try {
             const msg = JSON.parse(data) as { id?: string | number };
             if (msg?.id != null) state.pending.set(msg.id, { type: "stdio" });
@@ -1389,7 +1624,13 @@ export class WsTunnel implements BrokerContext {
         }
     }
 
-    private _routeFromClient(client: WebSocket, state: ProviderState, providerName: string, data: string): void {
+    private _routeFromClient(client: WebSocket, state: IProviderState, providerName: string, data: string): void {
+        const principal = this._clientPrincipals.get(client) ?? null;
+        if (!this._authorizeMcpFrame(providerName, data, principal)) {
+            client.send(this._policyDeniedPayload(data));
+            return;
+        }
+
         try {
             const msg = JSON.parse(data) as { id?: string | number };
             if (msg?.id != null) state.pending.set(msg.id, { type: "ws", socket: client });
@@ -1398,7 +1639,6 @@ export class WsTunnel implements BrokerContext {
         }
 
         if (this._isProviderConnected(providerName, state)) {
-            const principal = this._clientPrincipals.get(client) ?? null;
             this._sendToProvider(state, providerName, data, principal);
         } else {
             client.send(
@@ -1411,7 +1651,7 @@ export class WsTunnel implements BrokerContext {
         }
     }
 
-    private _routeFromProvider(state: ProviderState, data: string): void {
+    private _routeFromProvider(state: IProviderState, providerName: string, data: string): void {
         try {
             const msg = JSON.parse(data) as { id?: string | number };
 
@@ -1434,23 +1674,32 @@ export class WsTunnel implements BrokerContext {
                 state.pending.delete(msg.id);
             } else {
                 // Notification (no id): broadcast to all clients of this provider.
-                this._broadcast(state, data);
+                this._broadcast(state, providerName, data);
             }
         } catch {
-            this._broadcast(state, data);
+            this._broadcast(state, providerName, data);
         }
     }
 
     /** Sends a message to all clients connected to one provider. */
-    private _broadcast(state: ProviderState, data: string): void {
+    private _broadcast(state: IProviderState, providerName: string, data: string): void {
         for (const client of state.wsClients) {
-            if (client.readyState === WebSocket.OPEN) client.send(data);
+            const principal = this._clientPrincipals.get(client) ?? null;
+            if (client.readyState === WebSocket.OPEN && this._authorizeMcpFrame(providerName, data, principal)) {
+                client.send(data);
+            }
         }
         for (const sseRes of state.sseSessions.values()) {
-            this._sendSseEvent(sseRes, data);
+            const principal = this._streamPrincipals.get(sseRes) ?? null;
+            if (this._authorizeMcpFrame(providerName, data, principal)) {
+                this._sendSseEvent(sseRes, data);
+            }
         }
         for (const mcpRes of state.mcpGetSessions.values()) {
-            this._sendSseEvent(mcpRes, data);
+            const principal = this._streamPrincipals.get(mcpRes) ?? null;
+            if (this._authorizeMcpFrame(providerName, data, principal)) {
+                this._sendSseEvent(mcpRes, data);
+            }
         }
         for (const ic of state.internalClients) {
             ic.onMessage?.(data);
@@ -1466,7 +1715,7 @@ export class WsTunnel implements BrokerContext {
      * has disconnected, then clears the pending map. Shared by all provider
      * close handlers (dedicated WS, multiplexed WS, loopback).
      */
-    private _failProviderDisconnected(state: ProviderState, name: string): void {
+    private _failProviderDisconnected(state: IProviderState, name: string): void {
         const error = JSON.stringify({
             jsonrpc: "2.0",
             id: null,
@@ -1497,7 +1746,7 @@ export class WsTunnel implements BrokerContext {
      * Returns `true` if the provider is reachable — via a WebSocket connection,
      * a stdio upstream, or an in-process loopback transport.
      */
-    private _isProviderConnected(providerName: string, state: ProviderState): boolean {
+    private _isProviderConnected(providerName: string, state: IProviderState): boolean {
         if (this._upstreams.get(providerName)?.isOpen) return true;
         if (this._loopbackProviders.get(providerName)?.isOpen) return true;
         if (state.ws?.readyState === WebSocket.OPEN) return true;
@@ -1505,7 +1754,7 @@ export class WsTunnel implements BrokerContext {
     }
 
     /** Returns the state for `name`, creating it lazily if it doesn't exist yet. */
-    private _getOrCreateProviderState(name: string): ProviderState {
+    private _getOrCreateProviderState(name: string): IProviderState {
         let state = this._providers.get(name);
         if (!state) {
             state = {

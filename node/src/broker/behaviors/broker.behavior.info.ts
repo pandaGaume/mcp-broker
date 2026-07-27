@@ -2,7 +2,7 @@ import { McpBehavior } from "@cyanmycelium/mcp-core";
 import type { McpResource, McpTool } from "@cyanmycelium/mcp-core";
 import { BROKER_INFO_URI, BrokerInfoAdapter } from "../adapters/broker.adapter.info.js";
 import { brokerBaselineResourceDescription, brokerBaselineResourceName, brokerBaselineToolDescription } from "../broker.grammars.js";
-import type { BrokerContext } from "../broker.context.js";
+import type { IBrokerContext } from "../broker.context.js";
 
 /**
  * Exposes basic broker identity (name, version, uptime, listening config) as
@@ -13,7 +13,7 @@ import type { BrokerContext } from "../broker.context.js";
 export class BrokerInfoBehavior extends McpBehavior {
     public static readonly NAMESPACE = "broker";
 
-    constructor(context: BrokerContext) {
+    constructor(context: IBrokerContext) {
         super(new BrokerInfoAdapter(context), {
             namespace: BrokerInfoBehavior.NAMESPACE,
         });

@@ -11,7 +11,7 @@
  * `StdioUpstream` is reused as-is by the future `.mcpb` bundle loader: a bundle
  * is a local server whose `mcp_config` maps directly onto a stdio upstream.
  */
-export interface Upstream {
+export interface IUpstream {
     /** Provider slot name this upstream is bound to. */
     readonly name: string;
     /** Whether the upstream connection is currently usable. */
@@ -31,3 +31,6 @@ export interface Upstream {
     /** Closes the upstream connection. */
     close(): void;
 }
+
+/** @deprecated Use {@link IUpstream}. */
+export type Upstream = IUpstream;

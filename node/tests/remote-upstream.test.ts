@@ -7,7 +7,7 @@ import type { WsTunnel } from "../src/ws.tunnel.js";
 const BROKER_PORT = 3914;
 const FAKE_PORT = 3915;
 
-interface JsonRpc {
+interface IJsonRpc {
     jsonrpc: "2.0";
     id?: string | number | null;
     method?: string;
@@ -36,9 +36,9 @@ function startFakeHttpServer(): Promise<http.Server> {
             body += chunk.toString("utf8");
         });
         req.on("end", () => {
-            let msg: JsonRpc;
+            let msg: IJsonRpc;
             try {
-                msg = JSON.parse(body) as JsonRpc;
+                msg = JSON.parse(body) as IJsonRpc;
             } catch {
                 res.writeHead(400).end();
                 return;
@@ -69,12 +69,12 @@ function startFakeHttpServer(): Promise<http.Server> {
 }
 
 /** A JSON-RPC client over a raw WebSocket to a broker slot. */
-async function rpcClient(url: string): Promise<{ ws: WebSocket; request(method: string, params: Record<string, unknown>): Promise<JsonRpc> }> {
+async function rpcClient(url: string): Promise<{ ws: WebSocket; request(method: string, params: Record<string, unknown>): Promise<IJsonRpc> }> {
     const ws = new WebSocket(url);
-    const pending = new Map<number, (msg: JsonRpc) => void>();
+    const pending = new Map<number, (msg: IJsonRpc) => void>();
     let nextId = 0;
     ws.on("message", (raw: Buffer) => {
-        const msg = JSON.parse(raw.toString()) as JsonRpc;
+        const msg = JSON.parse(raw.toString()) as IJsonRpc;
         if (typeof msg.id === "number" && pending.has(msg.id)) {
             pending.get(msg.id)?.(msg);
             pending.delete(msg.id);
@@ -85,7 +85,7 @@ async function rpcClient(url: string): Promise<{ ws: WebSocket; request(method: 
         ws,
         request(method, params) {
             const id = ++nextId;
-            return new Promise<JsonRpc>((resolve) => {
+            return new Promise<IJsonRpc>((resolve) => {
                 pending.set(id, resolve);
                 ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
             });

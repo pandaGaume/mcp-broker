@@ -27,7 +27,7 @@ export type BrokerLocale = string;
  * the defaults emitted by `grammarResolverFromOptions`: `claude`, `gpt`,
  * `mistral`, `copilot`, plus the universal `default`. Custom families
  * are supported by passing a custom `agents` map in
- * `StartBrokerServerOptions.grammarResolverOptions`.
+ * `IStartBrokerServerOptions.grammarResolverOptions`.
  */
 export type BrokerUserAgent = string;
 
@@ -134,7 +134,7 @@ export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLoca
  * grammars and any local overrides. No hard-coded list of supported
  * user-agents or locales — adding a new grammar is dropping a JSON file.
  */
-export interface BrokerGrammarEntry {
+export interface IBrokerGrammarEntry {
     userAgent: BrokerUserAgent;
     locale: BrokerLocale;
     /** Set only for filenames carrying an `@<version>` suffix. */
@@ -144,7 +144,7 @@ export interface BrokerGrammarEntry {
     grammar: McpGrammar;
 }
 
-export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<BrokerGrammarEntry> {
+export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<IBrokerGrammarEntry> {
     if (!existsSync(grammarsDir)) return;
 
     const userAgents = readdirSync(grammarsDir).sort();
@@ -188,9 +188,12 @@ export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<BrokerGr
  * For local user overrides, see {@link iterBrokerGrammarsFrom} with a custom
  * directory — typically `.mcp-broker/grammars/` next to the config file.
  */
-export function* iterAvailableBrokerGrammars(): Generator<BrokerGrammarEntry> {
+export function* iterAvailableBrokerGrammars(): Generator<IBrokerGrammarEntry> {
     yield* iterBrokerGrammarsFrom(GRAMMARS_DIR);
 }
+
+/** @deprecated Use {@link IBrokerGrammarEntry}. */
+export type BrokerGrammarEntry = IBrokerGrammarEntry;
 
 // ---------------------------------------------------------------------------
 // Baseline helpers (used by behaviors to source their inline descriptions)

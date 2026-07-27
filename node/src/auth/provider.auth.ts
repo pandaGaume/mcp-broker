@@ -1,5 +1,17 @@
 import { timingSafeEqual } from "crypto";
 import type { IncomingMessage } from "http";
+import { ResourcePath, ResourcePathPattern } from "../authorization/index.js";
+
+export interface IProviderPrincipal {
+    readonly id: string;
+    readonly subjects?: readonly string[];
+    readonly allowedResources?: readonly string[];
+    readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export type ProviderAuthenticationResult = { readonly authenticated: true; readonly principal: IProviderPrincipal } | { readonly authenticated: false; readonly reason?: string };
+
+export type ProviderAuthenticatorReturn = boolean | ProviderAuthenticationResult;
 
 /**
  * Authenticates a **provider** (the engine that connects _into_ the broker to
@@ -9,14 +21,35 @@ import type { IncomingMessage } from "http";
  * slot. Authenticating it is what stops a stranger from occupying a free slot
  * (`ws://host/provider/<slot>`) and impersonating the real engine.
  */
-export interface ProviderAuthenticator {
+export interface IProviderAuthenticator {
     /**
-     * Returns `true` to accept the provider connection. `slot` is the dedicated
-     * slot name for `/provider/<slot>`, or `undefined` for the multiplexed
-     * `/providers` socket (which is authenticated at the socket level, before
-     * any provider name is known).
+     * Returns a structured result, or a legacy boolean for backward
+     * compatibility. `slot` is the dedicated slot name for
+     * `/provider/<slot>`, or `undefined` for the multiplexed `/providers`
+     * socket, which is authenticated before any provider name is known.
      */
-    authenticate(req: IncomingMessage, slot: string | undefined): boolean | Promise<boolean>;
+    authenticate(req: IncomingMessage, slot: string | undefined): ProviderAuthenticatorReturn | Promise<ProviderAuthenticatorReturn>;
+}
+
+export function normalizeProviderAuthentication(result: ProviderAuthenticatorReturn, fallbackId = "legacy-provider"): ProviderAuthenticationResult {
+    if (typeof result === "boolean") {
+        return result ? { authenticated: true, principal: { id: fallbackId, allowedResources: ["**"] } } : { authenticated: false };
+    }
+    if (!result.authenticated) return result;
+    if (!result.principal.id) return { authenticated: false, reason: "provider principal id is empty" };
+    return result;
+}
+
+export function providerMayPublish(principal: IProviderPrincipal, resource: ResourcePath): boolean {
+    const allowed = principal.allowedResources;
+    if (allowed === undefined) return true;
+    if (allowed.length === 0) return false;
+    try {
+        const patterns = allowed.map((pattern) => ResourcePathPattern.parse(pattern));
+        return patterns.some((pattern) => pattern.matches(resource));
+    } catch {
+        return false;
+    }
 }
 
 /** Constant-time string comparison; `false` on any length mismatch. */
@@ -44,13 +77,13 @@ function presentedSecret(req: IncomingMessage): string | null {
 }
 
 /**
- * The default {@link ProviderAuthenticator}: every provider connection must
+ * The default {@link IProviderAuthenticator}: every provider connection must
  * present a single shared secret (via `X-Provider-Token` or `Authorization:
  * Bearer`). Compared in constant time. Suitable when the broker and its
  * providers are operated by the same party; swap in a custom authenticator for
  * per-slot secrets, mTLS, or a signed handshake.
  */
-export class SharedSecretProviderAuthenticator implements ProviderAuthenticator {
+export class SharedSecretProviderAuthenticator implements IProviderAuthenticator {
     private readonly _secret: string;
 
     constructor(secret: string) {
@@ -60,9 +93,22 @@ export class SharedSecretProviderAuthenticator implements ProviderAuthenticator 
         this._secret = secret;
     }
 
-    authenticate(req: IncomingMessage): boolean {
+    authenticate(req: IncomingMessage): ProviderAuthenticationResult {
         const presented = presentedSecret(req);
-        if (!presented) return false;
-        return safeEqual(presented, this._secret);
+        if (!presented || !safeEqual(presented, this._secret)) {
+            return { authenticated: false };
+        }
+        return {
+            authenticated: true,
+            principal: {
+                id: "shared-secret",
+                allowedResources: ["**"],
+            },
+        };
     }
 }
+
+/** @deprecated Use {@link IProviderPrincipal}. */
+export type ProviderPrincipal = IProviderPrincipal;
+/** @deprecated Use {@link IProviderAuthenticator}. */
+export type ProviderAuthenticator = IProviderAuthenticator;

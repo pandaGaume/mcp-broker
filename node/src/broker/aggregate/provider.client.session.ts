@@ -1,5 +1,5 @@
-import type { InternalClient } from "../../ws.tunnel.js";
-import type { CatalogTool, CatalogPrompt } from "./aggregate.catalog.js";
+import type { IInternalClient } from "../../ws.tunnel.js";
+import type { ICatalogTool, ICatalogPrompt } from "./aggregate.catalog.js";
 
 /** MCP protocol version the aggregate sessions negotiate with sub-providers. */
 const PROTOCOL_VERSION = "2024-11-05";
@@ -8,17 +8,17 @@ const PROTOCOL_VERSION = "2024-11-05";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 /** Outcome of a JSON-RPC request: exactly one of `result` / `error` is set. */
-interface RpcOutcome {
+interface IRpcOutcome {
     result?: unknown;
     error?: unknown;
 }
 
-interface PendingRequest {
-    resolve: (outcome: RpcOutcome) => void;
+interface IPendingRequest {
+    resolve: (outcome: IRpcOutcome) => void;
     timer: ReturnType<typeof setTimeout>;
 }
 
-interface IncomingMessage {
+interface IIncomingMessage {
     id?: string | number | null;
     method?: string;
     result?: unknown;
@@ -27,7 +27,7 @@ interface IncomingMessage {
 
 /**
  * A hand-rolled JSON-RPC client session to one aggregated provider, running
- * over an in-process {@link InternalClient}.
+ * over an in-process {@link IInternalClient}.
  *
  * Performs the MCP `initialize` handshake, caches the provider's `tools/list`
  * and `prompts/list`, and re-fetches them when the provider emits a
@@ -37,12 +37,12 @@ interface IncomingMessage {
 export class ProviderClientSession {
     readonly provider: string;
 
-    private readonly _client: InternalClient;
+    private readonly _client: IInternalClient;
     private readonly _idPrefix: string;
-    private readonly _pending = new Map<string, PendingRequest>();
+    private readonly _pending = new Map<string, IPendingRequest>();
     private _nextId = 0;
-    private _tools: CatalogTool[] = [];
-    private _prompts: CatalogPrompt[] = [];
+    private _tools: ICatalogTool[] = [];
+    private _prompts: ICatalogPrompt[] = [];
     private _closed = false;
 
     /** Fires after the cached catalog changes (initial load or `list_changed`). */
@@ -51,7 +51,7 @@ export class ProviderClientSession {
     /** Fires when the underlying provider slot disconnects. */
     onClosed: (() => void) | null = null;
 
-    constructor(provider: string, client: InternalClient) {
+    constructor(provider: string, client: IInternalClient) {
         this.provider = provider;
         this._client = client;
         this._idPrefix = `agg-${provider}-`;
@@ -63,11 +63,11 @@ export class ProviderClientSession {
         };
     }
 
-    get tools(): CatalogTool[] {
+    get tools(): ICatalogTool[] {
         return this._tools;
     }
 
-    get prompts(): CatalogPrompt[] {
+    get prompts(): ICatalogPrompt[] {
         return this._prompts;
     }
 
@@ -83,12 +83,12 @@ export class ProviderClientSession {
     }
 
     /** Forwards a `tools/call` to the provider, relaying the raw outcome. */
-    callTool(name: string, args: Record<string, unknown>): Promise<RpcOutcome> {
+    callTool(name: string, args: Record<string, unknown>): Promise<IRpcOutcome> {
         return this._request("tools/call", { name, arguments: args });
     }
 
     /** Forwards a `prompts/get` to the provider, relaying the raw outcome. */
-    getPrompt(name: string, args: Record<string, unknown>): Promise<RpcOutcome> {
+    getPrompt(name: string, args: Record<string, unknown>): Promise<IRpcOutcome> {
         return this._request("prompts/get", { name, arguments: args });
     }
 
@@ -101,8 +101,8 @@ export class ProviderClientSession {
     }
 
     private async _refresh(): Promise<void> {
-        this._tools = await this._listAll<CatalogTool>("tools/list", "tools");
-        this._prompts = await this._listAll<CatalogPrompt>("prompts/list", "prompts");
+        this._tools = await this._listAll<ICatalogTool>("tools/list", "tools");
+        this._prompts = await this._listAll<ICatalogPrompt>("prompts/list", "prompts");
         this.onCatalogChanged?.();
     }
 
@@ -125,8 +125,8 @@ export class ProviderClientSession {
         return items;
     }
 
-    private _request(method: string, params: unknown): Promise<RpcOutcome> {
-        return new Promise<RpcOutcome>((resolve) => {
+    private _request(method: string, params: unknown): Promise<IRpcOutcome> {
+        return new Promise<IRpcOutcome>((resolve) => {
             if (this._closed) {
                 resolve({ error: { code: -32000, message: "session closed" } });
                 return;
@@ -142,9 +142,9 @@ export class ProviderClientSession {
     }
 
     private _handleMessage(data: string): void {
-        let msg: IncomingMessage;
+        let msg: IIncomingMessage;
         try {
-            msg = JSON.parse(data) as IncomingMessage;
+            msg = JSON.parse(data) as IIncomingMessage;
         } catch {
             return;
         }

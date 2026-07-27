@@ -12,7 +12,7 @@ import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { WebSocket } from "ws";
 
 /** Lifecycle + callbacks shared by every remote client transport. */
-export interface RemoteTransport {
+export interface IRemoteTransport {
     onMessage: ((data: string) => void) | null;
     onOpen: (() => void) | null;
     onClose: (() => void) | null;
@@ -63,7 +63,7 @@ class SseDecoder {
 // WebSocket
 // ---------------------------------------------------------------------------
 
-class WebSocketRemoteTransport implements RemoteTransport {
+class WebSocketRemoteTransport implements IRemoteTransport {
     onMessage: ((data: string) => void) | null = null;
     onOpen: (() => void) | null = null;
     onClose: (() => void) | null = null;
@@ -99,7 +99,7 @@ class WebSocketRemoteTransport implements RemoteTransport {
 // Legacy MCP SSE (GET event stream + POST message endpoint)
 // ---------------------------------------------------------------------------
 
-class SseRemoteTransport implements RemoteTransport {
+class SseRemoteTransport implements IRemoteTransport {
     onMessage: ((data: string) => void) | null = null;
     onOpen: (() => void) | null = null;
     onClose: (() => void) | null = null;
@@ -163,7 +163,7 @@ class SseRemoteTransport implements RemoteTransport {
 // Streamable HTTP (MCP 2025-03-26)
 // ---------------------------------------------------------------------------
 
-class StreamableHttpRemoteTransport implements RemoteTransport {
+class StreamableHttpRemoteTransport implements IRemoteTransport {
     onMessage: ((data: string) => void) | null = null;
     onOpen: (() => void) | null = null;
     onClose: (() => void) | null = null;
@@ -291,7 +291,7 @@ class StreamableHttpRemoteTransport implements RemoteTransport {
 // ---------------------------------------------------------------------------
 
 /** Builds the transport of the given kind. */
-export function createRemoteTransport(url: string, kind: RemoteTransportKind, headers: Record<string, string>): RemoteTransport {
+export function createRemoteTransport(url: string, kind: RemoteTransportKind, headers: Record<string, string>): IRemoteTransport {
     switch (kind) {
         case "websocket":
             return new WebSocketRemoteTransport(url, headers);
@@ -301,6 +301,9 @@ export function createRemoteTransport(url: string, kind: RemoteTransportKind, he
             return new StreamableHttpRemoteTransport(url, headers);
     }
 }
+
+/** @deprecated Use {@link IRemoteTransport}. */
+export type RemoteTransport = IRemoteTransport;
 
 /** Heuristic transport detection from the URL when none is configured. */
 export function detectTransport(url: string): RemoteTransportKind {

@@ -1,6 +1,6 @@
 import { McpAdapterBase, McpToolResults } from "@cyanmycelium/mcp-core";
 import type { McpResourceContent, McpToolResult } from "@cyanmycelium/mcp-core";
-import type { BrokerContext, BrokerProviderInfo } from "../broker.context.js";
+import type { IBrokerContext, IBrokerProviderInfo } from "../broker.context.js";
 
 /** URI of the static resource that lists every provider slot. */
 export const PROVIDERS_URI = "broker://providers";
@@ -13,7 +13,7 @@ export const PROVIDER_URI_TEMPLATE = "broker://providers/{name}";
  * (read of `broker://providers`) and individually (`broker://providers/<name>`).
  */
 export class BrokerProvidersAdapter extends McpAdapterBase {
-    constructor(private readonly _context: BrokerContext) {
+    constructor(private readonly _context: IBrokerContext) {
         super("broker");
     }
 
@@ -60,7 +60,7 @@ export class BrokerProvidersAdapter extends McpAdapterBase {
         }
     }
 
-    private _listSnapshot(): { count: number; providers: BrokerProviderInfo[] } {
+    private _listSnapshot(): { count: number; providers: IBrokerProviderInfo[] } {
         const providers = this._context.getProvidersInfo();
         return { count: providers.length, providers };
     }

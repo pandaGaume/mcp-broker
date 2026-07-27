@@ -120,7 +120,33 @@ Enabled via the `auth` config block (or env vars). Minimal `.mcp-broker/config.j
         "jwks": "https://auth.example.com/.well-known/jwks.json",
         "requiredScopes": ["mcp:call"],
         "perSlotScopes": { "_broker": ["broker:admin"] },
-        "providerScopes": { "weather": ["see:weather"] },
+        "subjectMapping": {
+            "userClaim": "sub",
+            "groupClaims": ["groups"],
+            "clientClaim": "client_id"
+        },
+        "roles": {
+            "viewer": {
+                "capabilities": ["mcp.tools.list", "mcp.resources.read"]
+            },
+            "maintenance": {
+                "inherits": ["viewer"],
+                "capabilities": ["mcp.tools.diagnose"]
+            }
+        },
+        "assignments": [
+            {
+                "subject": "group:maintenance-site-a",
+                "role": "maintenance",
+                "resource": "/enterprise/site-a/**"
+            }
+        ],
+        "slotResources": {
+            "motor-7": "/enterprise/site-a/area-a/line-3/cell-2/motor-7"
+        },
+        "toolCapabilities": {
+            "diagnose_motor": "mcp.tools.diagnose"
+        },
         "providerSecret": "change-me"
     }
 }
@@ -136,9 +162,14 @@ With this on:
   in the `401` challenge.
 - Providers must present `providerSecret` (via `X-Provider-Token` or
   `Authorization: Bearer`) to connect to `/provider/<slot>` or `/providers`.
-- `_all` only shows a caller the providers its token is scoped for.
+- `_all` only shows providers allowed by the caller's hierarchical policy.
+- Explicit denies override inherited role grants.
+- Structured provider principals can publish only inside their allowed resource
+  namespace.
 
 Full model, flows, scopes, and endpoints: **[../docs/authorization.md](../docs/authorization.md)**.
+Roles, resource paths, denies, and migration:
+**[../docs/hierarchical-authorization.md](../docs/hierarchical-authorization.md)**.
 Config field reference: **[docs/config.md](docs/config.md#auth-oauth-21-authorization)**.
 
 ## Programmatic API
@@ -161,7 +192,17 @@ const broker = new WsTunnelBuilder()
         authorizationServers: ["https://auth.example.com"],
         jwksUri: "https://auth.example.com/.well-known/jwks.json",
         requiredScopes: ["mcp:call"],
-        providerScopes: { weather: ["see:weather"] },
+        roles: {
+            viewer: { capabilities: ["mcp.tools.list"] },
+        },
+        assignments: [
+            {
+                subject: "group:operators",
+                role: "viewer",
+                resource: "/enterprise/site-a/**",
+            },
+        ],
+        subjectMapping: { groupClaims: ["groups"] },
     })
     .withProviderSecret(process.env.PROVIDER_SECRET!)
     .build();
@@ -169,7 +210,13 @@ const broker = new WsTunnelBuilder()
 await broker.start();
 ```
 
-All builder methods are documented inline. The full options interface is `WsTunnelOptions`, also exported. For a custom token validator (e.g. RFC 7662 introspection) or provider authenticator, use `withAuth(resolvedAuth)` / `withProviderAuth(authenticator)` with your own `TokenValidator` / `ProviderAuthenticator` (both interfaces are exported).
+All builder methods are documented inline. The full options interface is
+`IWsTunnelOptions`, also exported. Use `withAuthorizationPolicy` for a
+standalone policy configuration, `withPolicyEngine` for a custom engine, and
+`withSlotResourceResolver` for a custom namespace mapping. For a custom token
+validator (for example RFC 7662 introspection) or provider authenticator, use
+`withAuth(resolvedAuth)` or `withProviderAuth(authenticator)` with your own
+`ITokenValidator` or `IProviderAuthenticator`.
 
 ## TLS for local development
 

@@ -21,6 +21,10 @@ Two independent concerns:
 Out of scope (by the spec): the **stdio** transport (credentials come from the
 environment) and in-process **loopback** clients (the broker's own components).
 
+OAuth scopes remain available as coarse gates. For industrial namespace
+authorization based on who, what, and where, see
+[Hierarchical authorization](hierarchical-authorization.md).
+
 ---
 
 ## Model
@@ -114,7 +118,7 @@ handshake.
 The default validator verifies JWT access tokens **statelessly**: it checks the
 signature against the AS's JWKS, the issuer, the audience (`aud` must equal the
 slot's canonical resource), and expiry. No per-request round-trip to the AS, no
-shared secret. A pluggable `TokenValidator` seam lets a deployment swap in
+shared secret. A pluggable `ITokenValidator` seam lets a deployment swap in
 opaque-token introspection (RFC 7662) or any custom logic without touching the
 enforcement code.
 
@@ -128,7 +132,7 @@ Three layers, all optional:
 |---|---|
 | `requiredScopes` | Baseline scope(s) any caller must hold to reach any slot. Empty ⇒ any valid token passes. |
 | `perSlotScopes[slot]` | Override for one slot. E.g. require an admin scope on `_broker`. |
-| `providerScopes[provider]` | Narrows the `_all` aggregate: a caller sees a provider's tools/prompts only if it holds one of the listed scopes. |
+| `providerScopes[provider]` | Deprecated. Narrows the `_all` aggregate by scope and combines restrictively with hierarchical policies. |
 
 ### `_all` per-client filtering
 
@@ -150,6 +154,34 @@ caller (opt-in per provider).
 
 ---
 
+## Hierarchical policies
+
+When `roles`, `assignments`, or `denies` are configured, the broker also
+evaluates each MCP operation against a compiled hierarchical policy:
+
+```text
+JWT subjects + functional capability + resource path -> allow or deny
+```
+
+Roles define what a caller may do. Assignments bind roles to subjects and
+resource subtrees. Explicit denies override every allow. Technical slot names
+can be mapped to stable paths such as:
+
+```text
+/enterprise/site/area/line/cell/asset
+```
+
+The policy engine applies to direct slot transports and to every provider
+exposed through `_all`. Unauthorized aggregate calls use the same error as an
+unknown provider or tool. Provider identities may also be restricted to
+specific resource subtrees.
+
+The complete model, configuration, validation rules, examples, provider
+principals, and `providerScopes` migration procedure are documented in
+[Hierarchical authorization](hierarchical-authorization.md).
+
+---
+
 ## Provider authentication
 
 A separate concern from client authorization: a provider is the backend that
@@ -168,8 +200,14 @@ Authorization: Bearer <secret>
 ```
 
 A failed handshake is rejected with `401` before the connection is accepted.
-The default is a single shared secret; swap in a custom `ProviderAuthenticator`
+The default is a single shared secret; swap in a custom `IProviderAuthenticator`
 for per-slot secrets, mTLS, or a signed handshake.
+
+A custom authenticator can return a structured `IProviderPrincipal` with
+`allowedResources`. The broker then rejects a dedicated registration outside
+that namespace before the slot becomes visible. A multiplexed connection checks
+each announced slot independently. The shared-secret implementation remains
+unrestricted for backward compatibility.
 
 ---
 
@@ -193,4 +231,5 @@ scope.
 
 See the Node implementation's [config reference](../node/docs/config.md#auth-oauth-21-authorization)
 for the concrete `auth` block, environment variables, and the builder API
-(`withJwtAuth`, `withProviderSecret`).
+(`withJwtAuth`, `withProviderSecret`, `withAuthorizationPolicy`,
+`withPolicyEngine`, `withSlotResourceResolver`).

@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { WsTunnelBuilder, AuthError, type WsTunnel, type ResolvedAuth, type TokenValidator } from "../src/index.js";
+import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index.js";
 
-const validator: TokenValidator = {
+const validator: ITokenValidator = {
     async validate(token, resource) {
         if (token === "good") return { sub: "u1", aud: resource, scope: "mcp:call" };
         if (token === "admin") return { sub: "root", aud: resource, scope: "mcp:call broker:admin" };
@@ -15,7 +15,7 @@ const SECRET = "provider-s3cr3t";
 
 let tunnel: WsTunnel | null = null;
 
-async function start(opts: { auth?: ResolvedAuth; providerSecret?: string }): Promise<{ port: number }> {
+async function start(opts: { auth?: IResolvedAuth; providerSecret?: string }): Promise<{ port: number }> {
     const builder = new WsTunnelBuilder().withPort(0).withHost("127.0.0.1");
     if (opts.auth) builder.withAuth(opts.auth);
     if (opts.providerSecret) builder.withProviderSecret(opts.providerSecret);
@@ -96,7 +96,7 @@ describe("provider (engine) authentication — closes slot occupation", () => {
 describe("_broker introspection is gated once auth is enabled", () => {
     const RPC = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
 
-    const auth: ResolvedAuth = {
+    const auth: IResolvedAuth = {
         publicBaseUrl: "https://broker.test",
         authorizationServers: ["https://as.test"],
         validator,

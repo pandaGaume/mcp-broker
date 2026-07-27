@@ -8,7 +8,7 @@ const BASE = `ws://127.0.0.1:${PORT}`;
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-interface JsonRpc {
+interface IJsonRpc {
     jsonrpc: "2.0";
     id?: string | number | null;
     method?: string;
@@ -26,7 +26,7 @@ function fakeProvider(label: string, tools: Record<string, unknown>[], prompts: 
     const ws = new WebSocket(`${BASE}/provider/${label}`);
     ws.on("open", () => ws.send(JSON.stringify({ type: "register", aggregate: true })));
     ws.on("message", (raw: Buffer) => {
-        const msg = JSON.parse(raw.toString()) as JsonRpc;
+        const msg = JSON.parse(raw.toString()) as IJsonRpc;
         if (msg.id == null) return; // notification
         let result: Record<string, unknown>;
         switch (msg.method) {
@@ -55,15 +55,15 @@ function fakeProvider(label: string, tools: Record<string, unknown>[], prompts: 
 async function rpcClient(url: string): Promise<{
     ws: WebSocket;
     notifications: string[];
-    request(method: string, params: Record<string, unknown>): Promise<JsonRpc>;
+    request(method: string, params: Record<string, unknown>): Promise<IJsonRpc>;
 }> {
     const ws = new WebSocket(url);
-    const pending = new Map<number, (msg: JsonRpc) => void>();
+    const pending = new Map<number, (msg: IJsonRpc) => void>();
     const notifications: string[] = [];
     let nextId = 0;
 
     ws.on("message", (raw: Buffer) => {
-        const msg = JSON.parse(raw.toString()) as JsonRpc;
+        const msg = JSON.parse(raw.toString()) as IJsonRpc;
         if (msg.id != null && typeof msg.id === "number" && pending.has(msg.id)) {
             pending.get(msg.id)?.(msg);
             pending.delete(msg.id);
@@ -78,7 +78,7 @@ async function rpcClient(url: string): Promise<{
         notifications,
         request(method, params) {
             const id = ++nextId;
-            return new Promise<JsonRpc>((resolve) => {
+            return new Promise<IJsonRpc>((resolve) => {
                 pending.set(id, resolve);
                 ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
             });

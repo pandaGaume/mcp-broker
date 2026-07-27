@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { AuthError, scopesOf, type Principal, type ResolvedAuth } from "./auth.types.js";
-import { buildResourceMetadata, type ProtectedResourceMetadata } from "./resource.metadata.js";
+import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types.js";
+import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata.js";
+import { SubjectMappingError } from "../authorization/index.js";
 
 /** Well-known prefix under which per-slot Protected Resource Metadata is served. */
 const PRM_PREFIX = "/.well-known/oauth-protected-resource/";
@@ -19,7 +20,7 @@ function headerSafe(value: string): string {
 
 /**
  * The HTTP enforcement point for the resource-server layer. Wraps a
- * {@link ResolvedAuth} plus the configured `/mcp` path suffix and turns it into
+ * {@link IResolvedAuth} plus the configured `/mcp` path suffix and turns it into
  * the three operations the transport needs: serve Protected Resource Metadata,
  * authorize a request, and write an RFC 9728 `401`/`403` challenge.
  *
@@ -28,11 +29,11 @@ function headerSafe(value: string): string {
  * `/messages`) so a single token audience covers the whole slot.
  */
 export class HttpAuthGuard {
-    private readonly _auth: ResolvedAuth;
+    private readonly _auth: IResolvedAuth;
     /** The `/mcp` suffix without a leading slash, e.g. `"mcp"`. */
     private readonly _mcpSuffix: string;
 
-    constructor(auth: ResolvedAuth, mcpSuffix: string) {
+    constructor(auth: IResolvedAuth, mcpSuffix: string) {
         this._auth = auth;
         this._mcpSuffix = mcpSuffix.replace(/^\//, "");
     }
@@ -53,7 +54,7 @@ export class HttpAuthGuard {
     }
 
     /** The RFC 9728 metadata document for a slot. */
-    metadataFor(slot: string): ProtectedResourceMetadata {
+    metadataFor(slot: string): IProtectedResourceMetadata {
         return buildResourceMetadata({
             resource: this.resourceFor(slot),
             authorizationServers: this._auth.authorizationServers,
@@ -75,11 +76,11 @@ export class HttpAuthGuard {
 
     /**
      * Validates the request's bearer token against the slot's canonical resource
-     * and enforces the slot's required scopes. Resolves to the {@link Principal}
+     * and enforces the slot's required scopes. Resolves to the {@link IPrincipal}
      * on success; rejects with an {@link AuthError} (`401` missing/invalid token,
      * `403` insufficient scope) otherwise.
      */
-    async authorize(req: IncomingMessage, slot: string): Promise<Principal> {
+    async authorize(req: IncomingMessage, slot: string): Promise<IPrincipal> {
         const token = extractBearer(req.headers["authorization"]);
         if (!token) {
             throw new AuthError(401, "invalid_token", "Missing bearer token");
@@ -94,7 +95,17 @@ export class HttpAuthGuard {
             throw new AuthError(403, "insufficient_scope", `Missing required scope(s): ${missing.join(" ")}`, required.join(" "));
         }
 
-        return { claims, scopes };
+        let subject: IPrincipal["subject"];
+        try {
+            subject = this._auth.authorization?.subjectMapper.map(claims);
+        } catch (error) {
+            if (error instanceof SubjectMappingError) {
+                throw new AuthError(403, "insufficient_scope", "Malformed configured JWT subject claim");
+            }
+            throw error;
+        }
+
+        return subject ? { claims, scopes, subject } : { claims, scopes };
     }
 
     /**

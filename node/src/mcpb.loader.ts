@@ -1,5 +1,5 @@
 /**
- * Loads a local `.mcpb` bundle into a {@link StdioUpstreamConfig}.
+ * Loads a local `.mcpb` bundle into an {@link IStdioUpstreamConfig}.
  *
  * A `.mcpb` bundle is a ZIP holding a `manifest.json` whose `server.mcp_config`
  * describes a stdio MCP server process. The broker:
@@ -8,7 +8,7 @@
  *    public key (PEM) — integrity *and* provenance, using `node:crypto` only;
  * 2. unpacks the archive;
  * 3. reads the manifest, expands the `mcp_config` placeholders, and produces a
- *    `StdioUpstreamConfig` that the existing upstream wiring spawns.
+ *    `IStdioUpstreamConfig` that the existing upstream wiring spawns.
  *
  * The broker stays compatible with the `.mcpb` format without depending on the
  * `@anthropic-ai/mcpb` package: the bundle's *own* (native PKCS#7) signature is
@@ -23,10 +23,10 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { unzipMcpb } from "./mcpb.unzip.js";
-import type { StdioUpstreamConfig } from "./stdio.upstream.js";
+import type { IStdioUpstreamConfig } from "./stdio.upstream.js";
 
 /** A `.mcpb` bundle entry from the broker config file. */
-export interface McpbBundleConfig {
+export interface IMcpbBundleConfig {
     /** Provider slot name the bundle is bound to. */
     name: string;
     /** Path to the `.mcpb` file. */
@@ -41,7 +41,7 @@ export interface McpbBundleConfig {
     aggregate?: boolean;
 }
 
-interface McpConfig {
+interface IMcpConfig {
     command?: string;
     args?: string[];
     env?: Record<string, string>;
@@ -65,7 +65,7 @@ function verifyDetachedSignature(data: Buffer, signature: Buffer, publicKey: Key
 }
 
 /** Resolves a single `${...}` placeholder key, or `undefined` when unknown. */
-function resolvePlaceholder(key: string, dirname: string, userConfig: McpbBundleConfig["userConfig"]): string | number | boolean | Array<string | number> | undefined {
+function resolvePlaceholder(key: string, dirname: string, userConfig: IMcpbBundleConfig["userConfig"]): string | number | boolean | Array<string | number> | undefined {
     if (key === "__dirname") return dirname;
     if (key === "HOME") return homedir();
     if (key === "DESKTOP") return join(homedir(), "Desktop");
@@ -82,7 +82,7 @@ function resolvePlaceholder(key: string, dirname: string, userConfig: McpbBundle
 }
 
 /** Expands placeholders in a scalar string (command, env value). */
-function expandScalar(input: string, dirname: string, userConfig: McpbBundleConfig["userConfig"]): string {
+function expandScalar(input: string, dirname: string, userConfig: IMcpbBundleConfig["userConfig"]): string {
     return input.replace(/\$\{([^}]+)\}/g, (match, key: string) => {
         const value = resolvePlaceholder(key, dirname, userConfig);
         if (value === undefined) return match; // unknown placeholder — leave verbatim
@@ -92,7 +92,7 @@ function expandScalar(input: string, dirname: string, userConfig: McpbBundleConf
 }
 
 /** Expands one manifest argument; a standalone multi-valued placeholder spreads. */
-function expandArg(arg: string, dirname: string, userConfig: McpbBundleConfig["userConfig"]): string[] {
+function expandArg(arg: string, dirname: string, userConfig: IMcpbBundleConfig["userConfig"]): string[] {
     const standalone = /^\$\{(user_config\.[^}]+)\}$/.exec(arg);
     if (standalone) {
         const value = resolvePlaceholder(standalone[1], dirname, userConfig);
@@ -103,13 +103,13 @@ function expandArg(arg: string, dirname: string, userConfig: McpbBundleConfig["u
 }
 
 /**
- * Verifies, unpacks and resolves a `.mcpb` bundle into a `StdioUpstreamConfig`.
+ * Verifies, unpacks and resolves a `.mcpb` bundle into an `IStdioUpstreamConfig`.
  *
  * @param cfg      The bundle entry from the broker config.
  * @param baseDir  Directory the bundle paths are resolved against.
  * @returns        A ready upstream config, or `null` when the bundle is refused.
  */
-export async function loadMcpbBundle(cfg: McpbBundleConfig, baseDir: string): Promise<StdioUpstreamConfig | null> {
+export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): Promise<IStdioUpstreamConfig | null> {
     const tag = `[mcp-broker] mcpb bundle "${cfg.name}"`;
     try {
         const mcpbPath = resolve(baseDir, cfg.path);
@@ -147,7 +147,7 @@ export async function loadMcpbBundle(cfg: McpbBundleConfig, baseDir: string): Pr
             console.error(`${tag}: manifest.json missing inside the bundle — bundle refused.`);
             return null;
         }
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { server?: { mcp_config?: McpConfig } };
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { server?: { mcp_config?: IMcpConfig } };
         const mcpConfig = manifest.server?.mcp_config;
         if (!mcpConfig) {
             console.error(`${tag}: manifest has no server.mcp_config — bundle refused.`);
@@ -184,3 +184,6 @@ export async function loadMcpbBundle(cfg: McpbBundleConfig, baseDir: string): Pr
         return null;
     }
 }
+
+/** @deprecated Use {@link IMcpbBundleConfig}. */
+export type McpbBundleConfig = IMcpbBundleConfig;

@@ -1,7 +1,7 @@
-import type { Upstream } from "./upstream.js";
-import { createRemoteTransport, detectTransport, type RemoteTransport, type RemoteTransportKind } from "./remote.transports.js";
+import type { IUpstream } from "./upstream.js";
+import { createRemoteTransport, detectTransport, type IRemoteTransport, type RemoteTransportKind } from "./remote.transports.js";
 
-export interface RemoteUpstreamConfig {
+export interface IRemoteUpstreamConfig {
     /** Provider slot name this upstream is bound to. */
     name: string;
     /** URL of the remote MCP server. */
@@ -21,7 +21,7 @@ export interface RemoteUpstreamConfig {
  * muxes the slot's clients onto this single upstream. The only difference is
  * the transport — Streamable HTTP / SSE / WebSocket instead of a child process.
  */
-export class RemoteUpstream implements Upstream {
+export class RemoteUpstream implements IUpstream {
     readonly name: string;
 
     onMessage: ((data: string) => void) | null = null;
@@ -29,11 +29,11 @@ export class RemoteUpstream implements Upstream {
     onClose: (() => void) | null = null;
     onError: ((error: Error) => void) | null = null;
 
-    private readonly _config: RemoteUpstreamConfig;
-    private _transport: RemoteTransport | null = null;
+    private readonly _config: IRemoteUpstreamConfig;
+    private _transport: IRemoteTransport | null = null;
     private _open = false;
 
-    constructor(config: RemoteUpstreamConfig) {
+    constructor(config: IRemoteUpstreamConfig) {
         this.name = config.name;
         this._config = config;
     }
@@ -73,3 +73,6 @@ export class RemoteUpstream implements Upstream {
         this._transport = null;
     }
 }
+
+/** @deprecated Use {@link IRemoteUpstreamConfig}. */
+export type RemoteUpstreamConfig = IRemoteUpstreamConfig;

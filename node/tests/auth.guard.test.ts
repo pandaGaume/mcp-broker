@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { IncomingMessage, ServerResponse } from "http";
-import { HttpAuthGuard, AuthError, type ResolvedAuth, type TokenValidator, type AccessTokenClaims } from "../src/auth/index.js";
+import { HttpAuthGuard, AuthError, type IResolvedAuth, type ITokenValidator, type IAccessTokenClaims } from "../src/auth/index.js";
 
 /** A stub validator that echoes canned claims keyed by the raw token string. */
-function stubValidator(table: Record<string, AccessTokenClaims>): TokenValidator {
+function stubValidator(table: Record<string, IAccessTokenClaims>): ITokenValidator {
     return {
-        async validate(token: string, resource: string): Promise<AccessTokenClaims> {
+        async validate(token: string, resource: string): Promise<IAccessTokenClaims> {
             const claims = table[token];
             if (!claims) throw new AuthError(401, "invalid_token", "unknown token");
             // Echo the resource into aud so downstream shape looks realistic.
@@ -14,8 +14,8 @@ function stubValidator(table: Record<string, AccessTokenClaims>): TokenValidator
     };
 }
 
-function makeGuard(overrides: Partial<ResolvedAuth> = {}): HttpAuthGuard {
-    const auth: ResolvedAuth = {
+function makeGuard(overrides: Partial<IResolvedAuth> = {}): HttpAuthGuard {
+    const auth: IResolvedAuth = {
         publicBaseUrl: "https://broker.test",
         authorizationServers: ["https://as.test"],
         scopesSupported: ["mcp:call"],

@@ -3,17 +3,17 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startBrokerServer } from "../src/broker/index.js";
-import type { BrokerContext } from "../src/broker/index.js";
+import type { IBrokerContext } from "../src/broker/index.js";
 import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 
 // ---------------------------------------------------------------------------
-// Lightweight BrokerContext stub. The grammar wiring is exercised end-to-end
+// Lightweight IBrokerContext stub. The grammar wiring is exercised end-to-end
 // through `startBrokerServer`'s loopback transport, but the broker context is
 // only read by the BrokerInfoBehavior / BrokerProvidersBehavior at runtime,
 // so a minimal stub suffices for the grammar tests.
 // ---------------------------------------------------------------------------
 
-function makeContext(): BrokerContext {
+function makeContext(): IBrokerContext {
     return {
         version: "test",
         name: "test-broker",
@@ -30,7 +30,7 @@ function makeContext(): BrokerContext {
 
 // JSON-RPC helpers driving the loopback transport returned by startBrokerServer.
 
-interface JsonRpcMessage {
+interface IJsonRpcMessage {
     jsonrpc: "2.0";
     id?: number;
     method?: string;
@@ -46,13 +46,13 @@ interface JsonRpcMessage {
  * the receive callback to model the real wire protocol.
  */
 function rpc(transport: IMessageTransport): {
-    request(method: string, params?: unknown): Promise<JsonRpcMessage>;
+    request(method: string, params?: unknown): Promise<IJsonRpcMessage>;
 } {
     let nextId = 1;
-    const pending = new Map<number, (msg: JsonRpcMessage) => void>();
+    const pending = new Map<number, (msg: IJsonRpcMessage) => void>();
 
     transport.onMessage = (raw) => {
-        const msg = JSON.parse(raw) as JsonRpcMessage;
+        const msg = JSON.parse(raw) as IJsonRpcMessage;
         if (typeof msg.id === "number" && pending.has(msg.id)) {
             pending.get(msg.id)?.(msg);
             pending.delete(msg.id);
@@ -70,13 +70,13 @@ function rpc(transport: IMessageTransport): {
     };
 }
 
-interface ToolEntry {
+interface IToolEntry {
     name: string;
     description?: string;
 }
 
-function findToolDescription(toolsList: JsonRpcMessage, name: string): string | undefined {
-    const result = toolsList.result as { tools?: ToolEntry[] } | undefined;
+function findToolDescription(toolsList: IJsonRpcMessage, name: string): string | undefined {
+    const result = toolsList.result as { tools?: IToolEntry[] } | undefined;
     return result?.tools?.find((t) => t.name === name)?.description;
 }
 

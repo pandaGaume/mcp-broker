@@ -1,6 +1,15 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
-import type { InternalClient } from "../../ws.tunnel.js";
-import type { AggregateScopeFilter, Principal } from "../../auth/index.js";
+import type { IInternalClient } from "../../ws.tunnel.js";
+import type { AggregateScopeFilter, IPrincipal } from "../../auth/index.js";
+import {
+    SubjectMappingError,
+    makeAuthorizationAuditEvent,
+    writeAuthorizationAuditEvent,
+    type IAuthorizationDecision,
+    type IAuthorizationSubject,
+    type IMcpOperation,
+    type IPolicyAuthorization,
+} from "../../authorization/index.js";
 import { AggregateCatalog } from "./aggregate.catalog.js";
 import { ProviderClientSession } from "./provider.client.session.js";
 
@@ -8,15 +17,15 @@ import { ProviderClientSession } from "./provider.client.session.js";
 const PROTOCOL_VERSION = "2024-11-05";
 
 /** Opens an in-process client to a named provider slot. Supplied by WsTunnel. */
-export type InternalClientFactory = (providerName: string) => InternalClient;
+export type InternalClientFactory = (providerName: string) => IInternalClient;
 
-interface ClientMessage {
+interface IClientMessage {
     id?: string | number | null;
     method?: string;
     params?: unknown;
 }
 
-interface CallParams {
+interface ICallParams {
     name?: string;
     arguments?: Record<string, unknown>;
 }
@@ -40,6 +49,8 @@ export class AggregateServer implements IMessageTransport {
     private _running = false;
     /** Per-caller provider visibility filter; `null` ⇒ every caller sees all. */
     private _scopeFilter: AggregateScopeFilter | null = null;
+    /** Provider-aware hierarchical authorization, absent in legacy mode. */
+    private _authorization: IPolicyAuthorization | null = null;
 
     onMessage: ((data: string) => void) | null = null;
     onOpen: (() => void) | null = null;
@@ -69,6 +80,11 @@ export class AggregateServer implements IMessageTransport {
         this._scopeFilter = filter;
     }
 
+    /** Sets the compiled hierarchical policy runtime. */
+    setPolicyAuthorization(authorization: IPolicyAuthorization | null): void {
+        this._authorization = authorization;
+    }
+
     /** WsTunnel hands a client request for the `_all` slot here (no principal). */
     send(data: string): void {
         void this._handleClientMessage(data, null);
@@ -78,7 +94,7 @@ export class AggregateServer implements IMessageTransport {
      * Like {@link send}, but carries the authenticated caller so the aggregate
      * narrows the catalog and routing to the providers the caller may see.
      */
-    sendAs(data: string, principal: Principal | null): void {
+    sendAs(data: string, principal: IPrincipal | null): void {
         void this._handleClientMessage(data, principal);
     }
 
@@ -125,24 +141,98 @@ export class AggregateServer implements IMessageTransport {
         this._emitListChanged();
     }
 
-    /** Builds a provider-visibility predicate for a caller (allow-all when unfiltered). */
-    private _allow(principal: Principal | null): (provider: string) => boolean {
-        const filter = this._scopeFilter;
-        if (!filter || !principal) return () => true;
-        return (provider) => filter(principal, provider);
+    private _subjectFor(principal: IPrincipal | null): IAuthorizationSubject {
+        if (principal?.subject) return principal.subject;
+        if (!principal) return { ids: [] };
+        try {
+            return (
+                this._authorization?.subjectMapper.map(principal.claims) ?? {
+                    ids: [],
+                    claims: principal.claims,
+                }
+            );
+        } catch (error) {
+            if (!(error instanceof SubjectMappingError)) {
+                console.error("[broker] aggregate authorization subject mapping failed.");
+            }
+            return { ids: [], claims: principal.claims };
+        }
     }
 
-    private async _handleClientMessage(data: string, principal: Principal | null): Promise<void> {
-        let msg: ClientMessage;
+    private _scopeAllows(principal: IPrincipal | null, provider: string): boolean {
+        const filter = this._scopeFilter;
+        return !filter || !principal || filter(principal, provider);
+    }
+
+    private _policyAllows(principal: IPrincipal | null, provider: string, operation: IMcpOperation): boolean {
+        const authorization = this._authorization;
+        if (!authorization) return true;
+
+        const subject = this._subjectFor(principal);
+        const resource = authorization.slotResourceResolver.resolve(provider);
+        if (!resource) {
+            const decision: IAuthorizationDecision = { allowed: false, reason: "unknown-resource" };
+            writeAuthorizationAuditEvent(makeAuthorizationAuditEvent({ subject, slot: AggregateServer.SLOT, provider }, decision));
+            return false;
+        }
+
         try {
-            msg = JSON.parse(data) as ClientMessage;
+            const classified = authorization.capabilityClassifier.classify(operation, resource, provider);
+            if (!classified) return true;
+            const decision = authorization.engine.authorize({
+                subject,
+                capability: classified.capability,
+                resource,
+                provider,
+                tool: classified.tool,
+            });
+            if (!decision.allowed || authorization.audit.logAllowed) {
+                writeAuthorizationAuditEvent(
+                    makeAuthorizationAuditEvent(
+                        {
+                            subject,
+                            slot: AggregateServer.SLOT,
+                            resource,
+                            capability: classified.capability,
+                            provider,
+                            tool: classified.tool,
+                        },
+                        decision
+                    )
+                );
+            }
+            return decision.allowed;
+        } catch {
+            console.error("[broker] aggregate policy evaluation failed.");
+            const decision: IAuthorizationDecision = { allowed: false, reason: "no-matching-grant" };
+            writeAuthorizationAuditEvent(
+                makeAuthorizationAuditEvent(
+                    {
+                        subject,
+                        slot: AggregateServer.SLOT,
+                        resource,
+                        provider,
+                    },
+                    decision
+                )
+            );
+            return false;
+        }
+    }
+
+    private _allows(principal: IPrincipal | null, provider: string, operation: IMcpOperation): boolean {
+        return this._scopeAllows(principal, provider) && this._policyAllows(principal, provider, operation);
+    }
+
+    private async _handleClientMessage(data: string, principal: IPrincipal | null): Promise<void> {
+        let msg: IClientMessage;
+        try {
+            msg = JSON.parse(data) as IClientMessage;
         } catch {
             return;
         }
         const id = msg.id;
         if (id == null) return; // client notification — nothing to answer
-
-        const allow = this._allow(principal);
 
         switch (msg.method) {
             case "initialize":
@@ -158,28 +248,41 @@ export class AggregateServer implements IMessageTransport {
                 this._reply(id, { result: {} });
                 break;
             case "tools/list":
-                this._reply(id, { result: { tools: this._catalog.toolsFor(allow) } });
+                this._reply(id, {
+                    result: {
+                        tools: this._catalog.toolsFor((provider) => this._allows(principal, provider, { method: "tools/list" })),
+                    },
+                });
                 break;
             case "prompts/list":
-                this._reply(id, { result: { prompts: this._catalog.promptsFor(allow) } });
+                this._reply(id, {
+                    result: {
+                        prompts: this._catalog.promptsFor((provider) => this._allows(principal, provider, { method: "prompts/list" })),
+                    },
+                });
                 break;
             case "tools/call":
-                await this._route(id, msg.params, "tool", allow);
+                await this._route(id, msg.params, "tool", principal);
                 break;
             case "prompts/get":
-                await this._route(id, msg.params, "prompt", allow);
+                await this._route(id, msg.params, "prompt", principal);
                 break;
             default:
                 this._reply(id, { error: { code: -32601, message: `Method not found: ${msg.method ?? "(none)"}` } });
         }
     }
 
-    private async _route(id: string | number, params: unknown, kind: "tool" | "prompt", allow: (provider: string) => boolean): Promise<void> {
-        const p = (params ?? {}) as CallParams;
+    private async _route(id: string | number, params: unknown, kind: "tool" | "prompt", principal: IPrincipal | null): Promise<void> {
+        const p = (params ?? {}) as ICallParams;
         const route = p.name ? (kind === "tool" ? this._catalog.resolveTool(p.name) : this._catalog.resolvePrompt(p.name)) : undefined;
         // Treat a provider the caller may not see as if it did not exist — do not
         // leak its presence through a distinct "forbidden" error.
-        if (!route || !allow(route.provider)) {
+        const operation: IMcpOperation | undefined = route
+            ? kind === "tool"
+                ? { method: "tools/call", params: { name: route.original } }
+                : { method: "prompts/get", params: { name: route.original } }
+            : undefined;
+        if (!route || !operation || !this._allows(principal, route.provider, operation)) {
             this._reply(id, { error: { code: -32602, message: `Unknown aggregated ${kind}: ${p.name ?? "(none)"}` } });
             return;
         }

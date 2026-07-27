@@ -3,7 +3,7 @@ import type { GrammarResolverOptions, IMcpServer, IMessageTransport } from "@cya
 import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info.js";
 import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers.js";
 import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars.js";
-import type { BrokerContext } from "./broker.context.js";
+import type { IBrokerContext } from "./broker.context.js";
 
 /**
  * Reserved provider slot name under which the broker exposes itself as an MCP
@@ -19,7 +19,7 @@ export const BROKER_PROVIDER_NAME = "_broker";
  * replace either resolver with custom logic without touching mcp-broker
  * internals.
  */
-export interface StartBrokerServerOptions {
+export interface IStartBrokerServerOptions {
     /**
      * Overrides for the built-in grammar resolver from `@cyanmycelium/mcp-core`.
      *
@@ -69,8 +69,8 @@ export interface StartBrokerServerOptions {
  *          loopback transport to attach to the tunnel.
  */
 export async function startBrokerServer(
-    context: BrokerContext,
-    options: StartBrokerServerOptions = {}
+    context: IBrokerContext,
+    options: IStartBrokerServerOptions = {}
 ): Promise<{
     server: IMcpServer;
     clientTransport: IMessageTransport;
@@ -124,3 +124,6 @@ export async function startBrokerServer(
 
     return { server, clientTransport: clientEnd };
 }
+
+/** @deprecated Use {@link IStartBrokerServerOptions}. */
+export type StartBrokerServerOptions = IStartBrokerServerOptions;

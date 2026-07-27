@@ -1,5 +1,35 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import type { IAuthorizationPolicyConfig } from "./authorization/index.js";
+
+export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
+    /** Master switch. Absent/`false` keeps the broker unauthenticated. */
+    enabled?: boolean;
+    /** Public origin the broker is reached at (e.g. `https://mcp.example.com`). */
+    publicBaseUrl?: string;
+    /** Authorization server issuer URL(s) advertised in the metadata. */
+    authorizationServers?: string[];
+    /** URL of the authorization server's JWKS document. */
+    jwks?: string;
+    /** Expected token issuer. Defaults to the sole `authorizationServers` entry. */
+    issuer?: string;
+    /** Scopes advertised in the metadata `scopes_supported`. */
+    scopesSupported?: string[];
+    /** Baseline scope(s) required to reach any slot. */
+    requiredScopes?: string[];
+    /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
+    perSlotScopes?: Record<string, string[]>;
+    /**
+     * Per-provider scope requirements for the `_all` aggregate. Deprecated in
+     * favor of hierarchical policy assignments.
+     */
+    providerScopes?: Record<string, string[]>;
+    /**
+     * Shared secret every provider must present to occupy a slot. Independent
+     * of client authorization.
+     */
+    providerSecret?: string;
+}
 
 /**
  * Shape of the optional JSON config file consumed by `bin.ts` at startup.
@@ -18,7 +48,7 @@ import { dirname, resolve } from "node:path";
  * }
  * ```
  */
-export interface BrokerConfig {
+export interface IBrokerConfig {
     /** TCP port. Maps to `MCP_BROKER_PORT`. */
     port?: number;
 
@@ -47,36 +77,7 @@ export interface BrokerConfig {
      * Scalars also map to env vars (which win): `MCP_BROKER_AUTH_ENABLED`,
      * `MCP_BROKER_PUBLIC_BASE_URL`, `MCP_BROKER_JWKS`, `MCP_BROKER_ISSUER`.
      */
-    auth?: {
-        /** Master switch. Absent/`false` keeps the broker unauthenticated. */
-        enabled?: boolean;
-        /** Public origin the broker is reached at (e.g. `https://mcp.example.com`). */
-        publicBaseUrl?: string;
-        /** Authorization server issuer URL(s) advertised in the metadata. */
-        authorizationServers?: string[];
-        /** URL of the authorization server's JWKS document. */
-        jwks?: string;
-        /** Expected token issuer. Defaults to the sole `authorizationServers` entry. */
-        issuer?: string;
-        /** Scopes advertised in the metadata `scopes_supported`. */
-        scopesSupported?: string[];
-        /** Baseline scope(s) required to reach any slot. */
-        requiredScopes?: string[];
-        /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
-        perSlotScopes?: Record<string, string[]>;
-        /**
-         * Per-provider scope requirements for the `_all` aggregate. A caller sees
-         * a provider in `_all` only if it holds at least one of the listed scopes.
-         * Providers not listed stay visible to every authenticated caller.
-         */
-        providerScopes?: Record<string, string[]>;
-        /**
-         * Shared secret every provider must present to occupy a slot (via
-         * `X-Provider-Token` or `Authorization: Bearer`). Independent of client
-         * auth. Also settable via `MCP_BROKER_PROVIDER_SECRET` (which wins).
-         */
-        providerSecret?: string;
-    };
+    auth?: IBrokerAuthConfig;
 
     /** URL paths (override the defaults). */
     paths?: {
@@ -160,8 +161,8 @@ export interface BrokerConfig {
  * (the directory containing the config file when one was found, otherwise
  * `process.cwd()`).
  */
-export interface LoadedBrokerConfig {
-    config: BrokerConfig;
+export interface ILoadedBrokerConfig {
+    config: IBrokerConfig;
     baseDir: string;
     /** Absolute path of the config file that was loaded, or `null` if none. */
     sourcePath: string | null;
@@ -191,9 +192,9 @@ export const LEGACY_CONFIG_FILENAME = "mcp-broker.config.json";
  * returns the same empty config — never throws.
  *
  * Paths inside the config file are intended to be resolved against
- * {@link LoadedBrokerConfig.baseDir} by the consumer.
+ * {@link ILoadedBrokerConfig.baseDir} by the consumer.
  */
-export function loadBrokerConfig(path?: string): LoadedBrokerConfig {
+export function loadBrokerConfig(path?: string): ILoadedBrokerConfig {
     const cwd = process.cwd();
     const envPath = process.env["MCP_BROKER_CONFIG"];
 
@@ -224,10 +225,19 @@ export function loadBrokerConfig(path?: string): LoadedBrokerConfig {
 
     try {
         const raw = readFileSync(sourcePath, "utf-8");
-        const config = JSON.parse(raw) as BrokerConfig;
+        const config = JSON.parse(raw) as IBrokerConfig;
         return { config, baseDir, sourcePath };
     } catch (err) {
         process.stderr.write(`[mcp-broker] Failed to parse config file at ${sourcePath}: ${(err as Error).message}\n`);
         return { config: {}, baseDir: cwd, sourcePath: null };
     }
 }
+
+/** @deprecated Use {@link IBrokerAuthConfig}. */
+export type BrokerAuthConfig = IBrokerAuthConfig;
+
+/** @deprecated Use {@link IBrokerConfig}. */
+export type BrokerConfig = IBrokerConfig;
+
+/** @deprecated Use {@link ILoadedBrokerConfig}. */
+export type LoadedBrokerConfig = ILoadedBrokerConfig;

@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
-import { WsTunnelBuilder, AuthError, type WsTunnel, type ResolvedAuth, type TokenValidator } from "../src/index.js";
+import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index.js";
 
 /** Validator that accepts "good" (with scope) and "noscope"; rejects the rest. */
-const validator: TokenValidator = {
+const validator: ITokenValidator = {
     async validate(token, resource) {
         if (token === "good") return { sub: "u1", aud: resource, scope: "mcp:call" };
         if (token === "noscope") return { sub: "u2", aud: resource };
@@ -11,7 +11,7 @@ const validator: TokenValidator = {
     },
 };
 
-const AUTH: ResolvedAuth = {
+const AUTH: IResolvedAuth = {
     publicBaseUrl: "https://broker.test",
     authorizationServers: ["https://as.test"],
     scopesSupported: ["mcp:call"],

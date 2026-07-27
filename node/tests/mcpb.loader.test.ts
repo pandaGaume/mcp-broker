@@ -22,14 +22,14 @@ function crc32(buf: Buffer): number {
     return (crc ^ 0xffffffff) >>> 0;
 }
 
-interface ZipEntry {
+interface IZipEntry {
     name: string;
     data: Buffer;
     method?: 0 | 8;
 }
 
 /** Builds a ZIP archive in memory. Supports stored (0) and deflate (8). */
-function packZip(entries: ZipEntry[]): Buffer {
+function packZip(entries: IZipEntry[]): Buffer {
     const locals: Buffer[] = [];
     const centrals: Buffer[] = [];
     let offset = 0;

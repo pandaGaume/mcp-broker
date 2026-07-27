@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { WsTunnelBuilder, AuthError, type WsTunnel, type ResolvedAuth, type TokenValidator, type AggregateScopeFilter } from "../src/index.js";
+import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator, type AggregateScopeFilter } from "../src/index.js";
 
 // "geoer" holds see:geo; "blind" holds an unrelated scope. Both authenticate.
-const validator: TokenValidator = {
+const validator: ITokenValidator = {
     async validate(token, resource) {
         if (token === "geoer") return { sub: "g", aud: resource, scope: "see:geo" };
         if (token === "blind") return { sub: "b", aud: resource, scope: "see:none" };
@@ -15,7 +15,7 @@ const validator: TokenValidator = {
 // The geo provider is visible only to callers holding see:geo.
 const aggregateScopeFilter: AggregateScopeFilter = (principal, provider) => (provider === "geo" ? principal.scopes.has("see:geo") : true);
 
-const AUTH: ResolvedAuth = {
+const AUTH: IResolvedAuth = {
     publicBaseUrl: "https://broker.test",
     authorizationServers: ["https://as.test"],
     validator,

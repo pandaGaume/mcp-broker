@@ -4,9 +4,10 @@
  * The broker never acts as an authorization server: it only validates the
  * access tokens minted by an external AS and advertises that AS through
  * Protected Resource Metadata (RFC 9728). These types are the seam every other
- * auth module builds on, so a host can drop in a custom {@link TokenValidator}
+ * auth module builds on, so a host can drop in a custom {@link ITokenValidator}
  * (e.g. RFC 7662 introspection) without touching the enforcement code.
  */
+import type { IAuthorizationSubject, IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index.js";
 
 /**
  * The subset of OAuth 2.1 / RFC 9068 access-token claims a resource server
@@ -14,7 +15,7 @@
  * space-delimited granted scopes; some authorization servers emit `scopes` as
  * an array instead. Unknown claims are preserved via the index signature.
  */
-export interface AccessTokenClaims {
+export interface IAccessTokenClaims {
     /** Subject — the principal the token was issued for. */
     sub?: string;
     /** Intended audience(s). MUST include the slot's canonical resource URI. */
@@ -38,8 +39,8 @@ export interface AccessTokenClaims {
  * infrastructure failures (e.g. JWKS unreachable) should throw a plain error so
  * the caller can surface a `500` rather than a misleading `401`.
  */
-export interface TokenValidator {
-    validate(token: string, resource: string): Promise<AccessTokenClaims>;
+export interface ITokenValidator {
+    validate(token: string, resource: string): Promise<IAccessTokenClaims>;
 }
 
 /** OAuth 2.1 error codes the broker emits in `WWW-Authenticate` challenges. */
@@ -71,9 +72,11 @@ export class AuthError extends Error {
  * required scopes are satisfied. Threaded through the request so downstream
  * components (e.g. the `_all` aggregate) can make scope-aware decisions.
  */
-export interface Principal {
-    readonly claims: AccessTokenClaims;
+export interface IPrincipal {
+    readonly claims: IAccessTokenClaims;
     readonly scopes: ReadonlySet<string>;
+    /** Subjects derived exclusively from validated token claims. */
+    readonly subject?: IAuthorizationSubject;
 }
 
 /**
@@ -82,14 +85,14 @@ export interface Principal {
  * client only sees (and can call) tools/prompts from providers it is authorized
  * for. Return `true` to include the provider for this principal.
  */
-export type AggregateScopeFilter = (principal: Principal, providerName: string) => boolean;
+export type AggregateScopeFilter = (principal: IPrincipal, providerName: string) => boolean;
 
 /**
  * A fully resolved authorization configuration, ready for the enforcement
  * layer. Built either from JSON config (via `buildJwtAuth`) or supplied
- * directly by an embedder with a custom {@link TokenValidator}.
+ * directly by an embedder with a custom {@link ITokenValidator}.
  */
-export interface ResolvedAuth {
+export interface IResolvedAuth {
     /**
      * Public origin the broker is reached at, used to build canonical resource
      * URIs and metadata URLs. No trailing slash (e.g. `https://mcp.example.com`).
@@ -100,7 +103,7 @@ export interface ResolvedAuth {
     /** Optional list of scopes advertised in the PRM `scopes_supported`. */
     scopesSupported?: string[];
     /** The token validator (JWKS-backed by default). */
-    validator: TokenValidator;
+    validator: ITokenValidator;
     /** Baseline scope(s) required to reach any slot. Empty ⇒ any valid token. */
     requiredScopes?: string[];
     /** Per-slot required-scope overrides (e.g. an admin scope for `_broker`). */
@@ -111,13 +114,17 @@ export interface ResolvedAuth {
      * every authenticated caller sees the full aggregate.
      */
     aggregateScopeFilter?: AggregateScopeFilter;
+    /** Compiled hierarchical policy runtime, absent for legacy OAuth behavior. */
+    authorization?: IPolicyAuthorization;
+    /** Optional resolver usable for provider namespace checks without policies. */
+    slotResourceResolver?: ISlotResourceResolver;
 }
 
 /**
  * Extracts the effective set of granted scopes from token claims, unioning the
  * space-delimited `scope` string and the array-form `scopes` claim.
  */
-export function scopesOf(claims: AccessTokenClaims): Set<string> {
+export function scopesOf(claims: IAccessTokenClaims): Set<string> {
     const set = new Set<string>();
     if (typeof claims.scope === "string") {
         for (const s of claims.scope.split(/\s+/)) if (s) set.add(s);
@@ -127,3 +134,12 @@ export function scopesOf(claims: AccessTokenClaims): Set<string> {
     }
     return set;
 }
+
+/** @deprecated Use {@link IAccessTokenClaims}. */
+export type AccessTokenClaims = IAccessTokenClaims;
+/** @deprecated Use {@link ITokenValidator}. */
+export type TokenValidator = ITokenValidator;
+/** @deprecated Use {@link IPrincipal}. */
+export type Principal = IPrincipal;
+/** @deprecated Use {@link IResolvedAuth}. */
+export type ResolvedAuth = IResolvedAuth;

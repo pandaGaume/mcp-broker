@@ -9,7 +9,7 @@
  */
 
 /** The RFC 9728 metadata document for a single protected resource. */
-export interface ProtectedResourceMetadata {
+export interface IProtectedResourceMetadata {
     /** Canonical resource identifier (RFC 8707) — the slot's `/mcp` endpoint. */
     resource: string;
     /** Authorization server issuer URLs; MUST contain at least one. */
@@ -25,8 +25,8 @@ export interface ProtectedResourceMetadata {
  * is fixed to `["header"]` because the broker rejects tokens passed any other
  * way (never the query string, per OAuth 2.1 §5).
  */
-export function buildResourceMetadata(params: { resource: string; authorizationServers: string[]; scopesSupported?: string[] }): ProtectedResourceMetadata {
-    const doc: ProtectedResourceMetadata = {
+export function buildResourceMetadata(params: { resource: string; authorizationServers: string[]; scopesSupported?: string[] }): IProtectedResourceMetadata {
+    const doc: IProtectedResourceMetadata = {
         resource: params.resource,
         authorization_servers: params.authorizationServers,
         bearer_methods_supported: ["header"],
@@ -36,3 +36,6 @@ export function buildResourceMetadata(params: { resource: string; authorizationS
     }
     return doc;
 }
+
+/** @deprecated Use {@link IProtectedResourceMetadata}. */
+export type ProtectedResourceMetadata = IProtectedResourceMetadata;

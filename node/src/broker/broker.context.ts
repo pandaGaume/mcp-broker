@@ -4,7 +4,7 @@
  * Decouples the behaviors from the concrete `WsTunnel` class, making them
  * unit-testable and reusable (e.g. a future .NET-backed context).
  */
-export interface BrokerContext {
+export interface IBrokerContext {
     /** Package version (from package.json). */
     readonly version: string;
 
@@ -37,10 +37,10 @@ export interface BrokerContext {
     };
 
     /** Snapshot of every known provider slot, including disconnected ones. */
-    getProvidersInfo(): BrokerProviderInfo[];
+    getProvidersInfo(): IBrokerProviderInfo[];
 
     /** Snapshot of a single provider slot, or `undefined` if the name is unknown. */
-    getProviderInfo(name: string): BrokerProviderInfo | undefined;
+    getProviderInfo(name: string): IBrokerProviderInfo | undefined;
 }
 
 /**
@@ -54,7 +54,7 @@ export interface BrokerContext {
  */
 export type BrokerProviderTransport = "ws" | "ws-multiplex" | "stdio" | "loopback" | "none";
 
-export interface BrokerProviderInfo {
+export interface IBrokerProviderInfo {
     /** Slot name as advertised on `/<name>/...` endpoints. */
     name: string;
 
@@ -73,3 +73,9 @@ export interface BrokerProviderInfo {
     /** Number of in-flight JSON-RPC requests awaiting a response. */
     pendingCount: number;
 }
+
+/** @deprecated Use {@link IBrokerContext}. */
+export type BrokerContext = IBrokerContext;
+
+/** @deprecated Use {@link IBrokerProviderInfo}. */
+export type BrokerProviderInfo = IBrokerProviderInfo;

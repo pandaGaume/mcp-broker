@@ -1,11 +1,11 @@
 import { spawn, ChildProcess } from "node:child_process";
-import type { Upstream } from "./upstream.js";
+import type { IUpstream } from "./upstream.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
-export interface StdioUpstreamConfig {
+export interface IStdioUpstreamConfig {
     /** Logical name of this provider (matched against incoming WebSocket provider names). */
     name: string;
     /** Executable to spawn (e.g. `"node"`, `"python"`, an absolute path). */
@@ -30,10 +30,10 @@ export interface StdioUpstreamConfig {
  * One instance per configured provider. The broker uses this to bridge
  * WebSocket/SSE/HTTP clients to local MCP server processes.
  */
-export class StdioUpstream implements Upstream {
+export class StdioUpstream implements IUpstream {
     readonly name: string;
 
-    private readonly _config: StdioUpstreamConfig;
+    private readonly _config: IStdioUpstreamConfig;
     private _proc: ChildProcess | null = null;
     private _buffer = "";
     private _open = false;
@@ -51,7 +51,7 @@ export class StdioUpstream implements Upstream {
     /** Called on spawn or runtime errors. */
     onError: ((error: Error) => void) | null = null;
 
-    constructor(config: StdioUpstreamConfig) {
+    constructor(config: IStdioUpstreamConfig) {
         this.name = config.name;
         this._config = config;
     }
@@ -115,3 +115,6 @@ export class StdioUpstream implements Upstream {
         this._proc = null;
     }
 }
+
+/** @deprecated Use {@link IStdioUpstreamConfig}. */
+export type StdioUpstreamConfig = IStdioUpstreamConfig;
