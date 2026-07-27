@@ -1,0 +1,116 @@
+{
+    "port": 3001,
+    "host": "127.0.0.1",
+    "brokerName": "oauth-policy-lab",
+    "www": {
+        "open": false,
+        "mounts": [
+            {
+                "urlPrefix": "/",
+                "dir": "../.."
+            }
+        ]
+    },
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "http://127.0.0.1:3001",
+        "authorizationServers": ["http://127.0.0.1:4100"],
+        "jwks": "http://127.0.0.1:4100/jwks.json",
+        "issuer": "http://127.0.0.1:4100",
+        "scopesSupported": ["mcp:call", "broker:admin"],
+        "requiredScopes": ["mcp:call"],
+        "perSlotScopes": {
+            "_broker": ["broker:admin"]
+        },
+        "subjectMapping": {
+            "userClaim": "sub",
+            "groupClaims": ["groups"],
+            "clientClaim": "client_id"
+        },
+        "roles": {
+            "viewer": {
+                "capabilities": ["mcp.resources.read", "mcp.tools.list", "mcp.prompts.read"]
+            },
+            "maintenance": {
+                "inherits": ["viewer"],
+                "capabilities": ["mcp.tools.diagnose", "mcp.tools.configure-analysis"]
+            },
+            "operator": {
+                "inherits": ["viewer"],
+                "capabilities": ["mcp.tools.operate"]
+            },
+            "administrator": {
+                "capabilities": ["*"]
+            }
+        },
+        "assignments": [
+            {
+                "id": "starfleet-engineering",
+                "subject": "group:starfleet-engineering",
+                "role": "maintenance",
+                "resource": "/enterprise-a/site-paris/area-a/**"
+            },
+            {
+                "id": "starfleet-security",
+                "subject": "group:starfleet-security",
+                "role": "operator",
+                "resource": "/enterprise-a/site-paris/area-a/**"
+            },
+            {
+                "id": "astrometrics-analysis",
+                "subject": "group:astrometrics",
+                "role": "viewer",
+                "resource": "/enterprise-a/site-paris/**"
+            },
+            {
+                "id": "starfleet-command",
+                "subject": "group:starfleet-command",
+                "role": "administrator",
+                "resource": "/**"
+            }
+        ],
+        "denies": [
+            {
+                "id": "critical-furnace-safety-lock",
+                "subject": "group:starfleet-engineering",
+                "effect": "deny",
+                "capabilities": ["mcp.tools.configure-analysis", "mcp.tools.operate"],
+                "resource": "/enterprise-a/site-paris/area-a/line-2/cell-4/critical-furnace"
+            }
+        ],
+        "slotResources": {
+            "motor-7": "/enterprise-a/site-paris/area-a/line-3/cell-2/motor-7",
+            "critical-furnace": "/enterprise-a/site-paris/area-a/line-2/cell-4/critical-furnace",
+            "site-energy": "/enterprise-a/site-paris"
+        },
+        "toolCapabilities": {
+            "get_electrical_state": "mcp.resources.read",
+            "diagnose_machine": "mcp.tools.diagnose",
+            "reset_baseline": "mcp.tools.configure-analysis",
+            "start_machine": "mcp.tools.operate"
+        },
+        "audit": {
+            "logAllowed": true
+        }
+    },
+    "stdioUpstreams": [
+        {
+            "name": "motor-7",
+            "command": "node",
+            "args": ["web/demos/oauth-lab/server/factory-provider.mjs", "--slot", "motor-7", "--label", "Motor 7"],
+            "aggregate": true
+        },
+        {
+            "name": "critical-furnace",
+            "command": "node",
+            "args": ["web/demos/oauth-lab/server/factory-provider.mjs", "--slot", "critical-furnace", "--label", "Critical furnace"],
+            "aggregate": true
+        },
+        {
+            "name": "site-energy",
+            "command": "node",
+            "args": ["web/demos/oauth-lab/server/factory-provider.mjs", "--slot", "site-energy", "--label", "Paris site energy"],
+            "aggregate": true
+        }
+    ]
+}

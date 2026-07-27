@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>MCP Broker | OAuth Policy Lab</title>
+        <meta name="description" content="Interactive OAuth 2.1 and hierarchical authorization demo for @cyanmycelium/mcp-broker." />
+        <link rel="icon" type="image/png" href="../../assets/logo.png" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+        <link rel="stylesheet" href="../../css/styles.css" />
+        <link rel="stylesheet" href="css/app.css" />
+    </head>
+    <body>
+        <header class="topbar lab-topbar">
+            <a class="brand" href="/">
+                <img class="brand-mark" src="../../assets/logo.png" alt="" aria-hidden="true" />
+                <span>@cyanmycelium/mcp-broker</span>
+            </a>
+            <span class="topbar-tag">OAuth Policy Lab</span>
+            <span class="topbar-spacer"></span>
+            <div class="service-status" aria-label="Local service status">
+                <span class="service-pill checking" id="broker-status"><i></i>Broker</span>
+                <span class="service-pill checking" id="issuer-status"><i></i>Issuer</span>
+            </div>
+            <a class="topbar-link" href="/">Examples</a>
+        </header>
+
+        <main class="lab-shell">
+            <section class="lab-hero">
+                <div>
+                    <div class="eyebrow"><span class="dot"></span>Live OAuth 2.1 resource server</div>
+                    <h1>See every authorization decision.</h1>
+                    <p>
+                        Discover a protected MCP resource, sign in with Authorization Code and PKCE, receive an audience-bound JWT, then watch scopes and hierarchical policies
+                        allow or reject real MCP calls.
+                    </p>
+                </div>
+                <div class="hero-proof" aria-label="Security features demonstrated">
+                    <code>npm run demo:oauth</code>
+                    <span>PKCE S256</span>
+                    <span>JWKS</span>
+                    <span>RFC 8707</span>
+                    <span>RFC 9728</span>
+                    <span>RBAC + deny</span>
+                </div>
+            </section>
+
+            <ol class="flow" aria-label="OAuth demonstration flow">
+                <li id="flow-discovery">
+                    <span class="flow-number">01</span>
+                    <span><b>Discover</b><small>Protected Resource Metadata</small></span>
+                </li>
+                <li id="flow-login">
+                    <span class="flow-number">02</span>
+                    <span><b>Authorize</b><small>Code flow with PKCE</small></span>
+                </li>
+                <li id="flow-token">
+                    <span class="flow-number">03</span>
+                    <span><b>Validate</b><small>JWT, issuer, audience, scopes</small></span>
+                </li>
+                <li id="flow-policy">
+                    <span class="flow-number">04</span>
+                    <span><b>Decide</b><small>Subjects, roles, resource path</small></span>
+                </li>
+            </ol>
+
+            <div class="workspace">
+                <section class="panel setup-panel" aria-labelledby="setup-title">
+                    <div class="panel-heading">
+                        <div>
+                            <span class="section-kicker">Resource server</span>
+                            <h2 id="setup-title">Choose a protected slot</h2>
+                        </div>
+                        <button class="quiet-button" type="button" id="discover-btn">Discover</button>
+                    </div>
+
+                    <fieldset class="resource-list" id="resource-list">
+                        <legend class="sr-only">Protected MCP resource</legend>
+                        <label class="resource-option">
+                            <input type="radio" name="slot" value="motor-7" checked />
+                            <span class="resource-icon">M7</span>
+                            <span>
+                                <b>Motor 7</b>
+                                <small>/area-a/line-3/cell-2/motor-7</small>
+                            </span>
+                            <i></i>
+                        </label>
+                        <label class="resource-option">
+                            <input type="radio" name="slot" value="critical-furnace" />
+                            <span class="resource-icon critical">CF</span>
+                            <span>
+                                <b>Critical furnace</b>
+                                <small>/area-a/line-2/cell-4/critical-furnace</small>
+                            </span>
+                            <i></i>
+                        </label>
+                        <label class="resource-option">
+                            <input type="radio" name="slot" value="site-energy" />
+                            <span class="resource-icon energy">SE</span>
+                            <span>
+                                <b>Site energy</b>
+                                <small>/enterprise-a/site-paris</small>
+                            </span>
+                            <i></i>
+                        </label>
+                        <label class="resource-option">
+                            <input type="radio" name="slot" value="_broker" />
+                            <span class="resource-icon system">_B</span>
+                            <span>
+                                <b>Broker administration</b>
+                                <small>/_system/broker + broker:admin</small>
+                            </span>
+                            <i></i>
+                        </label>
+                    </fieldset>
+
+                    <div class="metadata-card" id="metadata-card">
+                        <div class="metadata-empty">
+                            <span class="metadata-mark">?</span>
+                            <p>Run discovery to load RFC 9728 metadata without a token.</p>
+                        </div>
+                    </div>
+
+                    <div class="session-card">
+                        <div class="panel-heading compact">
+                            <div>
+                                <span class="section-kicker">OAuth token cache</span>
+                                <h2>One token per audience</h2>
+                            </div>
+                            <button class="quiet-button danger hidden" type="button" id="sign-out-btn">Clear cache</button>
+                        </div>
+
+                        <div id="session-empty">
+                            <p class="muted">Choose a demo identity once. Additional audience-bound tokens are added silently to this tab's cache.</p>
+                            <button class="primary-button" type="button" id="sign-in-btn">
+                                <span>Start Authorization Code + PKCE</span>
+                                <b>-&gt;</b>
+                            </button>
+                        </div>
+
+                        <div id="session-active" class="hidden">
+                            <div class="identity-row">
+                                <span class="identity-avatar" id="identity-avatar">GL</span>
+                                <span>
+                                    <b id="identity-name">Geordi La Forge</b>
+                                    <small id="identity-subject">user:geordi-la-forge</small>
+                                </span>
+                                <span class="token-valid">JWT valid</span>
+                            </div>
+                            <div class="audience-notice hidden" id="audience-notice">
+                                <p id="audience-notice-copy"></p>
+                                <button class="primary-button" type="button" id="reauthorize-btn">Add token to cache</button>
+                            </div>
+                            <dl class="claims-grid">
+                                <div>
+                                    <dt>cache</dt>
+                                    <dd id="cache-summary"></dd>
+                                </div>
+                                <div>
+                                    <dt>aud</dt>
+                                    <dd id="claim-aud"></dd>
+                                </div>
+                                <div>
+                                    <dt>groups</dt>
+                                    <dd id="claim-groups"></dd>
+                                </div>
+                                <div>
+                                    <dt>scope</dt>
+                                    <dd id="claim-scope"></dd>
+                                </div>
+                                <div>
+                                    <dt>expires</dt>
+                                    <dd id="claim-exp"></dd>
+                                </div>
+                            </dl>
+                            <details class="token-details">
+                                <summary>Inspect decoded JWT claims</summary>
+                                <pre id="claims-output"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel actions-panel" aria-labelledby="actions-title">
+                    <div class="panel-heading">
+                        <div>
+                            <span class="section-kicker">Enforcement point</span>
+                            <h2 id="actions-title">Send real MCP requests</h2>
+                        </div>
+                        <span class="target-slot" id="target-slot">motor-7</span>
+                    </div>
+
+                    <p class="panel-intro">
+                        Each button sends JSON-RPC to the selected slot over Streamable HTTP. The expected result changes with the token identity and resource.
+                    </p>
+
+                    <div class="action-grid">
+                        <button class="action-card" type="button" data-action="unauthenticated">
+                            <span class="action-method">HTTP</span>
+                            <b>No bearer token</b>
+                            <small>Observe the 401 challenge and resource_metadata link.</small>
+                            <span class="expect deny" data-expect="unauthenticated">expect 401</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="wrong-audience">
+                            <span class="action-method">JWT</span>
+                            <b>Wrong audience</b>
+                            <small>Reuse this token against another MCP resource.</small>
+                            <span class="expect deny" data-expect="wrong-audience">expect 401</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="list">
+                            <span class="action-method">tools/list</span>
+                            <b>List available tools</b>
+                            <small>Requires the inherited mcp.tools.list capability.</small>
+                            <span class="expect" data-expect="list">sign in first</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="read">
+                            <span class="action-method">tools/call</span>
+                            <b>Read electrical state</b>
+                            <small>Mapped to the mcp.resources.read capability.</small>
+                            <span class="expect" data-expect="read">sign in first</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="diagnose">
+                            <span class="action-method">tools/call</span>
+                            <b>Run diagnostic</b>
+                            <small>Mapped to mcp.tools.diagnose.</small>
+                            <span class="expect" data-expect="diagnose">sign in first</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="reset">
+                            <span class="action-method">tools/call</span>
+                            <b>Reset baseline</b>
+                            <small>Explicitly denied for Geordi on the critical furnace.</small>
+                            <span class="expect" data-expect="reset">sign in first</span>
+                        </button>
+                        <button class="action-card" type="button" data-action="start">
+                            <span class="action-method">tools/call</span>
+                            <b>Start machine</b>
+                            <small>Mapped to the operational capability.</small>
+                            <span class="expect" data-expect="start">sign in first</span>
+                        </button>
+                    </div>
+
+                    <div class="console-card" aria-live="polite">
+                        <div class="console-head">
+                            <span><i id="console-dot"></i><b id="console-status">Ready</b></span>
+                            <span id="console-duration">No request yet</span>
+                        </div>
+                        <div class="console-columns">
+                            <div>
+                                <span class="console-label">Request</span>
+                                <pre id="request-output">Select an action above.</pre>
+                            </div>
+                            <div>
+                                <span class="console-label">Response</span>
+                                <pre id="response-output">The HTTP status, challenge, or JSON-RPC result will appear here.</pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="policy-section" aria-labelledby="policy-title">
+                <div class="section-heading-row">
+                    <div>
+                        <span class="section-kicker">Policy model</span>
+                        <h2 id="policy-title">Same API, different authority</h2>
+                    </div>
+                    <p>Roles contain capabilities. Assignments bind roles to resource paths. Explicit denies win.</p>
+                </div>
+                <div class="persona-grid">
+                    <article>
+                        <span class="persona-code">GL</span>
+                        <h3>Geordi La Forge, engineering</h3>
+                        <p>Viewer inheritance plus diagnostics and baseline configuration across Area A.</p>
+                        <div><span>Area A</span><b>read, diagnose, reset</b></div>
+                        <div><span>Critical furnace</span><b class="denied">reset denied</b></div>
+                    </article>
+                    <article>
+                        <span class="persona-code">WO</span>
+                        <h3>Worf, security</h3>
+                        <p>Viewer inheritance plus operational control across Area A.</p>
+                        <div><span>Area A</span><b>read, start</b></div>
+                        <div><span>Engineering</span><b class="denied">not granted</b></div>
+                    </article>
+                    <article>
+                        <span class="persona-code">7O</span>
+                        <h3>Seven of Nine, astrometrics</h3>
+                        <p>Read-only visibility from the Paris site root through every descendant.</p>
+                        <div><span>Paris site</span><b>read, list</b></div>
+                        <div><span>Mutations</span><b class="denied">not granted</b></div>
+                    </article>
+                    <article>
+                        <span class="persona-code admin">JP</span>
+                        <h3>Jean-Luc Picard, captain</h3>
+                        <p>Wildcard capability on every resource plus the broker:admin OAuth scope.</p>
+                        <div><span>All resources</span><b>full access</b></div>
+                        <div><span>_broker</span><b>admin scope</b></div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="audit-section" aria-labelledby="audit-title">
+                <div class="section-heading-row">
+                    <div>
+                        <span class="section-kicker">Decision trail</span>
+                        <h2 id="audit-title">Live authorization audit</h2>
+                    </div>
+                    <div class="audit-actions">
+                        <span id="audit-count">0 events</span>
+                        <button class="quiet-button danger" type="button" id="clear-audit-btn">Clear log</button>
+                    </div>
+                </div>
+                <div class="audit-list" id="audit-list">
+                    <div class="audit-empty">Run an authenticated MCP action to generate the first decision.</div>
+                </div>
+            </section>
+        </main>
+
+        <div class="toast" id="toast" role="status"></div>
+        <script type="module" src="js/app.js"></script>
+    </body>
+</html>

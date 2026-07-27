@@ -36,6 +36,7 @@
         "dist",
         "src",
         "scripts",
+        "web",
         ".mcp-broker.example",
         "LICENSE",
         "README.md"
@@ -57,6 +58,8 @@
         "pack:mcpb": "npm run build && node scripts/pack-mcpb.mjs",
         "test": "vitest run",
         "test:watch": "vitest",
+        "demo:oauth": "npm run build && node web/demos/oauth-lab/server/start.mjs",
+        "demo:oauth:smoke": "node web/demos/oauth-lab/server/smoke-test.mjs",
         "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
         "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
         "format": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",

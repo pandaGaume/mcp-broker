@@ -25,13 +25,19 @@ web/
     │   └── js/
     │       ├── app.js
     │       └── toolbox-server.js
-    └── broker-explorer/         ← MCP client connecting to a broker slot
+    ├── broker-explorer/         ← MCP client connecting to a broker slot
+    │   ├── index.html
+    │   ├── css/
+    │   │   └── app.css
+    │   └── js/
+    │       ├── app.js
+    │       └── mcp-ws-client.js
+    └── oauth-lab/               <- OAuth 2.1 and policy demonstration
         ├── index.html
-        ├── css/
-        │   └── app.css
-        └── js/
-            ├── app.js
-            └── mcp-ws-client.js
+        ├── config.json
+        ├── css/app.css
+        ├── js/app.js
+        └── server/
 ```
 
 ## Conventions
@@ -61,6 +67,10 @@ web/
   client to a broker slot (`_broker`, `_all`, or any provider), lists its
   tools and calls them live. The MCP-over-WebSocket client is isolated in
   `js/mcp-ws-client.js`. Paired with the `broker-self-mcp.html` explainer.
+- **`demos/oauth-lab/`** is a complete local OAuth 2.1 environment with
+  Authorization Code and PKCE, JWT and JWKS validation, audience-bound access
+  tokens, hierarchical roles, explicit denies, protected MCP calls, and a live
+  authorization audit. Run it with `npm run demo:oauth` from `node/`.
 
 ## Serving it
 

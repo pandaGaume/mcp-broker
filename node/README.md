@@ -218,6 +218,21 @@ validator (for example RFC 7662 introspection) or provider authenticator, use
 `withAuth(resolvedAuth)` or `withProviderAuth(authenticator)` with your own
 `ITokenValidator` or `IProviderAuthenticator`.
 
+## Interactive OAuth demo
+
+The bundled [OAuth Policy Lab](web/demos/oauth-lab/) runs a complete local
+Authorization Code and PKCE flow with signed JWTs, JWKS validation,
+audience-bound tokens, hierarchical policies, explicit denies, and a live
+audit:
+
+```sh
+npm run demo:oauth
+```
+
+The page opens at `http://127.0.0.1:3001/demos/oauth-lab/`. See the
+[demo README](web/demos/oauth-lab/README.md) for its identities, policy matrix,
+and automated smoke test.
+
 ## TLS for local development
 
 ```sh
