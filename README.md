@@ -26,12 +26,17 @@ This repo is a multi-implementation reference. Each language lives under its own
 
 ```
 mcp-broker/
-├── node/              ← TypeScript implementation (current)
-├── dotnet/            ← .NET implementation (planned)
-├── docs/              ← protocol, architecture, endpoints
-├── .github/workflows/ ← CI + release pipelines per implementation
+├── node/                       ← TypeScript implementation (current)
+│   └── packages/               ← npm workspace
+│       ├── broker/             ← the broker itself
+│       └── provider/           ← tunnel protocol + publishing a server to a slot
+├── dotnet/                     ← .NET implementation (planned)
+├── docs/                       ← protocol, architecture, endpoints
+├── .github/workflows/          ← CI + release pipelines per package
 └── mcp-broker.code-workspace
 ```
+
+The two ends of the tunnel share one repository on purpose: a change to the envelope protocol touches the client transport and the broker at once, so it lands in a single commit and neither end can drift ahead of the other.
 
 Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the right tooling per folder.
 
@@ -39,8 +44,11 @@ Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the r
 
 | Implementation | Status | Package | Tag prefix |
 |---|---|---|---|
-| [node/](node/) | published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
+| [node/packages/broker/](node/packages/broker/) | published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
+| [node/packages/provider/](node/packages/provider/) | not published yet | `@cyanmycelium/mcp-broker-provider` on npm | `provider-v*` |
 | [dotnet/](dotnet/) | planned | `CyanMycelium.Mcp.Broker` on NuGet | `dotnet-v*` |
+
+Each package carries its own `.npmrc` with the matching `tag-version-prefix`, so run `npm version` from inside the package directory rather than from the workspace root: npm ignores per-workspace `.npmrc` files when invoked at the root, and you would get an unprefixed `v*` tag that no release workflow listens to.
 
 ## Quick start (Node)
 
@@ -50,10 +58,11 @@ npx @cyanmycelium/mcp-broker
 
 The broker starts on `http://localhost:3000`. Connect your MCP provider to `ws://localhost:3000/provider/<name>`, then point any MCP client at `http://localhost:3000/<name>/mcp`.
 
-Full instructions, environment variables, and programmatic API in [node/README.md](node/README.md).
+Full instructions, environment variables, and programmatic API in [node/packages/broker/README.md](node/packages/broker/README.md).
 
 ## Documentation
 
+- [docs/packages.md](docs/packages.md) — the four packages, what belongs in each, and why `client` was split into `provider` and `consumer`
 - [docs/architecture.md](docs/architecture.md) — overview, roles, request flow, the reserved `_broker` slot
 - [docs/protocol.md](docs/protocol.md) — provider WebSocket framing, JSON-RPC envelopes
 - [docs/endpoints.md](docs/endpoints.md) — every HTTP and WS endpoint exposed by the broker

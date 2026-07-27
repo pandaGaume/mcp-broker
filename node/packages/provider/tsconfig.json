@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        // DOM is required by the WebSocket transports: this package runs in the
+        // browser as well as in Node, so it must not assume Node globals.
+        "lib": ["ES2022", "DOM"],
+        "types": ["node"],
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "declaration": true,
+        "sourceMap": true,
+        "removeComments": false,
+        "importHelpers": true,
+        "isolatedModules": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true
+    },
+    "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+    "exclude": ["node_modules", "dist"]
+}

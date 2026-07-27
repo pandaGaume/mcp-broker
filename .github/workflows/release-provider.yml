@@ -1,11 +1,11 @@
-name: release-node
+name: release-provider
 
-# Publishes @cyanmycelium/mcp-broker only. The provider side of the tunnel
-# lives in the same workspace but ships on its own `provider-v*` tag series,
-# see release-provider.yml.
+# Publishes @cyanmycelium/mcp-broker-provider, the provider side of the tunnel.
+# Separate tag series from the broker (`node-v*`) so the two ends of the tunnel
+# can be released independently.
 on:
     push:
-        tags: ["node-v*"]
+        tags: ["provider-v*"]
 
 env:
     # Opt into Node 24 for JavaScript-based actions (checkout, setup-node, ...)
@@ -45,9 +45,7 @@ jobs:
             - run: npm run build
             - run: npm test
 
-            # `npm ci` above installs the whole workspace, so target the package
-            # explicitly rather than publishing whatever sits in the cwd.
-            - run: npm publish --workspace @cyanmycelium/mcp-broker --access public --provenance
+            - run: npm publish --workspace @cyanmycelium/mcp-broker-provider --access public --provenance
 
             - name: Dump npm debug log on failure
               if: failure()
