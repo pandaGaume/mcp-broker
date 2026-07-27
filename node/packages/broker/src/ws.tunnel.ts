@@ -7,6 +7,10 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
 import type { GrammarResolverOptions, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioTransport } from "@cyanmycelium/mcp-core/node";
+// The broker is itself a provider — it publishes its own `_broker` and `_all`
+// slots — so sharing the provider package's wire contract is the natural way to
+// keep one definition of the envelope rather than two that drift.
+import { decodeEnvelope, encodeEnvelope, encodeErrorEnvelope, envelopeFrame, TunnelErrorCodes } from "@cyanmycelium/mcp-broker-provider/protocol";
 import { StdioUpstream, type IStdioUpstreamConfig } from "./stdio.upstream.js";
 import { RemoteUpstream, type IRemoteUpstreamConfig } from "./remote.upstream.js";
 import type { IUpstream } from "./upstream.js";
@@ -1455,15 +1459,10 @@ export class WsTunnel implements IBrokerContext {
         }
 
         ws.on("message", (data: Buffer) => {
-            let envelope: { provider?: string; payload?: unknown };
-            try {
-                envelope = JSON.parse(data.toString()) as { provider?: string; payload?: unknown };
-            } catch {
-                return; // malformed — drop
-            }
+            const envelope = decodeEnvelope(data.toString());
+            if (!envelope) return; // malformed — drop
 
             const name = envelope.provider;
-            if (!name || envelope.payload === undefined) return;
 
             // Register provider name lazily on first encounter.
             if (!providerNames.has(name)) {
@@ -1471,16 +1470,7 @@ export class WsTunnel implements IBrokerContext {
                     const resource = this._slotResourceResolver.resolve(name);
                     if (!resource || !providerMayPublish(providerPrincipal, resource)) {
                         this._logProviderRegistration(providerPrincipal, name, resource, false);
-                        ws.send(
-                            JSON.stringify({
-                                provider: name,
-                                payload: {
-                                    jsonrpc: "2.0",
-                                    id: null,
-                                    error: { code: -32001, message: "Provider registration forbidden" },
-                                },
-                            })
-                        );
+                        ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.RegistrationForbidden, "Provider registration forbidden"));
                         return;
                     }
                 }
@@ -1489,46 +1479,19 @@ export class WsTunnel implements IBrokerContext {
                         `[broker] WARNING: Multiplexed WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
                             `Rename one of them to avoid the conflict.`
                     );
-                    ws.send(
-                        JSON.stringify({
-                            provider: name,
-                            payload: {
-                                jsonrpc: "2.0",
-                                id: null,
-                                error: { code: -32000, message: `Provider "${name}" is managed by a stdio upstream` },
-                            },
-                        })
-                    );
+                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is managed by a stdio upstream`));
                     return;
                 }
 
                 if (this._loopbackProviders.has(name)) {
-                    ws.send(
-                        JSON.stringify({
-                            provider: name,
-                            payload: {
-                                jsonrpc: "2.0",
-                                id: null,
-                                error: { code: -32000, message: `Provider "${name}" is reserved by the broker` },
-                            },
-                        })
-                    );
+                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is reserved by the broker`));
                     return;
                 }
 
                 const existing = this._providers.get(name);
                 if (existing?.ws?.readyState === WebSocket.OPEN) {
                     // Provider already connected via another socket — reject this name.
-                    ws.send(
-                        JSON.stringify({
-                            provider: name,
-                            payload: {
-                                jsonrpc: "2.0",
-                                id: null,
-                                error: { code: -32000, message: `Provider "${name}" is already connected` },
-                            },
-                        })
-                    );
+                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is already connected`));
                     return;
                 }
                 providerNames.add(name);
@@ -1540,7 +1503,7 @@ export class WsTunnel implements IBrokerContext {
             }
 
             const state = this._providers.get(name)!;
-            this._routeFromProvider(state, name, JSON.stringify(envelope.payload));
+            this._routeFromProvider(state, name, envelopeFrame(envelope));
         });
 
         ws.on("close", () => {
@@ -1590,8 +1553,7 @@ export class WsTunnel implements IBrokerContext {
 
         if (this._multiplexSockets.has(state.ws)) {
             // Wrap in envelope for the multiplexed socket.
-            const payload = JSON.parse(data) as unknown;
-            state.ws.send(JSON.stringify({ provider: providerName, payload }));
+            state.ws.send(encodeEnvelope(providerName, data));
         } else {
             state.ws.send(data);
         }

@@ -13,7 +13,8 @@
         "packages/*"
     ],
     "scripts": {
-        "build": "npm run build --workspaces --if-present",
+        "//build": "Dependency order, not folder order: `npm run --workspaces` walks packages alphabetically, and the broker compiles against the provider's published dist. Add new packages here, downstream last.",
+        "build": "npm run build --workspace @cyanmycelium/mcp-broker-provider && npm run build --workspace @cyanmycelium/mcp-broker",
         "clean": "npm run clean --workspaces --if-present",
         "compile": "npm run compile --workspaces --if-present",
         "test": "npm run test --workspaces --if-present",

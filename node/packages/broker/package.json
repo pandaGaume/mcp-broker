@@ -68,6 +68,7 @@
         "prepublishOnly": "npm run lint && npm run build && npm test"
     },
     "dependencies": {
+        "@cyanmycelium/mcp-broker-provider": "^0.1.0",
         "@cyanmycelium/mcp-core": "^0.4.0",
         "jose": "^6.2.3",
         "open": "^11.0.0",

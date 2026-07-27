@@ -32,12 +32,14 @@ A multiplexed tunnel socket carries traffic for several providers at once, so ev
 { "provider": "scene-1", "payload": { "jsonrpc": "2.0", "id": 1, "method": "tools/list" } }
 ```
 
-`./protocol` is the single definition of that format. The broker imports it rather than re-declaring the shape inline, so the two ends cannot drift.
+`./protocol` is the single definition of that format, and the broker imports it from here rather than re-declaring the shape inline, so the two ends cannot drift. The broker depends on this package because it is itself a provider: it publishes its own `_broker` introspection slot and its `_all` aggregate slot.
 
 Beyond the envelope it also covers:
 
 - `notifications/register`, sent as soon as the tunnel opens to claim a provider slot. Without it the broker only learns a provider name on its first real message, and an MCP client connecting in between is told the provider is not connected.
-- The tunnel error codes: `-32001` when the provider's credentials do not allow publishing on the requested slot, `-32000` when the slot is unavailable. `tunnelErrorOf()` lets a provider recognise them instead of handing an `id: null` error frame to an MCP server, which would classify it as an unknown notification and drop it silently.
+- The tunnel error codes: `-32001` when the provider's credentials do not allow publishing on the requested slot, `-32000` when the slot is unavailable.
+
+When the broker refuses a slot, the transport surfaces it through `onError` rather than forwarding it. An id-less error frame handed to an MCP server would be classified as an unknown notification and dropped without a word, so the publisher would never learn it was refused.
 
 Malformed frames decode to `undefined` rather than throwing: a tunnel socket is a public surface, and a peer sending garbage must not take the receiver down.
 
@@ -69,7 +71,7 @@ Transports created for the same tunnel URL share one WebSocket, whichever order 
 
 `0.1.0` ships the protocol module and both transports. They still exist in `@cyanmycelium/mcp-core@0.4.x` as well, and are removed there in `0.5.0` — migrate your imports before upgrading.
 
-The protocol is shared with the broker and, later, with the consumer side, so it is expected to graduate into its own `@cyanmycelium/mcp-broker-core` package. Import it through the `./protocol` subpath rather than the package root and that move will cost you one line.
+The protocol is shared with the broker, and later with the consumer side. Import it through the `./protocol` subpath rather than the package root, so it can move to a package of its own one day without touching your call sites.
 
 ## License
 

@@ -17,34 +17,24 @@ A package named `broker-client` would have to mean one or the other, and readers
 
 | Package | npm | Responsibility | Runs in |
 |---|---|---|---|
-| core | `@cyanmycelium/mcp-broker-core` | The tunnel wire format: envelopes, registration, error codes, shared types | Browser and Node |
 | server | `@cyanmycelium/mcp-broker` | The broker process: routing, sessions, auth, aggregation, MCP endpoints | Node |
-| provider | `@cyanmycelium/mcp-broker-provider` | Publishing an MCP server to a broker slot | Browser and Node |
+| provider | `@cyanmycelium/mcp-broker-provider` | Publishing an MCP server to a broker slot, and the tunnel wire contract under `./protocol` | Browser and Node |
 | consumer | `@cyanmycelium/mcp-broker-consumer` | Reaching providers through a broker, and introspecting the broker itself | Browser and Node |
 
 The broker itself keeps the unsuffixed name it was published under: it is the artifact users install, and `npx @cyanmycelium/mcp-broker` must keep working.
 
 ```
-            ┌───────────────┐
-            │     core      │   envelopes, types, codec — no dependencies
-            └───────────────┘
-              ▲     ▲     ▲
-      ┌───────┘     │     └───────┐
-┌───────────┐ ┌───────────┐ ┌───────────┐
-│ provider  │ │  server   │ │ consumer  │
-└───────────┘ └───────────┘ └───────────┘
-      │             │             │
-      └──────── @cyanmycelium/mcp-core ─────────┘
+┌───────────┐         ┌───────────┐         ┌───────────┐
+│  server   │ ──────▶ │ provider  │ ◀────── │ consumer  │
+└───────────┘         │ /protocol │         └───────────┘
+      │               └───────────┘               │
+      └──────── @cyanmycelium/mcp-core ───────────┘
                 (the MCP specification itself)
 ```
 
-`core` depends on nothing, which is what lets both ends of the tunnel share one definition instead of two that drift. `provider` and `consumer` additionally depend on `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`. `server` depends on it too, for the behaviors it exposes on its own `_broker` slot.
+The server depends on the provider package, which reads backwards until you notice that **the broker is itself a provider**: it publishes its own `_broker` introspection slot and its `_all` aggregate slot as in-process MCP servers. Sharing the provider's wire contract is therefore the natural way to keep one definition of the envelope, rather than two that drift.
 
-### core
-
-The wire contract, and only that: the `{ provider, payload }` envelope, its codec, the `notifications/register` claim, and the tunnel error codes. No transport, no I/O, no dependency.
-
-Anything that both ends must agree on byte for byte belongs here. Anything one end can change alone does not.
+All three additionally depend on `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`.
 
 ### server
 
@@ -71,7 +61,7 @@ When something new needs a home, the question is not which package is convenient
 | Question | Home |
 |---|---|
 | Is it defined by the MCP specification? | `@cyanmycelium/mcp-core`, not here |
-| Must both ends of the tunnel agree on it byte for byte? | `core` |
+| Must both ends of the tunnel agree on it byte for byte? | `provider/protocol` |
 | Does it only make sense while listening on a port? | `server` |
 | Does it help an application publish a server? | `provider` |
 | Does it help an application find or reach one? | `consumer` |
@@ -80,21 +70,22 @@ The first line matters most. MCP defines stdio and Streamable HTTP; those transp
 
 ## Status
 
-`core` and `server` have content today. `provider` and `consumer` are named but not yet populated.
-
 | Package | Folder | Tag series | State |
 |---|---|---|---|
-| server | `node/packages/broker` | `node-v*` | Published, in production |
-| provider | `node/packages/provider` | `provider-v*` | Written but unpublished: envelope codec, `DirectTransport`, `MultiplexTransport`. The transports still exist in `@cyanmycelium/mcp-core@0.4.x` too, and leave it in `0.5.0` |
-| core | not created yet | `core-v*` | The envelope codec lives in `provider/src/protocol` for now, exposed as the `./protocol` subpath |
+| server | `node/packages/broker` | `node-v*` | Published, in production. Routes through the shared codec |
+| provider | `node/packages/provider` | `provider-v*` | `0.1.0` published: wire contract under `./protocol`, plus `DirectTransport` and `MultiplexTransport`. The transports still exist in `@cyanmycelium/mcp-core@0.4.x` too and leave it in `0.5.0` |
 | consumer | not created yet | `consumer-v*` | Scope to be designed; nothing exists to move into it |
 
 `node-v*` predates the split, when `node/` held a single package. It stays as it is because the series is already published and a rename would orphan the existing tags; the newer packages use their own name instead.
 
-### On `core` not existing yet
+### On the wire contract not having its own package
 
-The wire contract is written and tested, but it sits inside `provider` under a dedicated `./protocol` entry point rather than in its own package. That is deliberate: a package with one consumer is not yet a package.
+It lives in `provider`, behind a dedicated `./protocol` entry point, and the broker imports it from there. Giving it a package of its own would only pay off the day a third party needs it without needing the provider — the consumer side, most likely. Until then it would be a package with one owner and one consumer.
 
-It graduates the day a second end needs it, which will be when the broker stops re-declaring the envelope inline in `ws.tunnel.ts`. At that point `server` would otherwise have to depend on `provider`, and a broker depending on the provider-side package is exactly the confusion this whole split removes. Anything importing the protocol should use the `./protocol` subpath, so that move costs one line per call site.
+Everything importing it goes through the `./protocol` subpath rather than the package root, so that move stays a one-line change per call site when it becomes worthwhile.
+
+### Build order
+
+The broker compiles against the provider's published `dist`, and `npm run --workspaces` walks packages alphabetically rather than by dependency. The workspace `build` script therefore names its packages explicitly, downstream last. A new package added to `packages/` must be added there too, or a clean checkout will fail to build while an incremental one keeps working.
 
 Moving the transports out of `@cyanmycelium/mcp-core` is a breaking change for that package. The order is: publish `provider` with the transports, migrate applications, then remove them from `mcp-core`. Never the reverse.

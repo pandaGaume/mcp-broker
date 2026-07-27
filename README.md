@@ -29,7 +29,7 @@ mcp-broker/
 ├── node/                       ← TypeScript implementation (current)
 │   └── packages/               ← npm workspace
 │       ├── broker/             ← the broker itself
-│       └── provider/           ← tunnel protocol + publishing a server to a slot
+│       └── provider/           ← tunnel wire contract + publishing a server to a slot
 ├── dotnet/                     ← .NET implementation (planned)
 ├── docs/                       ← protocol, architecture, endpoints
 ├── .github/workflows/          ← CI + release pipelines per package
@@ -45,7 +45,7 @@ Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the r
 | Implementation | Status | Package | Tag prefix |
 |---|---|---|---|
 | [node/packages/broker/](node/packages/broker/) | published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
-| [node/packages/provider/](node/packages/provider/) | not published yet | `@cyanmycelium/mcp-broker-provider` on npm | `provider-v*` |
+| [node/packages/provider/](node/packages/provider/) | published | `@cyanmycelium/mcp-broker-provider` on npm | `provider-v*` |
 | [dotnet/](dotnet/) | planned | `CyanMycelium.Mcp.Broker` on NuGet | `dotnet-v*` |
 
 Each package carries its own `.npmrc` with the matching `tag-version-prefix`, so run `npm version` from inside the package directory rather than from the workspace root: npm ignores per-workspace `.npmrc` files when invoked at the root, and you would get an unprefixed `v*` tag that no release workflow listens to.
