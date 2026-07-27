@@ -28,11 +28,13 @@ jobs:
                   cache: "npm"
                   cache-dependency-path: node/package-lock.json
 
-            # npm < 11.5.1 does not support OIDC trusted publishing.
-            # Node 20.x ships with npm 10.x, so upgrade explicitly before publish.
+            # npm < 11.5.1 does not support OIDC trusted publishing, and Node 20.x
+            # ships npm 10.x — so upgrade explicitly before publish. Pin to npm 11.x:
+            # npm@latest is 12.x, which dropped Node 20 support (requires Node >=22.22),
+            # while npm 11.x still runs on Node 20.17+ and already supports OIDC.
             - name: Upgrade npm to enable OIDC trusted publishing
               run: |
-                  npm install -g npm@latest
+                  npm install -g npm@^11
                   echo "npm version after upgrade: $(npm --version)"
 
             - run: npm ci
