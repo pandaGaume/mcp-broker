@@ -1,6 +1,6 @@
 {
     "name": "@cyanmycelium/mcp-broker-provider",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Provider side of the CyanMycelium MCP broker tunnel: publish an MCP server to a broker slot over the shared envelope protocol.",
     "type": "module",
     "license": "Apache-2.0",
