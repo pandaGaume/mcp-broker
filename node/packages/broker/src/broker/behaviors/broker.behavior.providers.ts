@@ -15,8 +15,8 @@ import type { IBrokerContext } from "../broker.context";
  * Exposes the broker's provider slots so an MCP agent can discover what is
  * currently routable behind the broker, with two tools:
  *
- * - `providers_list` — every slot (including disconnected ones).
- * - `provider_status({ name })` — detail on one slot.
+ * - `providers_list`: every slot (including disconnected ones).
+ * - `provider_status({ name })`, detail on one slot.
  *
  * Plus matching resources at `broker://providers` and `broker://providers/<name>`.
  */

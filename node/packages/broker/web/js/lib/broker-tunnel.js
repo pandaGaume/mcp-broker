@@ -1,5 +1,5 @@
 /**
- * broker-tunnel.js — connect an MCP server to @cyanmycelium/mcp-broker.
+ * broker-tunnel.js, connect an MCP server to @cyanmycelium/mcp-broker.
  *
  * This is the ONLY broker-specific code you need to tunnel an MCP server
  * (browser-side or anywhere a WebSocket is available) to the broker. Copy
@@ -11,7 +11,7 @@
  * direction, so `BrokerTunnelTransport` below is a thin shim implementing the
  * SDK's structural `Transport` interface (start / send / close / onmessage /
  * onclose / onerror) over a browser `WebSocket`. The MCP protocol itself is
- * untouched — any standard MCP server works through it.
+ * untouched: any standard MCP server works through it.
  *
  * @example
  *   import { Server } from "https://esm.sh/@modelcontextprotocol/sdk@1.12.3/server/index.js";
@@ -19,7 +19,7 @@
  *
  *   const server = new Server({ name: "my-provider", version: "1.0.0" },
  *                             { capabilities: { tools: {} } });
- *   // server.setRequestHandler(...) — your tools and resources
+ *   // server.setRequestHandler(...), your tools and resources
  *
  *   const transport = new BrokerTunnelTransport("ws://localhost:3000/provider/my-provider");
  *   transport.onTunnelClose = (code, reason) =>
@@ -47,12 +47,12 @@ export class BrokerTunnelTransport {
         this._ws = null;
         this._aggregate = options.aggregate === true;
 
-        // Set by the MCP SDK inside Server.connect() — do not assign these yourself.
+        // Set by the MCP SDK inside Server.connect(), do not assign these yourself.
         this.onmessage = null;
         this.onclose = null;
         this.onerror = null;
 
-        // Page-owned observation hooks — assign these before Server.connect().
+        // Page-owned observation hooks, assign these before Server.connect().
         /** @type {null | (() => void)} */
         this.onTunnelOpen = null;
         /** @type {null | ((code: number, reason: string) => void)} */
@@ -60,7 +60,7 @@ export class BrokerTunnelTransport {
         /** @type {null | ((error: Error) => void)} */
         this.onTunnelError = null;
 
-        // Last close code/reason — useful for diagnostics after the fact.
+        // Last close code/reason, useful for diagnostics after the fact.
         this.closeCode = null;
         this.closeReason = "";
     }
@@ -69,7 +69,7 @@ export class BrokerTunnelTransport {
      * Opens the WebSocket. Called by `Server.connect()`. The returned promise
      * resolves once the broker accepts the WebSocket upgrade.
      *
-     * Note: a successful upgrade is not yet a usable slot — the broker may
+     * Note: a successful upgrade is not yet a usable slot: the broker may
      * still reject the slot at the application layer with a 1008 close (name
      * already taken, or reserved) a few milliseconds later. Watch
      * `onTunnelClose` for that case.
@@ -84,7 +84,7 @@ export class BrokerTunnelTransport {
 
             ws.onopen = () => {
                 opened = true;
-                // Optional broker registration frame — it MUST precede any MCP
+                // Optional broker registration frame: it MUST precede any MCP
                 // traffic, so it is sent here before start() resolves.
                 if (this._aggregate) {
                     ws.send(JSON.stringify({ type: "register", aggregate: true }));
@@ -97,7 +97,7 @@ export class BrokerTunnelTransport {
                 const err = new Error(`WebSocket error on ${this.url}`);
                 this.onTunnelError?.(err);
                 this.onerror?.(err);
-                // Reject start() only if the socket never opened — a post-open
+                // Reject start() only if the socket never opened: a post-open
                 // error is a runtime failure, not a connect failure.
                 if (!opened) reject(err);
             };
@@ -114,7 +114,7 @@ export class BrokerTunnelTransport {
                 try {
                     parsed = JSON.parse(typeof ev.data === "string" ? ev.data : "");
                 } catch {
-                    return; // not JSON — drop
+                    return; // not JSON, drop
                 }
                 this.onmessage?.(parsed);
             };
@@ -147,7 +147,7 @@ export class BrokerTunnelTransport {
 export const BROKER_REJECT_CODE = 1008;
 
 /**
- * Turns a tunnel WebSocket close into a human-readable diagnosis — the
+ * Turns a tunnel WebSocket close into a human-readable diagnosis: the
  * "handshake check". Three cases matter when tunnelling to the broker:
  *
  * - 1008  → the broker rejected the slot (name already connected, or reserved).
@@ -164,7 +164,7 @@ export function describeTunnelClose(code, reason, wasOpen) {
         return { level: "error", message: `Broker rejected the provider slot: ${reason || "policy violation (1008)"}` };
     }
     if (!wasOpen) {
-        return { level: "error", message: "Broker unreachable — the WebSocket closed before the tunnel opened." };
+        return { level: "error", message: "Broker unreachable: the WebSocket closed before the tunnel opened." };
     }
     if (code && code !== 1000 && code !== 1005) {
         return { level: "warn", message: `Tunnel closed unexpectedly (code ${code}${reason ? ", " + reason : ""}).` };

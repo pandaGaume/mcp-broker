@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
+import { mcpCall } from "./streamable.helper";
 import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index";
 
 const validator: ITokenValidator = {
@@ -50,7 +51,7 @@ afterEach(async () => {
     tunnel = null;
 });
 
-describe("provider (engine) authentication — closes slot occupation", () => {
+describe("provider (engine) authentication, closes slot occupation", () => {
     it("rejects a dedicated provider connection without the secret", async () => {
         const { port } = await start({ providerSecret: SECRET });
         const result = await connect(`ws://127.0.0.1:${port}/provider/weather`);
@@ -119,10 +120,10 @@ describe("_broker introspection is gated once auth is enabled", () => {
 
     it("lets an admin-scoped token reach the broker's own tools", async () => {
         const { port } = await start({ auth });
-        const res = await fetch(`http://127.0.0.1:${port}/_broker/mcp`, { method: "POST", headers: { authorization: "Bearer admin" }, body: RPC });
+        const res = await mcpCall(`http://127.0.0.1:${port}`, "_broker", RPC, { authorization: "Bearer admin" });
         expect(res.status).toBe(200);
         const body = (await res.json()) as { result?: { tools?: unknown[] }; error?: unknown };
-        // The broker loopback answers for real — a tools/list result, not an error.
+        // The broker loopback answers for real: a tools/list result, not an error.
         expect(body.result?.tools).toBeDefined();
         expect(body.error).toBeUndefined();
     });

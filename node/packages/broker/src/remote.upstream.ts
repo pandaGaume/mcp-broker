@@ -19,7 +19,7 @@ export interface IRemoteUpstreamConfig {
  *
  * The broker-facing contract is identical to {@link StdioUpstream}: the broker
  * muxes the slot's clients onto this single upstream. The only difference is
- * the transport — Streamable HTTP / SSE / WebSocket instead of a child process.
+ * the transport, Streamable HTTP / SSE / WebSocket instead of a child process.
  */
 export class RemoteUpstream implements IUpstream {
     readonly name: string;

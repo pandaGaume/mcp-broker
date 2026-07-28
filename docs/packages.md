@@ -80,7 +80,7 @@ The first line matters most. MCP defines stdio and Streamable HTTP; those transp
 
 ### On the wire contract not having its own package
 
-It lives in `provider`, behind a dedicated `./protocol` entry point, and the broker imports it from there. Giving it a package of its own would only pay off the day a third party needs it without needing the provider — the consumer side, most likely. Until then it would be a package with one owner and one consumer.
+It lives in `provider`, behind a dedicated `./protocol` entry point, and the broker imports it from there. Giving it a package of its own would only pay off the day a third party needs it without needing the provider: the consumer side, most likely. Until then it would be a package with one owner and one consumer.
 
 Everything importing it goes through the `./protocol` subpath rather than the package root, so that move stays a one-line change per call site when it becomes worthwhile.
 

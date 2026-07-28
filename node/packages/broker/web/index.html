@@ -17,7 +17,7 @@
     .hero { padding: 80px 0 56px; }
     .hero-mark { margin-bottom: 20px; }
 
-    /* "Running" status dot — pulsing green to read as "live" at a glance */
+    /* "Running" status dot, pulsing green to read as "live" at a glance */
     .status-row {
       display: inline-flex;
       align-items: center;
@@ -50,7 +50,7 @@
       100% { transform: scale(2.4); opacity: 0; }
     }
 
-    /* Address line — copy-on-click, same vibe as the hero CTA from the docs site */
+    /* Address line, copy-on-click, same vibe as the hero CTA from the docs site */
     .address {
       display: inline-flex;
       align-items: center;
@@ -81,7 +81,7 @@
     }
     .address.copied .copy-hint { color: var(--blue); }
 
-    /* "Safe to close" reassurance — green-tinted version of the .conclusion block */
+    /* "Safe to close" reassurance, green-tinted version of the .conclusion block */
     .safe {
       margin: 28px 0 0;
       padding: 14px 18px;
@@ -95,7 +95,7 @@
     .safe b { color: var(--fg); font-weight: 500; }
     .safe svg { vertical-align: -3px; margin-right: 6px; color: var(--lime); }
 
-    /* Endpoints — a quick reference, two columns on wide screens */
+    /* Endpoints: a quick reference, two columns on wide screens */
     .endpoints {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -125,7 +125,7 @@
       word-break: break-all;
     }
 
-    /* Example cards grid — links to other pages mounted under www/ */
+    /* Example cards grid, links to other pages mounted under www/ */
     .examples-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -196,7 +196,7 @@
     }
     a.example:hover .ex-path .arrow { transform: translateX(3px); }
 
-    /* Placeholder cards — visibly inactive, still clickable to the explainer.
+    /* Placeholder cards, visibly inactive, still clickable to the explainer.
        Uses the same dashed/striped pattern as the placeholder page's mark
        so the two visually agree. */
     a.example.placeholder {
@@ -233,7 +233,7 @@
       background: transparent;
     }
 
-    /* Hide-this-page section — a quieter, more compact look */
+    /* Hide-this-page section: a quieter, more compact look */
     #disable .code-wrap { margin-top: 14px; }
     .hide-options {
       display: grid;
@@ -270,7 +270,7 @@
       border-radius: 3px;
     }
 
-    /* Section heads on this page don't need such big padding — it's a single screen */
+    /* Section heads on this page don't need such big padding: it's a single screen */
     section { padding: 56px 0; }
     section:first-of-type { padding-top: 0; } /* hero handles its own top */
   </style>
@@ -323,7 +323,7 @@
     <div class="safe">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"/></svg>
       <b>Safe to close this page.</b>
-      The broker runs in the terminal that started it — closing the tab will not stop it.
+      The broker runs in the terminal that started it, closing the tab will not stop it.
       Use <code class="inline">Ctrl + C</code> in that terminal when you want to shut it down.
     </div>
   </div>
@@ -335,7 +335,7 @@
     <div class="section-num">01 - Endpoints</div>
     <h2>Where to connect from</h2>
 
-    <p class="intro">Four transports are mounted on the same host. Replace <code class="inline">&lt;name&gt;</code> with one of your provider slot names — or use <code class="inline">_broker</code> to talk to the broker itself, or <code class="inline">_all</code> for the aggregate of every provider.</p>
+    <p class="intro">Four transports are mounted on the same host. Replace <code class="inline">&lt;name&gt;</code> with one of your provider slot names: or use <code class="inline">_broker</code> to talk to the broker itself, or <code class="inline">_all</code> for the aggregate of every provider.</p>
 
     <div class="endpoints">
       <div class="endpoint">
@@ -436,7 +436,7 @@
       </div>
       <div class="hide-option">
         <div class="h">Option C · CLI flag</div>
-        <p>Pass <code>--no-open</code> on the command line — wins over both.</p>
+        <p>Pass <code>--no-open</code> on the command line, wins over both.</p>
       </div>
     </div>
 

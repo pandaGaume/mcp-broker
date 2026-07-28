@@ -16,7 +16,7 @@ import type { IAuthorizationSubject, IPolicyAuthorization, ISlotResourceResolver
  * an array instead. Unknown claims are preserved via the index signature.
  */
 export interface IAccessTokenClaims {
-    /** Subject — the principal the token was issued for. */
+    /** Subject: the principal the token was issued for. */
     sub?: string;
     /** Intended audience(s). MUST include the slot's canonical resource URI. */
     aud?: string | string[];

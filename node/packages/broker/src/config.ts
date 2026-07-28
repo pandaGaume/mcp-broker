@@ -68,6 +68,28 @@ export interface IBrokerConfig {
     brokerName?: string;
 
     /**
+     * Browser origins allowed to reach `/<slot>/mcp`.
+     *
+     * Absent means no browser origin is accepted: a request carrying an
+     * `Origin` header gets `403`, one carrying none (Claude Desktop, MCP
+     * Inspector, any server-side SDK) always passes. The MCP specification asks
+     * for this check, since without it any web page loaded in a browser that
+     * can reach the broker could drive it.
+     *
+     * An array lists origins matched **exactly**. An object supplies a regular
+     * expression tested against the whole `Origin` header. Also maps to
+     * `MCP_BROKER_ALLOWED_ORIGINS` (comma-separated list form only; a pattern
+     * needs the config file).
+     *
+     * @example
+     * ```json
+     * { "allowedOrigins": ["https://app.example.com", "http://localhost:5173"] }
+     * { "allowedOrigins": { "pattern": "^https://[a-z0-9-]+\\.example\\.com$" } }
+     * ```
+     */
+    allowedOrigins?: string[] | { pattern: string; flags?: string };
+
+    /**
      * OAuth 2.1 resource-server authorization. When `enabled` is `true`, every
      * HTTP client request to a slot must carry a valid `Authorization: Bearer`
      * token issued for that slot, and the broker publishes Protected Resource
@@ -184,12 +206,12 @@ export const LEGACY_CONFIG_FILENAME = "mcp-broker.config.json";
  * 1. The `path` argument when provided (explicit override).
  * 2. The `MCP_BROKER_CONFIG` env var.
  * 3. `./.mcp-broker/config.json` relative to `process.cwd()`.
- * 4. `./mcp-broker.config.json` relative to `process.cwd()` (legacy layout —
+ * 4. `./mcp-broker.config.json` relative to `process.cwd()` (legacy layout ,
  *    a deprecation warning is written to stderr).
  *
  * When no file is found, returns the built-in empty config with
  * `baseDir = process.cwd()`. On invalid JSON, logs a warning to stderr and
- * returns the same empty config — never throws.
+ * returns the same empty config, never throws.
  *
  * Paths inside the config file are intended to be resolved against
  * {@link ILoadedBrokerConfig.baseDir} by the consumer.

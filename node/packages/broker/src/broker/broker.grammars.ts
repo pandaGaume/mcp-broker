@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { McpGrammar } from "@cyanmycelium/mcp-core";
 
 // ---------------------------------------------------------------------------
-// Open string types — extensibility by convention
+// Open string types, extensibility by convention
 // ---------------------------------------------------------------------------
 
 /**
@@ -40,8 +40,8 @@ export type BrokerUserAgent = string;
  * matrix the broker registers on disk.
  *
  * Pattern:
- *   - `"<userAgent>:<locale>"` (no version) — e.g. `"claude:fr"`, `"default:en"`
- *   - `"<userAgent>:<locale>@<version>"` (versioned) — e.g. `"claude:fr@v2"`
+ *   - `"<userAgent>:<locale>"` (no version), e.g. `"claude:fr"`, `"default:en"`
+ *   - `"<userAgent>:<locale>@<version>"` (versioned), e.g. `"claude:fr@v2"`
  *
  * The colon separator is reserved for the `<ua>:<locale>` composition; the
  * `@` separator is reserved for the optional version suffix. Neither
@@ -94,7 +94,7 @@ export function parseBrokerGrammarStem(stem: string): { locale: BrokerLocale; ve
  * JSON files live alongside this module in `src/broker/grammars/` during
  * development and are mirrored under `dist/broker/grammars/` at build time
  * by `scripts/copy-assets.mjs`. Adding a new `(userAgent, locale)` pair is
- * just a matter of dropping a new JSON file — no code change required.
+ * just a matter of dropping a new JSON file: no code change required.
  */
 const GRAMMARS_DIR = join(dirname(fileURLToPath(import.meta.url)), "grammars");
 
@@ -132,7 +132,7 @@ export function loadBrokerGrammar(userAgent: BrokerUserAgent, locale: BrokerLoca
  *
  * Used by the broker server at startup to bulk-register both the packaged
  * grammars and any local overrides. No hard-coded list of supported
- * user-agents or locales — adding a new grammar is dropping a JSON file.
+ * user-agents or locales, adding a new grammar is dropping a JSON file.
  */
 export interface IBrokerGrammarEntry {
     userAgent: BrokerUserAgent;
@@ -186,7 +186,7 @@ export function* iterBrokerGrammarsFrom(grammarsDir: string): Generator<IBrokerG
  * mcp-broker package). Equivalent to `iterBrokerGrammarsFrom(<packaged-dir>)`.
  *
  * For local user overrides, see {@link iterBrokerGrammarsFrom} with a custom
- * directory — typically `.mcp-broker/grammars/` next to the config file.
+ * directory, typically `.mcp-broker/grammars/` next to the config file.
  */
 export function* iterAvailableBrokerGrammars(): Generator<IBrokerGrammarEntry> {
     yield* iterBrokerGrammarsFrom(GRAMMARS_DIR);
@@ -206,20 +206,20 @@ export type BrokerGrammarEntry = IBrokerGrammarEntry;
  * Conventionally this is `default:en`. Session-specific grammars selected by
  * the resolver override individual entries on top of this baseline.
  *
- * Throws if the JSON resource is missing — the broker behaviors cannot be
+ * Throws if the JSON resource is missing: the broker behaviors cannot be
  * built without baseline descriptions.
  */
 export function brokerBaselineGrammar(): McpGrammar {
     const g = loadBrokerGrammar("default", "en");
     if (!g) {
-        throw new Error(`Required baseline broker grammar "default:en" is missing — expected at ${join(GRAMMARS_DIR, "default", "en.json")}.`);
+        throw new Error(`Required baseline broker grammar "default:en" is missing, expected at ${join(GRAMMARS_DIR, "default", "en.json")}.`);
     }
     return g;
 }
 
 /**
  * Convenience accessor for a baseline tool description. Throws when the
- * tool is not listed in the baseline grammar — i.e. the JSON file is missing
+ * tool is not listed in the baseline grammar, i.e. the JSON file is missing
  * an entry for a tool the code knows about.
  */
 export function brokerBaselineToolDescription(toolName: string): string {

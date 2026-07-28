@@ -69,7 +69,7 @@ Transports created for the same tunnel URL share one WebSocket, whichever order 
 
 ## Status
 
-`0.1.0` ships the protocol module and both transports. They still exist in `@cyanmycelium/mcp-core@0.4.x` as well, and are removed there in `0.5.0` — migrate your imports before upgrading.
+`0.1.0` ships the protocol module and both transports. They still exist in `@cyanmycelium/mcp-core@0.4.x` as well, and are removed there in `0.5.0`, migrate your imports before upgrading.
 
 The protocol is shared with the broker, and later with the consumer side. Import it through the `./protocol` subpath rather than the package root, so it can move to a package of its own one day without touching your call sites.
 

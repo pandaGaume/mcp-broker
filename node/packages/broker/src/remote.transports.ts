@@ -3,7 +3,7 @@
  *
  * No `@modelcontextprotocol/sdk` dependency: the broker stays SDK-free, the
  * official SDK is only used outside the broker (in the demo) to prove the
- * broker is implementation-agnostic. Each transport is a thin frame relay —
+ * broker is implementation-agnostic. Each transport is a thin frame relay ,
  * it does not interpret MCP, it pipes JSON-RPC strings both ways.
  */
 import * as http from "node:http";
@@ -179,7 +179,7 @@ class StreamableHttpRemoteTransport implements IRemoteTransport {
     ) {}
 
     connect(): void {
-        // Streamable HTTP is stateless — there is no connection to open. The
+        // Streamable HTTP is stateless, there is no connection to open. The
         // transport is usable as soon as connect() is called; the session id
         // is captured later from the first response that carries one.
         this._closed = false;
@@ -244,7 +244,7 @@ class StreamableHttpRemoteTransport implements IRemoteTransport {
                 return;
             }
         } catch {
-            /* not JSON — forward verbatim */
+            /* not JSON, forward verbatim */
         }
         this.onMessage?.(trimmed);
     }

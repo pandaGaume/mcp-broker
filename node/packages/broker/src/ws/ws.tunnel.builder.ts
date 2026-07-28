@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
-import type { IStaticMount, IWsTunnelOptions } from "./ws.interfaces";
+import type { AllowedOrigins, IStaticMount, IWsTunnelOptions } from "./ws.interfaces";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "../auth/index";
@@ -40,6 +40,7 @@ export class WsTunnelBuilder {
     private _messagesPath = "/messages";
     private _mcpPath = "/mcp";
     private _samplesIndexPath = "/__samples_index__";
+    private _allowedOrigins: AllowedOrigins | undefined = undefined;
     private _staticMounts: IStaticMount[] = [];
     private _stdioUpstreams: IStdioUpstreamConfig[] = [];
     private _remoteUpstreams: IRemoteUpstreamConfig[] = [];
@@ -129,6 +130,26 @@ export class WsTunnelBuilder {
      */
     withSamplesIndexPath(path: string): this {
         this._samplesIndexPath = path;
+        return this;
+    }
+
+    /**
+     * Allows browser origins to reach `/<slot>/mcp`.
+     *
+     * Without this call no browser origin is accepted, which is the safe
+     * default: a request carrying an `Origin` is refused with `403`, while one
+     * carrying none (any non-browser client) always passes. Call it only when a
+     * web page really has to talk to the broker over HTTP.
+     *
+     * @example
+     * ```typescript
+     * builder.withAllowedOrigins(["https://app.example.com"]);
+     * builder.withAllowedOrigins(/^https:\/\/[a-z0-9-]+\.example\.com$/);
+     * builder.withAllowedOrigins((origin) => origin.endsWith(".example.com"));
+     * ```
+     */
+    withAllowedOrigins(allowed: AllowedOrigins): this {
+        this._allowedOrigins = allowed;
         return this;
     }
 
@@ -289,6 +310,7 @@ export class WsTunnelBuilder {
             messagesPath: this._messagesPath,
             mcpPath: this._mcpPath,
             samplesIndexPath: this._samplesIndexPath,
+            allowedOrigins: this._allowedOrigins,
             staticMounts: this._staticMounts.length > 0 ? [...this._staticMounts] : undefined,
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
             remoteUpstreams: this._remoteUpstreams.length > 0 ? [...this._remoteUpstreams] : undefined,

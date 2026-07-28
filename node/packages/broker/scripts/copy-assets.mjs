@@ -8,7 +8,7 @@
  *
  * That is why each entry below is an explicit `from → to` pair rather than a
  * single relative path: the two sides genuinely differ, and assuming otherwise
- * builds a `dist` that passes every test — they run against `src` — and fails
+ * builds a `dist` that passes every test (they run against `src`) and fails
  * the moment the published artifact is executed.
  *
  * Usage (called from npm scripts):

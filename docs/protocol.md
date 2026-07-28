@@ -61,18 +61,18 @@ Framing: one JSON-RPC message per WebSocket text frame, no envelope. The broker 
 ## Streamable HTTP client (MCP 2025-03-26)
 
 Endpoints:
-- `POST /<name>/mcp` with `Content-Type: application/json` — sends one JSON-RPC request, the response is held until the provider replies, then returned as `application/json`. Notifications (no `id`) get a `202 Accepted` immediately.
-- `GET /<name>/mcp` — opens an SSE-style stream that receives all server-initiated notifications until the client disconnects. The session id is echoed in the `Mcp-Session-Id` response header (and read back from the request header if the client supplies one).
+- `POST /<name>/mcp` with `Content-Type: application/json`, sends one JSON-RPC request, the response is held until the provider replies, then returned as `application/json`. Notifications (no `id`) get a `202 Accepted` immediately.
+- `GET /<name>/mcp`, opens an SSE-style stream that receives all server-initiated notifications until the client disconnects. The session id is echoed in the `Mcp-Session-Id` response header (and read back from the request header if the client supplies one).
 
 ## Legacy SSE client
 
 Endpoints:
-- `GET /<name>/sse` — opens an SSE stream. Immediately emits one `endpoint` event whose `data:` is the URL the client must POST to:
+- `GET /<name>/sse`, opens an SSE stream. Immediately emits one `endpoint` event whose `data:` is the URL the client must POST to:
   ```
   event: endpoint
   data: /<name>/messages?sessionId=<uuid>
   ```
-- `POST /<name>/messages?sessionId=<uuid>` — body is a JSON-RPC request. Always returns `202 Accepted`. The response is delivered as a `message` event on the matching SSE stream.
+- `POST /<name>/messages?sessionId=<uuid>`, body is a JSON-RPC request. Always returns `202 Accepted`. The response is delivered as a `message` event on the matching SSE stream.
 
 ## Error envelopes
 

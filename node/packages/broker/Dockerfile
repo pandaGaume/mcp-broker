@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---------------------------------------------------------------------------
-# Build stage — compiles TypeScript, copies grammar JSON resources to dist/
+# Build stage, compiles TypeScript, copies grammar JSON resources to dist/
 # ---------------------------------------------------------------------------
 FROM node:20-alpine AS build
 
@@ -23,7 +23,7 @@ RUN npm prune --omit=dev
 
 
 # ---------------------------------------------------------------------------
-# Runtime stage — only what `node dist/bin.js` needs to start.
+# Runtime stage, only what `node dist/bin.js` needs to start.
 # ---------------------------------------------------------------------------
 FROM node:20-alpine AS runtime
 
@@ -43,7 +43,7 @@ COPY --from=build /app/dist ./dist
 RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
 USER app
 
-# Lightweight TCP probe — succeeds when the broker is listening.
+# Lightweight TCP probe, succeeds when the broker is listening.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "require('net').createConnection({host:'127.0.0.1',port:Number(process.env.MCP_BROKER_PORT||3000)}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
 

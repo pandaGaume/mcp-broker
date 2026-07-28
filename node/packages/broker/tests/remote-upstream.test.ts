@@ -124,16 +124,16 @@ describe("remote upstream (mcpServers)", () => {
         const client = await rpcClient(`ws://127.0.0.1:${BROKER_PORT}/echo`);
         sockets.push(client.ws);
 
-        // initialize — the response comes back relayed from the remote server.
+        // initialize: the response comes back relayed from the remote server.
         const init = await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
         expect((init.result?.serverInfo as { name?: string })?.name).toBe("fake-http");
 
-        // tools/list — succeeds only if the transport reused the captured session id.
+        // tools/list, succeeds only if the transport reused the captured session id.
         const list = await client.request("tools/list", {});
         expect(list.error).toBeUndefined();
         expect((list.result?.tools as { name: string }[]).map((t) => t.name)).toEqual(["echo"]);
 
-        // tools/call — arguments round-trip to the remote server and back.
+        // tools/call, arguments round-trip to the remote server and back.
         const call = await client.request("tools/call", { name: "echo", arguments: { hi: 1 } });
         const text = (call.result?.content as { text: string }[])[0].text;
         expect(text).toBe('echoed:{"hi":1}');

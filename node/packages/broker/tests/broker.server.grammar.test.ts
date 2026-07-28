@@ -128,7 +128,7 @@ async function bootBroker(opts: Parameters<typeof startBrokerServer>[1] = {}): P
 // Defaults: MCP_BROKER_LOCALE drives the selected grammar
 // ---------------------------------------------------------------------------
 
-describe("startBrokerServer — default localeSource reads MCP_BROKER_LOCALE", () => {
+describe("startBrokerServer, default localeSource reads MCP_BROKER_LOCALE", () => {
     it("returns the English baseline when MCP_BROKER_LOCALE is unset", async () => {
         const { rpcClient } = await bootBroker();
         await rpcClient.request("initialize", { clientInfo: { name: "test-client", version: "0.0.0" } });
@@ -151,7 +151,7 @@ describe("startBrokerServer — default localeSource reads MCP_BROKER_LOCALE", (
 // grammarResolverOptions passthrough: a host can override localeSource etc.
 // ---------------------------------------------------------------------------
 
-describe("startBrokerServer — grammarResolverOptions overrides", () => {
+describe("startBrokerServer, grammarResolverOptions overrides", () => {
     it("uses a custom localeSource provided by the host instead of the env var", async () => {
         process.env["MCP_BROKER_LOCALE"] = "en";
         const { rpcClient } = await bootBroker({
@@ -190,7 +190,7 @@ describe("startBrokerServer — grammarResolverOptions overrides", () => {
 // Explicit grammar version requested by the WS client via capabilities
 // ---------------------------------------------------------------------------
 
-describe("startBrokerServer — client requests a grammar version via capabilities", () => {
+describe("startBrokerServer, client requests a grammar version via capabilities", () => {
     it("loads <locale>@<version>.json from disk and applies it when the client asks for that version", async () => {
         // Drop a versioned grammar in a temp local override directory. The
         // broker's iterBrokerGrammarsFrom parses <locale>@<version>.json and

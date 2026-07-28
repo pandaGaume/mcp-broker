@@ -35,7 +35,7 @@ function reqWith(authorization?: string): IncomingMessage {
     return { headers: authorization ? { authorization } : {} } as unknown as IncomingMessage;
 }
 
-describe("HttpAuthGuard — resource & metadata URIs", () => {
+describe("HttpAuthGuard, resource & metadata URIs", () => {
     const guard = makeGuard();
 
     it("builds the canonical resource URI for a slot", () => {
@@ -62,7 +62,7 @@ describe("HttpAuthGuard — resource & metadata URIs", () => {
     });
 });
 
-describe("HttpAuthGuard — authorize", () => {
+describe("HttpAuthGuard, authorize", () => {
     it("rejects a missing token with 401 invalid_token", async () => {
         const guard = makeGuard();
         await expect(guard.authorize(reqWith(), "s")).rejects.toMatchObject({ status: 401, code: "invalid_token" });
@@ -115,7 +115,7 @@ describe("HttpAuthGuard — authorize", () => {
     });
 });
 
-describe("HttpAuthGuard — writeChallenge", () => {
+describe("HttpAuthGuard, writeChallenge", () => {
     it("writes an RFC 9728 Bearer challenge on 401", () => {
         const guard = makeGuard();
         const captured = { headers: {} as Record<string, string>, status: 0, body: "" };

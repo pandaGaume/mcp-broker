@@ -1,4 +1,4 @@
-# `node/web/` — broker instance UI
+# `node/web/`: broker instance UI
 
 Static web UI served by the broker. No build step: plain ES modules and CSS,
 served as-is over the broker's static mount.
@@ -58,12 +58,12 @@ web/
 
 ## Bundled demos
 
-- **`demos/provider-tunnel/`** — hosts an MCP server (official
+- **`demos/provider-tunnel/`**, hosts an MCP server (official
   `@modelcontextprotocol/sdk`) and tunnels it to the broker over a WebSocket.
   Proves the broker is implementation-agnostic: a server built with the
   reference SDK tunnels through unchanged. The only broker-specific code is
   `js/lib/broker-tunnel.js`.
-- **`demos/broker-explorer/`** — the client side: connects a browser MCP
+- **`demos/broker-explorer/`**: the client side: connects a browser MCP
   client to a broker slot (`_broker`, `_all`, or any provider), lists its
   tools and calls them live. The MCP-over-WebSocket client is isolated in
   `js/mcp-ws-client.js`. Paired with the `broker-self-mcp.html` explainer.

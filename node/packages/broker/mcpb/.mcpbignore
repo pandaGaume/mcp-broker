@@ -1,4 +1,4 @@
-# Type declarations and source maps — not needed at runtime
+# Type declarations and source maps, not needed at runtime
 **/*.d.ts
 **/*.d.ts.map
 **/*.js.map

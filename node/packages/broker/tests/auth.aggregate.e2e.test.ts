@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
 import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator, type AggregateScopeFilter } from "../src/index";
+import { mcpCall } from "./streamable.helper";
 
 // "geoer" holds see:geo; "blind" holds an unrelated scope. Both authenticate.
 const validator: ITokenValidator = {
@@ -55,10 +56,8 @@ async function connectProvider(port: number, slot: string, tools: { name: string
 }
 
 async function toolsList(port: number, token: string): Promise<string[]> {
-    const res = await fetch(`http://127.0.0.1:${port}/_all/mcp`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    const res = await mcpCall(`http://127.0.0.1:${port}`, "_all", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), {
+        authorization: `Bearer ${token}`,
     });
     const body = (await res.json()) as { result?: { tools?: { name: string }[] } };
     return (body.result?.tools ?? []).map((t) => t.name);

@@ -1,12 +1,12 @@
 /**
- * app.js — UI wiring for the provider tunnel demo.
+ * app.js, UI wiring for the provider tunnel demo.
  *
  * Owns the DOM: console log, status badge, catalog panel, and the connect /
  * disconnect lifecycle. The two pieces of real logic are imported:
  *
- * - js/lib/broker-tunnel.js — broker connection (reusable, zero-dependency,
- *   shared across demos — lives at the web root).
- * - ./toolbox-server.js     — the demo MCP server (plain MCP, broker-agnostic).
+ * - js/lib/broker-tunnel.js, broker connection (reusable, zero-dependency,
+ *   shared across demos, lives at the web root).
+ * - ./toolbox-server.js    : the demo MCP server (plain MCP, broker-agnostic).
  */
 import { BrokerTunnelTransport, describeTunnelClose } from "../../../js/lib/broker-tunnel.js";
 import { TOOLS, RESOURCES, createToolboxServer } from "./toolbox-server.js";
@@ -42,7 +42,7 @@ function setStatus(next) {
 }
 
 // =====================================================================
-// Catalog panel — rendered from the toolbox server's exported definitions.
+// Catalog panel, rendered from the toolbox server's exported definitions.
 // =====================================================================
 function renderCatalog() {
     const el = document.getElementById("catalog");
@@ -102,7 +102,7 @@ const endpointsEl = document.getElementById("endpoints");
 const aggregateCheck = document.getElementById("aggregate-check");
 
 // Derive the provider WebSocket base from the page origin: ws:// over HTTP,
-// wss:// over HTTPS — avoids mixed-content errors under TLS.
+// wss:// over HTTPS, avoids mixed-content errors under TLS.
 (function deriveProviderUrl() {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     wsUrlInput.value = `${scheme}//${window.location.host}/provider`;
@@ -132,7 +132,7 @@ function showEndpoints(slotName) {
 
 // The WS "handshake check": classify how the tunnel socket closed.
 // describeTunnelClose (lib/broker-tunnel.js) maps the close code to a
-// diagnosis — broker rejection (1008), unreachable, or dropped.
+// diagnosis, broker rejection (1008), unreachable, or dropped.
 function handleTunnelClose(code, reason) {
     // A pending success banner must not fire once the slot is rejected.
     if (connectGraceTimer) {
@@ -167,7 +167,7 @@ startBtn.addEventListener("click", async () => {
     tunnelWasOpen = false;
     log(`Opening tunnel WebSocket to ${url} …`, "dim");
     if (aggregate) {
-        log("Aggregate mode on — this server will join the broker's _all slot.", "dim");
+        log("Aggregate mode on: this server will join the broker's _all slot.", "dim");
     }
 
     transport = new BrokerTunnelTransport(url, { aggregate });
@@ -180,7 +180,7 @@ startBtn.addEventListener("click", async () => {
     server = createToolboxServer({ name: slotName, onActivity: log });
 
     try {
-        // connect() awaits transport.start() — resolves when the broker accepts
+        // connect() awaits transport.start(), resolves when the broker accepts
         // the WebSocket upgrade. The MCP initialize handshake happens later,
         // when a real client targets the slot.
         await server.connect(transport);
@@ -194,7 +194,7 @@ startBtn.addEventListener("click", async () => {
     // The broker accepts the WebSocket upgrade first, then may still reject the
     // slot at the application layer with a 1008 close (name already taken, or
     // reserved) within a few milliseconds. Hold a short grace window before
-    // declaring success — handleTunnelClose cancels this timer if a rejection
+    // declaring success, handleTunnelClose cancels this timer if a rejection
     // lands first.
     connectGraceTimer = setTimeout(() => {
         connectGraceTimer = null;

@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { mcpCall } from "./streamable.helper";
 
 /**
  * Runs the **published artifact**, not the sources.
@@ -13,7 +14,7 @@ import { fileURLToPath } from "node:url";
  * way. That leaves a whole class of bugs invisible: anything that depends on
  * the shape of `dist/`. Bundling flattens the module tree, so an asset read at
  * runtime through `import.meta.url` can sit at the wrong path in `dist` while
- * every unit test still passes — which is exactly how the broker's grammars
+ * every unit test still passes: which is exactly how the broker's grammars
  * once shipped broken.
  *
  * So this spawns the real CLI and asks it to answer a real request.
@@ -84,11 +85,7 @@ describe.skipIf(!built)("published CLI", () => {
         // The reserved `_broker` slot is an in-process MCP server that reads its
         // grammars from disk at startup. A real tools/list proves both that the
         // slot came up and that those files were found next to the bundle.
-        const res = await fetch(`${base}/_broker/mcp`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
-        });
+        const res = await mcpCall(base, "_broker", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), { "content-type": "application/json" });
         expect(res.status).toBe(200);
 
         const body = (await res.json()) as { result?: { tools?: { name: string }[] }; error?: { message: string } };

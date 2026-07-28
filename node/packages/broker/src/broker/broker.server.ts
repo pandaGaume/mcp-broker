@@ -44,7 +44,7 @@ export interface IStartBrokerServerOptions {
      * via `withGrammar(brokerGrammarKey(ua, locale), grammar)`. The
      * candidate-chain resolution implemented by `McpServer.initialize` in
      * mcp-core@0.3.0 then walks the chain and merges the four layers
-     * (behavior, adapter, static, store) for the first matching key —
+     * (behavior, adapter, static, store) for the first matching key ,
      * the old hand-rolled pre-merge cascade is no longer needed.
      *
      * When `undefined` (default), only the packaged grammars are loaded.
@@ -93,7 +93,7 @@ export async function startBrokerServer(
     // Register every `(userAgent, locale)` JSON found on disk as a raw
     // grammar layer. The candidate-chain resolution in
     // McpServer.initialize (mcp-core@0.3.0) walks the resolver's chain
-    // and merges all matching layers — so partial user-agent files no
+    // and merges all matching layers: so partial user-agent files no
     // longer need to be pre-merged with the default-locale baseline at
     // boot. Local overrides come after packaged entries; identical keys
     // get overlaid via the registry's last-write-wins.

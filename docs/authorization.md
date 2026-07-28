@@ -231,6 +231,22 @@ unrestricted for backward compatibility.
 token like any other, and `perSlotScopes["_broker"]` can gate it behind an admin
 scope.
 
+### Two layers, two shapes of refusal
+
+Authentication and per-frame policy fail at different moments, and say so
+differently:
+
+| Refusal | When | What the client sees |
+|---|---|---|
+| Token absent, invalid, or missing a required scope | Before the request reaches the transport | HTTP `401` / `403` with `WWW-Authenticate` |
+| Hierarchical policy denies the operation the frame carries | Once the session is established and the frame is read | HTTP `200` with JSON-RPC `{ "error": { "code": -32001, "message": "Forbidden" } }` |
+
+The second is not an HTTP failure: the transport did its job, the operation was
+refused. This is the shape the raw WebSocket transport has always returned, and
+on `/<slot>/mcp` it is now the same, because the session owns the exchange by
+the time the frame is inspected. A client must therefore check the JSON-RPC
+body, not the status code alone.
+
 ---
 
 ## Configuration

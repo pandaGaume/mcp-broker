@@ -14,6 +14,7 @@ import {
     type WsTunnel,
 } from "../src/index";
 import { AggregateServer } from "../src/broker/aggregate/aggregate.server";
+import { mcpCall } from "./streamable.helper";
 
 const validator: ITokenValidator = {
     async validate(token, resource) {
@@ -94,14 +95,20 @@ afterEach(async () => {
     tunnel = null;
 });
 
+/**
+ * Where the two layers of refusal now surface.
+ *
+ * Token failures (absent, invalid, missing scope) are still HTTP: the guard runs
+ * before the request reaches the transport, so they stay `401`/`403`. A
+ * per-frame policy refusal is not, because by then the session is established
+ * and the transport owns the exchange; it comes back as JSON-RPC `-32001` on a
+ * `200`, exactly as it already did over WebSocket. So these tests assert on the
+ * body, which is what actually distinguishes an allow from a deny.
+ */
 describe("hierarchical policy enforcement on direct slots", () => {
     it("allows a caller through inherited subtree access", async () => {
         const base = await startTunnel();
-        const response = await fetch(`${base}/motor/mcp`, {
-            method: "POST",
-            headers: { authorization: "Bearer alice" },
-            body: LIST,
-        });
+        const response = await mcpCall(base, "motor", LIST, { authorization: "Bearer alice" });
         expect(response.status).toBe(200);
         const body = (await response.json()) as { error?: { code: number; message: string } };
         expect(body.error?.message).toContain("not connected");
@@ -109,41 +116,29 @@ describe("hierarchical policy enforcement on direct slots", () => {
 
     it("denies a caller with no matching assignment", async () => {
         const base = await startTunnel();
-        const response = await fetch(`${base}/motor/mcp`, {
-            method: "POST",
-            headers: { authorization: "Bearer bob" },
-            body: LIST,
-        });
-        expect(response.status).toBe(403);
+        const response = await mcpCall(base, "motor", LIST, { authorization: "Bearer bob" });
         const body = (await response.json()) as { error?: { code: number; message: string } };
         expect(body.error).toMatchObject({ code: -32001, message: "Forbidden" });
     });
 
     it("applies an exact explicit deny over an inherited role grant", async () => {
         const base = await startTunnel();
-        const response = await fetch(`${base}/critical/mcp`, {
-            method: "POST",
-            headers: { authorization: "Bearer alice" },
-            body: DIAGNOSE,
-        });
-        expect(response.status).toBe(403);
+        const response = await mcpCall(base, "critical", DIAGNOSE, { authorization: "Bearer alice" });
+        const body = (await response.json()) as { error?: { code: number; message: string } };
+        expect(body.error).toMatchObject({ code: -32001, message: "Forbidden" });
     });
 
     it("protects _broker with its independent reserved resource", async () => {
         const base = await startTunnel();
-        const allowed = await fetch(`${base}/_broker/mcp`, {
-            method: "POST",
-            headers: { authorization: "Bearer alice" },
-            body: LIST,
-        });
+        const allowed = await mcpCall(base, "_broker", LIST, { authorization: "Bearer alice" });
         expect(allowed.status).toBe(200);
+        const allowedBody = (await allowed.json()) as { result?: { tools?: unknown[] }; error?: unknown };
+        expect(allowedBody.error).toBeUndefined();
+        expect(allowedBody.result?.tools).toBeInstanceOf(Array);
 
-        const denied = await fetch(`${base}/_broker/mcp`, {
-            method: "POST",
-            headers: { authorization: "Bearer bob" },
-            body: LIST,
-        });
-        expect(denied.status).toBe(403);
+        const denied = await mcpCall(base, "_broker", LIST, { authorization: "Bearer bob" });
+        const deniedBody = (await denied.json()) as { error?: { code: number; message: string } };
+        expect(deniedBody.error).toMatchObject({ code: -32001, message: "Forbidden" });
     });
 });
 

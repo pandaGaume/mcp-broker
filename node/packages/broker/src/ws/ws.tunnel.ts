@@ -6,9 +6,9 @@ import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
 import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
-import { StdioTransport } from "@cyanmycelium/mcp-core/node";
-// The broker is itself a provider — it publishes its own `_broker` and `_all`
-// slots — so sharing the provider package's wire contract is the natural way to
+import { StdioTransport, StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
+// The broker is itself a provider: it publishes its own `_broker` and `_all`
+// slots: so sharing the provider package's wire contract is the natural way to
 // keep one definition of the envelope rather than two that drift.
 import { decodeEnvelope, encodeEnvelope, encodeErrorEnvelope, envelopeFrame, TunnelErrorCodes } from "@cyanmycelium/mcp-broker-provider/protocol";
 import { StdioUpstream } from "../stdio.upstream";
@@ -38,7 +38,7 @@ import {
     type ISlotResourceResolver,
 } from "../authorization/index";
 import { VERSION, PACKAGE_NAME } from "../version";
-import type { IInternalClient, IProviderState, IWsTunnelOptions, McpEndpointKind } from "./ws.interfaces";
+import type { AllowedOrigins, IHttpSession, IInternalClient, IProviderState, IWsTunnelOptions, McpEndpointKind } from "./ws.interfaces";
 
 // ---------------------------------------------------------------------------
 // Static-file helpers
@@ -58,6 +58,64 @@ const MIME: Readonly<Record<string, string>> = {
     ".woff2": "font/woff2",
     ".woff": "font/woff",
 };
+
+// ---------------------------------------------------------------------------
+// JSON-RPC helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSON-RPC id a frame is waiting on, or `undefined` when nothing will come
+ * back for it: a notification, or something that did not parse.
+ *
+ * `null` is a legal id in an error response, so absence cannot be signalled
+ * with it, hence `undefined`.
+ */
+function requestIdOf(frame: string): string | number | undefined {
+    try {
+        const parsed = JSON.parse(frame) as { id?: unknown };
+        if (typeof parsed?.id === "string" || typeof parsed?.id === "number") return parsed.id;
+    } catch {
+        /* not JSON: nothing to route by */
+    }
+    return undefined;
+}
+
+/**
+ * Turns the three shapes an operator may configure into the single predicate
+ * the Streamable HTTP endpoint expects.
+ *
+ * Absent means closed, not open: a browser origin is refused unless it was
+ * named. A `RegExp` is reset before each test, because one carrying the `g`
+ * flag keeps `lastIndex` between calls and would otherwise accept and refuse
+ * the same origin in turn.
+ */
+function originPredicate(allowed: AllowedOrigins | undefined): (origin: string) => boolean {
+    if (!allowed) return () => false;
+    if (typeof allowed === "function") return allowed;
+    if (allowed instanceof RegExp) {
+        return (origin) => {
+            allowed.lastIndex = 0;
+            return allowed.test(origin);
+        };
+    }
+    const exact = new Set(allowed);
+    return (origin) => exact.has(origin);
+}
+
+/**
+ * Opens a transport that was handed over closed.
+ *
+ * `connect` is not part of `IMessageTransport`, because some transports arrive
+ * already open, so it is probed for rather than required. This is the same
+ * check `McpServer` makes on the transport it is given, and for the same
+ * reason: testing for a concrete class would tie the caller to one
+ * implementation.
+ */
+function openTransport(transport: IMessageTransport): void {
+    if ("connect" in transport && typeof (transport as { connect: unknown }).connect === "function") {
+        (transport as { connect(): void }).connect();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // WsTunnel
@@ -136,6 +194,9 @@ export class WsTunnel implements IBrokerContext {
     /** Stable technical-slot to hierarchical-resource mapping. */
     private readonly _slotResourceResolver: ISlotResourceResolver;
 
+    /** Origin check applied by every slot's Streamable HTTP endpoint. */
+    private readonly _allowedOrigins: (origin: string) => boolean;
+
     /** Principal captured at a client's WS upgrade, keyed by the upgrade request. */
     private readonly _pendingClientPrincipals = new WeakMap<IncomingMessage, IPrincipal>();
 
@@ -153,6 +214,7 @@ export class WsTunnel implements IBrokerContext {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
         this._providerAuth = options.providerAuth ?? null;
+        this._allowedOrigins = originPredicate(options.allowedOrigins);
         this._authorization = options.authorization ?? options.auth?.authorization ?? null;
         this._slotResourceResolver =
             options.slotResourceResolver ?? this._authorization?.slotResourceResolver ?? options.auth?.slotResourceResolver ?? new DefaultSlotResourceResolver();
@@ -240,7 +302,7 @@ export class WsTunnel implements IBrokerContext {
             transport,
             connected,
             clientCount: state.wsClients.size,
-            sessionCount: state.sseSessions.size + state.mcpGetSessions.size,
+            sessionCount: state.sseSessions.size + state.httpSessions.size,
             pendingCount: state.pending.size,
         };
     }
@@ -280,7 +342,7 @@ export class WsTunnel implements IBrokerContext {
      * broadcast notifications. Used by the aggregate server to fan a single
      * in-process client out to every aggregated provider.
      *
-     * The slot does not need a provider attached yet — `send` returns a
+     * The slot does not need a provider attached yet, `send` returns a
      * JSON-RPC error while the provider is disconnected.
      */
     public openInternalClient(providerName: string): IInternalClient {
@@ -338,7 +400,7 @@ export class WsTunnel implements IBrokerContext {
     get clientCount(): number {
         let n = 0;
         for (const s of this._providers.values()) {
-            n += s.wsClients.size + s.sseSessions.size + s.mcpGetSessions.size;
+            n += s.wsClients.size + s.sseSessions.size + s.httpSessions.size;
         }
         return n;
     }
@@ -433,7 +495,7 @@ export class WsTunnel implements IBrokerContext {
                         console.error(`[broker] stdio client transport: ${err.message}`);
                     };
                     transport.onClose = (): void => {
-                        // Client disconnected — nothing to clean up; pending sinks will time out.
+                        // Client disconnected: nothing to clean up; pending sinks will time out.
                     };
                     transport.connect();
                 }
@@ -525,12 +587,17 @@ export class WsTunnel implements IBrokerContext {
         this._stdioClientTransport = null;
         this._stdioClientProvider = null;
 
+        // Streamable HTTP sessions are torn down by the endpoint that owns them,
+        // not by ending their responses here: `closeAll` runs each session's
+        // `stop`, which is what empties `httpSessions`.
+        await Promise.all([...this._providers.values()].map((state) => state.httpEndpoint?.closeAll() ?? Promise.resolve()));
+
         return new Promise((resolve, reject) => {
             for (const state of this._providers.values()) {
                 for (const res of state.sseSessions.values()) res.end();
                 state.sseSessions.clear();
-                for (const res of state.mcpGetSessions.values()) res.end();
-                state.mcpGetSessions.clear();
+                state.httpSessions.clear();
+                state.httpEndpoint = null;
                 for (const client of state.wsClients) client.close();
                 state.wsClients.clear();
                 state.ws?.close();
@@ -655,6 +722,15 @@ export class WsTunnel implements IBrokerContext {
         });
     }
 
+    /** The JSON-RPC error returned when the slot has nobody behind it. */
+    private _notConnectedPayload(providerName: string, frame: string): string {
+        return JSON.stringify({
+            jsonrpc: "2.0",
+            id: requestIdOf(frame) ?? null,
+            error: { code: -32000, message: `Provider "${providerName}" not connected` },
+        });
+    }
+
     // -------------------------------------------------------------------------
     // HTTP dispatcher
     // -------------------------------------------------------------------------
@@ -682,7 +758,7 @@ export class WsTunnel implements IBrokerContext {
             return;
         }
 
-        // Protected Resource Metadata (RFC 9728) — public discovery data, served
+        // Protected Resource Metadata (RFC 9728), public discovery data, served
         // unauthenticated so a client can find the authorization server after a 401.
         if (this._authGuard && method === "GET") {
             const metaSlot = this._authGuard.matchMetadataRequest(rawUrl);
@@ -745,8 +821,8 @@ export class WsTunnel implements IBrokerContext {
         const mcpSuffix = (this._options.mcpPath ?? "/mcp").replace(/^\//, "");
         const sseSuffix = (this._options.ssePath ?? "/sse").replace(/^\//, "");
         const messagesSuffix = (this._options.messagesPath ?? "/messages").replace(/^\//, "");
-        if (endpoint === mcpSuffix && method === "GET") return "mcp-get";
-        if (endpoint === mcpSuffix && method === "POST") return "mcp-post";
+        // GET, POST and DELETE all belong to the Streamable HTTP state machine.
+        if (endpoint === mcpSuffix) return "mcp";
         if (endpoint === sseSuffix && method === "GET") return "sse-connect";
         if (endpoint === messagesSuffix && method === "POST") return "sse-message";
         return null;
@@ -755,11 +831,8 @@ export class WsTunnel implements IBrokerContext {
     /** Routes an already-authorized (or auth-disabled) request to its handler. */
     private _dispatchMcpEndpoint(kind: McpEndpointKind, req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
         switch (kind) {
-            case "mcp-get":
-                this._handleMcpGetStream(req, res, providerName, principal);
-                return;
-            case "mcp-post":
-                this._handleMcpPost(req, res, providerName, principal);
+            case "mcp":
+                this._handleStreamableHttp(req, res, providerName, principal);
                 return;
             case "sse-connect":
                 this._handleSseConnect(req, res, providerName, principal);
@@ -776,7 +849,7 @@ export class WsTunnel implements IBrokerContext {
             guard.writeChallenge(res, providerName, err);
             return;
         }
-        // Not a token failure (e.g. the JWKS endpoint is unreachable) — surface a
+        // Not a token failure (e.g. the JWKS endpoint is unreachable), surface a
         // 500 rather than a misleading 401.
         console.error(`[broker] token validation error for "${providerName}":`, err);
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -810,7 +883,7 @@ export class WsTunnel implements IBrokerContext {
             const isDedicated = url.startsWith(providerPath + "/") || url === providerPath;
 
             if (isMultiplex || isDedicated) {
-                // Provider (engine) upgrade — shared-secret / custom authenticator.
+                // Provider (engine) upgrade, shared-secret / custom authenticator.
                 if (!providerAuth) {
                     cb(true);
                     return;
@@ -842,7 +915,7 @@ export class WsTunnel implements IBrokerContext {
                 return;
             }
 
-            // Raw WS MCP client upgrade — OAuth 2.1 resource server.
+            // Raw WS MCP client upgrade, OAuth 2.1 resource server.
             if (!guard) {
                 cb(true);
                 return;
@@ -871,7 +944,7 @@ export class WsTunnel implements IBrokerContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Handles `GET /<providerName>/sse` — opens a long-lived SSE stream for Claude.
+     * Handles `GET /<providerName>/sse`, opens a long-lived SSE stream for Claude.
      * Sends an `endpoint` event so Claude knows where to POST its requests.
      */
     private _handleSseConnect(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
@@ -899,7 +972,7 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
-     * Handles `POST /<providerName>/messages?sessionId=…` — receives a JSON-RPC
+     * Handles `POST /<providerName>/messages?sessionId=…`, receives a JSON-RPC
      * request from Claude and forwards it to the provider.
      * Always responds 202 Accepted; the real response arrives over SSE.
      */
@@ -928,7 +1001,7 @@ export class WsTunnel implements IBrokerContext {
                 const msg = JSON.parse(body) as { id?: string | number };
                 if (msg.id != null) state.pending.set(msg.id, { type: "sse", sessionId });
             } catch {
-                /* malformed — forward anyway */
+                /* malformed, forward anyway */
             }
 
             if (this._isProviderConnected(providerName, state)) {
@@ -959,86 +1032,94 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
-     * Handles `POST /<providerName>/mcp` — Streamable HTTP transport (MCP 2025-03-26).
-     * Forwards the JSON-RPC request to the provider and holds the HTTP response
-     * open until the reply arrives, then writes it as `application/json`.
+     * Serves `/<providerName>/mcp` by handing the request to the slot's
+     * Streamable HTTP endpoint.
+     *
+     * Everything protocol-shaped, sessions, `Mcp-Session-Id`, `DELETE`, the
+     * `404` on a terminated session, `Origin` and `MCP-Protocol-Version`
+     * validation, `202` on a notification, belongs to `mcp-core` and is no
+     * longer reimplemented here. What stays is the broker's own business:
+     * deciding who may speak (already done upstream by the auth guard) and
+     * relaying frames to a provider that lives somewhere else entirely.
      */
-    private _handleMcpPost(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
-        let body = "";
-        req.on("data", (chunk: Buffer) => {
-            body += chunk.toString();
-        });
-        req.on("end", () => {
-            let msg: { id?: string | number } = {};
-            try {
-                msg = JSON.parse(body) as { id?: string | number };
-            } catch {
-                res.writeHead(400, { "Content-Type": "text/plain" });
-                res.end("Invalid JSON");
-                return;
-            }
+    private _handleStreamableHttp(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
+        const state = this._getOrCreateProviderState(providerName);
 
-            const state = this._getOrCreateProviderState(providerName);
+        // The endpoint authenticates nothing: this broker has its own guard,
+        // richer than the spec's (per-slot scopes, subject mapping into the
+        // policy engine). So the principal is attached to the session here,
+        // refreshed on every request, and read back when a frame is checked.
+        const sessionId = req.headers["mcp-session-id"];
+        if (typeof sessionId === "string") {
+            const session = state.httpSessions.get(sessionId);
+            if (session) session.principal = principal;
+        }
 
-            if (!this._authorizeMcpFrame(providerName, body, principal)) {
-                res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
-                res.end(this._policyDeniedPayload(body));
-                return;
-            }
-
-            if (!this._isProviderConnected(providerName, state)) {
-                res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                res.end(
-                    JSON.stringify({
-                        jsonrpc: "2.0",
-                        id: msg.id ?? null,
-                        error: { code: -32000, message: `Provider "${providerName}" not connected` },
-                    })
-                );
-                return;
-            }
-
-            if (msg.id != null) {
-                // Request: hold the response open; reply arrives in _routeFromProvider.
-                state.pending.set(msg.id, { type: "http", res });
-            } else {
-                // Notification: forward and acknowledge immediately.
-                res.writeHead(202);
-                res.end();
-            }
-
-            this._sendToProvider(state, providerName, body, principal);
-        });
+        void this._endpointFor(providerName, state).handleRequest(req, res);
     }
 
     /**
-     * Handles `GET /<providerName>/mcp` — opens a persistent SSE stream per MCP 2025-03-26.
-     * Streamable HTTP clients (e.g. MCP Inspector) use this to receive
-     * server-initiated notifications without re-polling.
+     * The slot's Streamable HTTP endpoint, built on first use.
+     *
+     * Its factory does not create an MCP server: the server is the provider,
+     * reachable only through the tunnel. It creates a bridge instead: frames the
+     * client sends go out to the provider, and frames coming back are addressed
+     * to this session by id.
      */
-    private _handleMcpGetStream(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
-        const sessionId = (req.headers["mcp-session-id"] as string | undefined) ?? randomUUID();
+    private _endpointFor(providerName: string, state: IProviderState): StreamableHttpEndpoint {
+        if (state.httpEndpoint) return state.httpEndpoint;
 
-        res.writeHead(200, {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-            "Mcp-Session-Id": sessionId,
+        state.httpEndpoint = new StreamableHttpEndpoint({
+            allowedOrigins: this._allowedOrigins,
+
+            createServer: (transport, sessionId, _principal) => {
+                const session: IHttpSession = { transport, principal: null };
+                state.httpSessions.set(sessionId, session);
+
+                transport.onMessage = (frame: string) => this._fromHttpSession(state, providerName, sessionId, session, frame);
+
+                return {
+                    // No server to launch: the one serving this session is the
+                    // provider, at the far end of the tunnel. What `start` still
+                    // owes is opening the transport, since a closed one drops
+                    // every frame it is handed.
+                    start: () => openTransport(transport),
+                    stop: () => {
+                        state.httpSessions.delete(sessionId);
+                        // Nothing can answer the requests this session had in
+                        // flight; leaving them would pin the ids forever.
+                        for (const [id, sink] of state.pending) {
+                            if (sink.type === "http-session" && sink.sessionId === sessionId) state.pending.delete(id);
+                        }
+                    },
+                };
+            },
         });
-        res.write(": stream open\n\n");
 
-        const state = this._getOrCreateProviderState(providerName);
-        state.mcpGetSessions.set(sessionId, res);
-        if (principal) this._streamPrincipals.set(res, principal);
+        return state.httpEndpoint;
+    }
 
-        req.on("close", () => {
-            state.mcpGetSessions.delete(sessionId);
-        });
+    /** Relays one frame from an HTTP session to the provider behind the slot. */
+    private _fromHttpSession(state: IProviderState, providerName: string, sessionId: string, session: IHttpSession, frame: string): void {
+        if (!this._authorizeMcpFrame(providerName, frame, session.principal)) {
+            session.transport.send(this._policyDeniedPayload(frame));
+            return;
+        }
+
+        if (!this._isProviderConnected(providerName, state)) {
+            session.transport.send(this._notConnectedPayload(providerName, frame));
+            return;
+        }
+
+        const id = requestIdOf(frame);
+        if (id !== undefined) state.pending.set(id, { type: "http-session", sessionId });
+
+        this._sendToProvider(state, providerName, frame, session.principal);
     }
 
     /** Writes one JSON-RPC message as an SSE `message` event. */
     private _sendSseEvent(res: ServerResponse, data: string): void {
-        // data is already a compact JSON string — no need to parse+re-serialize.
+        // data is already a compact JSON string: no need to parse+re-serialize.
         res.write(`event: message\ndata: ${data}\n\n`);
     }
 
@@ -1067,15 +1148,14 @@ export class WsTunnel implements IBrokerContext {
         }
         if (this._upstreams.has(name)) {
             console.warn(
-                `[broker] WARNING: WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
-                    `Rename one of them to avoid the conflict.`
+                `[broker] WARNING: WebSocket provider "${name}" rejected: a stdio upstream with the same name is already configured. ` + `Rename one of them to avoid the conflict.`
             );
             ws.close(1008, `Provider "${name}" is managed by a stdio upstream`);
             return;
         }
 
         if (this._loopbackProviders.has(name)) {
-            console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected — the slot is held by an in-process loopback (reserved system slot).`);
+            console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected: the slot is held by an in-process loopback (reserved system slot).`);
             ws.close(1008, `Provider "${name}" is reserved by the broker`);
             return;
         }
@@ -1093,8 +1173,8 @@ export class WsTunnel implements IBrokerContext {
         }
 
         // A provider MAY send a registration control frame as its very first
-        // message (see _tryHandleRegistration). Any other first message —
-        // including a normal MCP frame — is routed and leaves the provider
+        // message (see _tryHandleRegistration). Any other first message ,
+        // including a normal MCP frame, is routed and leaves the provider
         // non-aggregated, so every pre-existing provider keeps working.
         let registrationChecked = false;
         ws.on("message", (data: Buffer) => {
@@ -1115,7 +1195,7 @@ export class WsTunnel implements IBrokerContext {
     /**
      * Inspects a provider's first WebSocket message for an optional registration
      * control frame `{ "type": "register", "aggregate": boolean }`. Returns
-     * `true` when the message was a registration frame — and thus consumed, not
+     * `true` when the message was a registration frame: and thus consumed, not
      * routed as MCP traffic. A normal MCP frame always carries `jsonrpc`, so it
      * returns `false` and the provider stays non-aggregated.
      */
@@ -1172,7 +1252,7 @@ export class WsTunnel implements IBrokerContext {
 
         ws.on("message", (data: Buffer) => {
             const envelope = decodeEnvelope(data.toString());
-            if (!envelope) return; // malformed — drop
+            if (!envelope) return; // malformed, drop
 
             const name = envelope.provider;
 
@@ -1188,7 +1268,7 @@ export class WsTunnel implements IBrokerContext {
                 }
                 if (this._upstreams.has(name)) {
                     console.warn(
-                        `[broker] WARNING: Multiplexed WebSocket provider "${name}" rejected — a stdio upstream with the same name is already configured. ` +
+                        `[broker] WARNING: Multiplexed WebSocket provider "${name}" rejected: a stdio upstream with the same name is already configured. ` +
                             `Rename one of them to avoid the conflict.`
                     );
                     ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is managed by a stdio upstream`));
@@ -1202,7 +1282,7 @@ export class WsTunnel implements IBrokerContext {
 
                 const existing = this._providers.get(name);
                 if (existing?.ws?.readyState === WebSocket.OPEN) {
-                    // Provider already connected via another socket — reject this name.
+                    // Provider already connected via another socket, reject this name.
                     ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is already connected`));
                     return;
                 }
@@ -1240,7 +1320,7 @@ export class WsTunnel implements IBrokerContext {
      */
     private _sendToProvider(state: IProviderState, providerName: string, data: string, principal: IPrincipal | null = null): void {
         // The `_all` aggregate is a loopback, but it needs the caller's principal
-        // to scope its catalog/routing — hand it off directly rather than through
+        // to scope its catalog/routing, hand it off directly rather than through
         // the generic transport, which would drop the context.
         if (providerName === AggregateServer.SLOT && this._aggregateServer) {
             this._aggregateServer.sendAs(data, principal);
@@ -1339,9 +1419,10 @@ export class WsTunnel implements IBrokerContext {
                 } else if (sink?.type === "sse") {
                     const sseRes = state.sseSessions.get(sink.sessionId);
                     if (sseRes) this._sendSseEvent(sseRes, data);
-                } else if (sink?.type === "http") {
-                    sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                    sink.res.end(data);
+                } else if (sink?.type === "http-session") {
+                    // The session transport decides whether this answers a held-open
+                    // POST or travels on the GET stream: it correlates by id.
+                    state.httpSessions.get(sink.sessionId)?.transport.send(data);
                 } else if (sink?.type === "stdio") {
                     this._stdioClientTransport?.send(data);
                 } else if (sink?.type === "internal") {
@@ -1371,10 +1452,12 @@ export class WsTunnel implements IBrokerContext {
                 this._sendSseEvent(sseRes, data);
             }
         }
-        for (const mcpRes of state.mcpGetSessions.values()) {
-            const principal = this._streamPrincipals.get(mcpRes) ?? null;
-            if (this._authorizeMcpFrame(providerName, data, principal)) {
-                this._sendSseEvent(mcpRes, data);
+        for (const session of state.httpSessions.values()) {
+            // The principal rides on the session here rather than in a WeakMap
+            // keyed by the response: a Streamable HTTP session spans many HTTP
+            // exchanges, so there is no single response to hang it on.
+            if (this._authorizeMcpFrame(providerName, data, session.principal)) {
+                session.transport.send(data);
             }
         }
         for (const ic of state.internalClients) {
@@ -1392,20 +1475,22 @@ export class WsTunnel implements IBrokerContext {
      * close handlers (dedicated WS, multiplexed WS, loopback).
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
-        const error = JSON.stringify({
-            jsonrpc: "2.0",
-            id: null,
-            error: { code: -32000, message: `Provider "${name}" disconnected` },
-        });
-        for (const sink of state.pending.values()) {
+        // Echoing the pending id rather than `null`: a Streamable HTTP session
+        // matches the answer to its held-open POST by id, so an unaddressed
+        // error would leave that request hanging until it times out.
+        for (const [id, sink] of state.pending) {
+            const error = JSON.stringify({
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32000, message: `Provider "${name}" disconnected` },
+            });
             if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
                 sink.socket.send(error);
             } else if (sink.type === "sse") {
                 const sseRes = state.sseSessions.get(sink.sessionId);
                 if (sseRes) this._sendSseEvent(sseRes, error);
-            } else if (sink.type === "http") {
-                sink.res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-                sink.res.end(error);
+            } else if (sink.type === "http-session") {
+                state.httpSessions.get(sink.sessionId)?.transport.send(error);
             } else if (sink.type === "stdio") {
                 this._stdioClientTransport?.send(error);
             } else if (sink.type === "internal") {
@@ -1421,7 +1506,7 @@ export class WsTunnel implements IBrokerContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns `true` if the provider is reachable — via a WebSocket connection,
+     * Returns `true` if the provider is reachable, via a WebSocket connection,
      * a stdio upstream, or an in-process loopback transport.
      */
     private _isProviderConnected(providerName: string, state: IProviderState): boolean {
@@ -1439,9 +1524,10 @@ export class WsTunnel implements IBrokerContext {
                 ws: null,
                 pending: new Map(),
                 sseSessions: new Map(),
-                mcpGetSessions: new Map(),
+                httpSessions: new Map(),
                 wsClients: new Set(),
                 internalClients: new Set(),
+                httpEndpoint: null,
             };
             this._providers.set(name, state);
         }

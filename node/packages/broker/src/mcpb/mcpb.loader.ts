@@ -5,14 +5,14 @@
  * describes a stdio MCP server process. The broker:
  *
  * 1. verifies a **detached signature** of the `.mcpb` file against a trusted
- *    public key (PEM) — integrity *and* provenance, using `node:crypto` only;
+ *    public key (PEM), integrity *and* provenance, using `node:crypto` only;
  * 2. unpacks the archive;
  * 3. reads the manifest, expands the `mcp_config` placeholders, and produces a
  *    `IStdioUpstreamConfig` that the existing upstream wiring spawns.
  *
  * The broker stays compatible with the `.mcpb` format without depending on the
  * `@anthropic-ai/mcpb` package: the bundle's *own* (native PKCS#7) signature is
- * never parsed — the detached signature layer is the broker's trust anchor.
+ * never parsed: the detached signature layer is the broker's trust anchor.
  *
  * Any failure (missing files, bad signature, malformed manifest, missing
  * `user_config` value) is logged and yields `null`: the bundle is refused and
@@ -85,7 +85,7 @@ function resolvePlaceholder(key: string, dirname: string, userConfig: IMcpbBundl
 function expandScalar(input: string, dirname: string, userConfig: IMcpbBundleConfig["userConfig"]): string {
     return input.replace(/\$\{([^}]+)\}/g, (match, key: string) => {
         const value = resolvePlaceholder(key, dirname, userConfig);
-        if (value === undefined) return match; // unknown placeholder — leave verbatim
+        if (value === undefined) return match; // unknown placeholder, leave verbatim
         if (Array.isArray(value)) throw new Error(`placeholder "\${${key}}" is multi-valued and cannot be used here`);
         return String(value);
     });
@@ -122,7 +122,7 @@ export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): P
             ["signature", signaturePath],
         ] as const) {
             if (!existsSync(file)) {
-                console.error(`${tag}: ${label} file not found at ${file} — bundle refused.`);
+                console.error(`${tag}: ${label} file not found at ${file}, bundle refused.`);
                 return null;
             }
         }
@@ -132,7 +132,7 @@ export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): P
         const signatureBytes = readFileSync(signaturePath);
         const publicKey = loadPublicKey(readFileSync(publicKeyPath, "utf8"));
         if (!verifyDetachedSignature(bundleBytes, signatureBytes, publicKey)) {
-            console.error(`${tag}: detached signature is invalid for the configured public key — bundle refused.`);
+            console.error(`${tag}: detached signature is invalid for the configured public key, bundle refused.`);
             return null;
         }
 
@@ -144,13 +144,13 @@ export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): P
         // ── Manifest → mcp_config ───────────────────────────────────────────
         const manifestPath = join(outputDir, "manifest.json");
         if (!existsSync(manifestPath)) {
-            console.error(`${tag}: manifest.json missing inside the bundle — bundle refused.`);
+            console.error(`${tag}: manifest.json missing inside the bundle, bundle refused.`);
             return null;
         }
         const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { server?: { mcp_config?: IMcpConfig } };
         const mcpConfig = manifest.server?.mcp_config;
         if (!mcpConfig) {
-            console.error(`${tag}: manifest has no server.mcp_config — bundle refused.`);
+            console.error(`${tag}: manifest has no server.mcp_config, bundle refused.`);
             return null;
         }
 
@@ -160,7 +160,7 @@ export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): P
         const rawArgs = override?.args ?? mcpConfig.args ?? [];
         const rawEnv = { ...mcpConfig.env, ...override?.env };
         if (!command) {
-            console.error(`${tag}: manifest mcp_config has no command — bundle refused.`);
+            console.error(`${tag}: manifest mcp_config has no command, bundle refused.`);
             return null;
         }
 
@@ -180,7 +180,7 @@ export async function loadMcpbBundle(cfg: IMcpbBundleConfig, baseDir: string): P
             aggregate: cfg.aggregate ?? true,
         };
     } catch (err) {
-        console.error(`${tag}: ${(err as Error).message} — bundle refused.`);
+        console.error(`${tag}: ${(err as Error).message}, bundle refused.`);
         return null;
     }
 }

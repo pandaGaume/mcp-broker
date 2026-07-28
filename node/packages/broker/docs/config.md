@@ -3,13 +3,13 @@
 `mcp-broker` reads its configuration from three sources, applied in this order
 (highest priority first):
 
-1. **Environment variables** — `MCP_BROKER_*`
-2. **JSON config file** — discovered automatically (see below)
+1. **Environment variables**, `MCP_BROKER_*`
+2. **JSON config file**, discovered automatically (see below)
 3. **Built-in defaults**
 
 Env vars always win over file values. The file is the static baseline you ship
 with the broker; env vars are the deploy-specific overrides. Arrays (`www.mounts`,
-`stdioUpstreams`) are file-only — no env-var equivalent.
+`stdioUpstreams`) are file-only: no env-var equivalent.
 
 ---
 
@@ -51,11 +51,11 @@ The broker looks in this order:
 
 1. `MCP_BROKER_CONFIG` env var (explicit path).
 2. `./.mcp-broker/config.json` relative to `process.cwd()`.
-3. `./mcp-broker.config.json` relative to `process.cwd()` — **legacy**,
+3. `./mcp-broker.config.json` relative to `process.cwd()`, **legacy**,
    logs a deprecation warning to stderr. Move it to `.mcp-broker/config.json`
    to silence.
 
-When none of these exist, the broker runs with env-vars-or-defaults only —
+When none of these exist, the broker runs with env-vars-or-defaults only , 
 no error, no warning.
 
 ### Path resolution
@@ -81,7 +81,7 @@ naming convention encodes the resolver key directly:
 
 Both layers are composed by the candidate-chain resolver in
 `@cyanmycelium/mcp-core@0.3.0` at session time, so partial files only need
-to declare the entries they want to change — the rest cascades from the
+to declare the entries they want to change: the rest cascades from the
 packaged values.
 
 Concrete example (per-agent locale override):
@@ -94,7 +94,7 @@ Concrete example (per-agent locale override):
 {
     "tools": {
         "broker_info": {
-            "description": "Custom description for Claude in French — overrides the packaged one."
+            "description": "Custom description for Claude in French, overrides the packaged one."
         }
     }
 }
@@ -206,6 +206,47 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
 | `locale` | `string` | `en` | `MCP_BROKER_LOCALE` | BCP-47 tag (`fr`, `fr-CA`, `zh-CN`, ...) |
 | `brokerName` | `string` | package name | (none) | Logical name in `broker_info` output |
 | `stdioProvider` | `string` | (unset) | `MCP_BROKER_STDIO_PROVIDER` | Bridge stdin/stdout to this provider |
+| `allowedOrigins` | `string[]` or `{ pattern, flags? }` | (unset) | `MCP_BROKER_ALLOWED_ORIGINS` | Browser origins allowed on `/<slot>/mcp`, see below |
+
+### `allowedOrigins`
+
+Which browser origins may reach `/<slot>/mcp`.
+
+The MCP specification requires servers to validate the `Origin` header: without
+it, any web page loaded in a browser that can reach the broker is able to drive
+it. So the endpoint is **closed to browsers by default**, and a request carrying
+an `Origin` gets `403` until an operator opens it.
+
+A request carrying **no** `Origin` is always accepted. That covers every
+non-browser client, which is what Claude Desktop, MCP Inspector and the
+server-side SDKs are, so the default breaks none of them.
+
+An array lists origins matched exactly against the whole header:
+
+```json
+{ "allowedOrigins": ["https://app.example.com", "http://localhost:5173"] }
+```
+
+An object supplies a regular expression, tested against the whole header. Anchor
+it, or a lookalike domain such as `https://app.example.com.evil.test` matches:
+
+```json
+{ "allowedOrigins": { "pattern": "^https://[a-z0-9-]+\\.example\\.com$" } }
+```
+
+A pattern that fails to compile is reported on stderr and ignored, leaving the
+closed default rather than a rule the operator believes is in force.
+
+`MCP_BROKER_ALLOWED_ORIGINS` takes a comma-separated list and wins over the file.
+It carries the list form only, since a regular expression cannot survive
+comma-splitting; a pattern needs the config file.
+
+In code, `WsTunnelBuilder.withAllowedOrigins` additionally accepts a predicate,
+for a decision that needs more than the string:
+
+```typescript
+builder.withAllowedOrigins((origin) => origin.endsWith(".example.com"));
+```
 
 ### `paths` (URL routing)
 
@@ -243,7 +284,7 @@ target directory does not exist on disk are skipped with a warning.
 #### Env-var shortcuts (additive)
 
 Env vars cannot express arrays, so two flat shortcuts cover the common cases.
-They are **additive** with `www.mounts` — both contribute mount entries.
+They are **additive** with `www.mounts`, both contribute mount entries.
 
 | Env var | Equivalent JSON |
 |---|---|
@@ -363,7 +404,7 @@ during migration, must pass in addition to the hierarchical policy.
 }
 ```
 
-The most frequent use case — no env vars needed across shell sessions.
+The most frequent use case: no env vars needed across shell sessions.
 
 ### Local TLS
 
@@ -382,7 +423,7 @@ In `.mcp-broker/config.json`:
 }
 ```
 
-Self-contained — moving `.mcp-broker/` to another machine carries the certs.
+Self-contained, moving `.mcp-broker/` to another machine carries the certs.
 
 ### Bridge a local stdio MCP server
 

@@ -12,7 +12,7 @@
  *   ├── node_modules/     ← npm install --omit=dev (the host does not install)
  *   └── dist/             ← compiled broker
  *
- * Requires `dist/` to exist — run `npm run build` first (the `pack:mcpb`
+ * Requires `dist/` to exist, run `npm run build` first (the `pack:mcpb`
  * npm script chains it).
  *
  * Usage (from node/):
@@ -35,13 +35,13 @@ function run(command, args, cwd) {
     }
 }
 
-// ── Read package metadata — single source of truth for version + deps ───────
+// ── Read package metadata, single source of truth for version + deps ───────
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const { version, dependencies } = pkg;
 
 // ── Preconditions ───────────────────────────────────────────────────────────
 if (!existsSync(join(root, "dist", "bin.js"))) {
-    console.error("[pack-mcpb] dist/bin.js not found — run `npm run build` first.");
+    console.error("[pack-mcpb] dist/bin.js not found, run `npm run build` first.");
     process.exit(1);
 }
 
@@ -55,7 +55,7 @@ mkdirSync(stage, { recursive: true });
 cpSync(join(root, "dist"), join(stage, "dist"), { recursive: true });
 console.log("[pack-mcpb] copied dist/");
 
-// ── Production package.json — drives the bundled npm install ────────────────
+// ── Production package.json, drives the bundled npm install ────────────────
 // type=module is required so Node treats the compiled .js as ESM.
 writeFileSync(
     join(stage, "package.json"),
@@ -81,4 +81,4 @@ console.log("[pack-mcpb] running mcpb pack …");
 run("npx", ["--yes", "@anthropic-ai/mcpb@2", "pack", stage, output]);
 
 const sizeMb = (statSync(output).size / 1024 / 1024).toFixed(2);
-console.log(`[pack-mcpb] done — ${output} (${sizeMb} MB)`);
+console.log(`[pack-mcpb] done, ${output} (${sizeMb} MB)`);

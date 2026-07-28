@@ -31,7 +31,7 @@ Property-by-property educational guides:
     └── index.html
 ```
 
-A ready-made instance UI lives at [`node/web/`](../web/) — point a `www`
+A ready-made instance UI lives at [`node/web/`](../web/), point a `www`
 mount at it (`"dir": "../web"`) to serve it. See [`node/web/README.md`](../web/README.md).
 
 ## Path resolution
@@ -41,14 +41,14 @@ config file** (i.e. `.mcp-broker/`). So `"certs/cert.pem"` in the config
 points at `.mcp-broker/certs/cert.pem`. The folder is self-contained.
 
 Env vars (`MCP_BROKER_TLS_CERT`, `MCP_BROKER_WWW_DIR`, ...) are still
-resolved against `process.cwd()` — they are the deploy-time override
+resolved against `process.cwd()`: they are the deploy-time override
 mechanism and not tied to the config file's location.
 
 ## `.mcpb` bundles
 
 `mcpbBundles` entries load local `.mcpb` bundles as stdio provider slots.
 Each bundle is verified against a **detached signature** before it is
-unpacked and run — the broker never spawns an unverified bundle.
+unpacked and run: the broker never spawns an unverified bundle.
 
 1. Generate a signing key pair (once):
    `node ../scripts/sign-bundle.mjs keygen bundles`

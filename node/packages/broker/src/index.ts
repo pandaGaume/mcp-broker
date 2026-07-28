@@ -1,18 +1,18 @@
 export { WsTunnel } from "./ws/ws.tunnel";
 export { WsTunnelBuilder } from "./ws/ws.tunnel.builder";
-export type { IInternalClient, IWsTunnelOptions, IStaticMount, InternalClient, WsTunnelOptions, StaticMount } from "./ws/ws.interfaces";
+export type { AllowedOrigins, IInternalClient, IWsTunnelOptions, IStaticMount, InternalClient, WsTunnelOptions, StaticMount } from "./ws/ws.interfaces";
 export { StdioUpstream } from "./stdio.upstream";
 export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream";
 export { RemoteUpstream } from "./remote.upstream";
 export type { IRemoteUpstreamConfig, RemoteUpstreamConfig } from "./remote.upstream";
 export type { IUpstream, Upstream } from "./upstream";
 
-// `.mcpb` bundle loading — verifies + unpacks a bundle into a stdio upstream.
+// `.mcpb` bundle loading, verifies + unpacks a bundle into a stdio upstream.
 export { loadMcpbBundle } from "./mcpb/mcpb.loader";
 export type { IMcpbBundleConfig, McpbBundleConfig } from "./mcpb/mcpb.loader";
 export { unzipMcpb } from "./mcpb/mcpb.unzip";
 
-// Broker introspection — tier 1.
+// Broker introspection, tier 1.
 export { BrokerInfoBehavior, BrokerProvidersBehavior, startBrokerServer, BROKER_PROVIDER_NAME } from "./broker/index";
 export type { IStartBrokerServerOptions, StartBrokerServerOptions } from "./broker/index";
 export { brokerGrammarKey, iterAvailableBrokerGrammars, iterBrokerGrammarsFrom, loadBrokerGrammar } from "./broker/index";

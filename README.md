@@ -62,10 +62,10 @@ Full instructions, environment variables, and programmatic API in [node/packages
 
 ## Documentation
 
-- [docs/packages.md](docs/packages.md) — the four packages, what belongs in each, and why `client` was split into `provider` and `consumer`
-- [docs/architecture.md](docs/architecture.md) — overview, roles, request flow, the reserved `_broker` slot
-- [docs/protocol.md](docs/protocol.md) — provider WebSocket framing, JSON-RPC envelopes
-- [docs/endpoints.md](docs/endpoints.md) — every HTTP and WS endpoint exposed by the broker
+- [docs/packages.md](docs/packages.md): the four packages, what belongs in each, and why `client` was split into `provider` and `consumer`
+- [docs/architecture.md](docs/architecture.md), overview, roles, request flow, the reserved `_broker` slot
+- [docs/protocol.md](docs/protocol.md), provider WebSocket framing, JSON-RPC envelopes
+- [docs/endpoints.md](docs/endpoints.md): every HTTP and WS endpoint exposed by the broker
 - [docs/authorization.md](docs/authorization.md): OAuth 2.1 resource server, provider auth, `_all` scope filtering (opt-in)
 - [docs/hierarchical-authorization.md](docs/hierarchical-authorization.md): roles, ISA-95-aligned resource paths, inherited permissions, explicit deny, and provider namespaces
 

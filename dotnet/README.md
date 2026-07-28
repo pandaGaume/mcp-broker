@@ -1,4 +1,4 @@
-# mcp-broker — .NET implementation
+# mcp-broker: .NET implementation
 
 > Status: **planned**. Not started yet.
 

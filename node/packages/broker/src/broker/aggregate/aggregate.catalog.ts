@@ -1,5 +1,5 @@
 /**
- * AggregateCatalog — merges the tool and prompt catalogs of several providers
+ * AggregateCatalog, merges the tool and prompt catalogs of several providers
  * into a single namespaced view, and routes aggregated names back to their
  * origin provider.
  *

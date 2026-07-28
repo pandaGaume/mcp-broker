@@ -72,7 +72,7 @@ export class StdioUpstream implements IUpstream {
 
         this._proc.on("error", (err: Error) => {
             this._open = false;
-            this.onError?.(new Error(`StdioUpstream "${this.name}": process error — ${err.message}`));
+            this.onError?.(new Error(`StdioUpstream "${this.name}": process error, ${err.message}`));
         });
 
         this._proc.on("spawn", () => {

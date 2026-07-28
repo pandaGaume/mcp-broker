@@ -232,7 +232,7 @@ export class AggregateServer implements IMessageTransport {
             return;
         }
         const id = msg.id;
-        if (id == null) return; // client notification — nothing to answer
+        if (id == null) return; // client notification: nothing to answer
 
         switch (msg.method) {
             case "initialize":
@@ -275,7 +275,7 @@ export class AggregateServer implements IMessageTransport {
     private async _route(id: string | number, params: unknown, kind: "tool" | "prompt", principal: IPrincipal | null): Promise<void> {
         const p = (params ?? {}) as ICallParams;
         const route = p.name ? (kind === "tool" ? this._catalog.resolveTool(p.name) : this._catalog.resolvePrompt(p.name)) : undefined;
-        // Treat a provider the caller may not see as if it did not exist — do not
+        // Treat a provider the caller may not see as if it did not exist, do not
         // leak its presence through a distinct "forbidden" error.
         const operation: IMcpOperation | undefined = route
             ? kind === "tool"

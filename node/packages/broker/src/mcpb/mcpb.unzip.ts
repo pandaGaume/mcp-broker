@@ -3,12 +3,12 @@
  *
  * A `.mcpb` bundle is an ordinary ZIP archive. The broker deliberately avoids
  * the `@anthropic-ai/mcpb` package so it stays compatible with the format
- * without being coupled to Anthropic's tooling — hence this small reader.
+ * without being coupled to Anthropic's tooling, hence this small reader.
  *
  * Supports the two compression methods used in practice: stored (0) and
  * deflate (8). ZIP64 archives are rejected with a clear error (`.mcpb` bundles
  * are small and never need it). Any trailing bytes after the End Of Central
- * Directory record — e.g. a native PKCS#7 signature block — are ignored, since
+ * Directory record (e.g. a native PKCS#7 signature block) are ignored, since
  * extraction is driven entirely by the central directory.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

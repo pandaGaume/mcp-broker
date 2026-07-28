@@ -1,7 +1,7 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 
 /**
- * 1:1 WebSocket transport — wraps a single `WebSocket` connection to a broker
+ * 1:1 WebSocket transport, wraps a single `WebSocket` connection to a broker
  * provider slot, typically `ws://<broker>/provider/<name>`.
  *
  * One server owns one socket. When an application publishes several servers

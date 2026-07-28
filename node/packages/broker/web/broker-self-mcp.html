@@ -16,7 +16,7 @@
     .hero-mark { margin-bottom: 20px; }
     .hero-mark img { width: 72px; height: 72px; }
 
-    /* Endpoints — quick reference grid, shared look with the launcher page. */
+    /* Endpoints, quick reference grid, shared look with the launcher page. */
     .endpoints {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -46,7 +46,7 @@
       word-break: break-all;
     }
 
-    /* Tool list — the broker's three built-in introspection tools. */
+    /* Tool list: the broker's three built-in introspection tools. */
     .tools {
       display: grid;
       gap: 10px;
@@ -106,7 +106,7 @@
 
     <p class="hero-sub">
       Beyond tunnelling other servers, the broker exposes a reserved slot,
-      <code class="inline">_broker</code>, that answers MCP itself — and an
+      <code class="inline">_broker</code>, that answers MCP itself: and an
       aggregate slot, <code class="inline">_all</code>, that unions every
       connected provider into one server.
     </p>
@@ -126,7 +126,7 @@
 
     <p class="intro">
       The reserved <code class="inline">_broker</code> slot is an in-process MCP
-      server. Point any MCP client at it — MCP Inspector, Claude, your own — to
+      server. Point any MCP client at it (MCP Inspector, Claude, your own) to
       inspect the broker's identity and the providers currently tunnelled in.
     </p>
 
@@ -145,7 +145,7 @@
       </div>
     </div>
 
-    <p class="caption">Reachable on every client transport — see the endpoints below.</p>
+    <p class="caption">Reachable on every client transport, see the endpoints below.</p>
   </div>
 </section>
 
@@ -170,8 +170,8 @@
       <code class="inline">_broker-broker_info</code>,
       <code class="inline">_broker-providers_list</code> and
       <code class="inline">_broker-provider_status</code>. A client pinned to
-      <code class="inline">_all</code> therefore sees the whole broker — its
-      meta tools plus every tunnelled provider — through one connection.
+      <code class="inline">_all</code> therefore sees the whole broker, its
+      meta tools plus every tunnelled provider, through one connection.
     </p>
 
     <div class="conclusion">
@@ -193,7 +193,7 @@
       The broker loads local <code class="inline">.mcpb</code> bundles listed in
       its config and runs them as stdio provider slots. Before a bundle is
       unpacked or spawned, the broker verifies a <strong>detached signature</strong>
-      against a trusted public key — an unverified bundle is refused, never run.
+      against a trusted public key: an unverified bundle is refused, never run.
     </p>
 
     <div class="code-wrap">
@@ -214,7 +214,7 @@
     </div>
 
     <p>
-      Sign bundles with the bundled helper — Node built-ins only, no OpenSSL
+      Sign bundles with the bundled helper, Node built-ins only, no OpenSSL
       and no dependency on Anthropic's <code class="inline">mcpb</code> CLI:
     </p>
 

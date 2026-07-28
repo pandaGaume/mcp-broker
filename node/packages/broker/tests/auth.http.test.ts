@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "net";
 import { WsTunnelBuilder, AuthError, type WsTunnel, type IResolvedAuth, type ITokenValidator } from "../src/index";
+import { mcpCall } from "./streamable.helper";
 
 /** `Response.json()` yields `unknown`; this is the shape these tests assert on. */
 type JsonRpcBody = { result?: { tools?: unknown[] }; error?: { code: number; message: string } };
@@ -72,7 +73,7 @@ describe("resource-server auth over HTTP", () => {
 
     it("passes a valid token through to the handler (provider-not-connected proves the gate opened)", async () => {
         const base = await start(true);
-        const res = await fetch(`${base}/weather/mcp`, { method: "POST", headers: { authorization: "Bearer good" }, body: RPC });
+        const res = await mcpCall(base, "weather", RPC, { authorization: "Bearer good" });
         expect(res.status).toBe(200);
         const body = (await res.json()) as JsonRpcBody;
         expect(body.error?.code).toBe(-32000);
@@ -91,7 +92,7 @@ describe("resource-server auth over HTTP", () => {
         const meta = await fetch(`${base}/.well-known/oauth-protected-resource/weather/mcp`);
         expect(meta.status).toBe(404);
         // MCP POST reaches the handler with no token.
-        const res = await fetch(`${base}/weather/mcp`, { method: "POST", body: RPC });
+        const res = await mcpCall(base, "weather", RPC);
         expect(res.status).toBe(200);
         const body = (await res.json()) as JsonRpcBody;
         expect(body.error?.code).toBe(-32000);

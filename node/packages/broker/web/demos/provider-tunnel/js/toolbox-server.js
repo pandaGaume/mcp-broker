@@ -1,5 +1,5 @@
 /**
- * toolbox-server.js — the demo MCP server.
+ * toolbox-server.js: the demo MCP server.
  *
  * A generic "toolbox" MCP server built with the official
  * `@modelcontextprotocol/sdk`. It is plain MCP: nothing here knows about the
@@ -19,7 +19,7 @@ import {
     ReadResourceRequestSchema,
 } from "https://esm.sh/@modelcontextprotocol/sdk@1.12.3/types.js";
 
-/** Tool catalog — advertised by `tools/list` and rendered by the UI. */
+/** Tool catalog, advertised by `tools/list` and rendered by the UI. */
 export const TOOLS = [
     {
         name: "echo",
@@ -86,7 +86,7 @@ export const TOOLS = [
     },
 ];
 
-/** Resource catalog — advertised by `resources/list` and rendered by the UI. */
+/** Resource catalog, advertised by `resources/list` and rendered by the UI. */
 export const RESOURCES = [
     {
         uri: "demo://clock",
@@ -112,7 +112,7 @@ const fail = (text) => ({ content: [{ type: "text", text }], isError: true });
  * @param {string} opts.name                                Server / slot name.
  * @param {(msg: string, level?: string) => void} [opts.onActivity]
  *        Called on each tool call, resource read, and on the initialize
- *        handshake — lets the UI log tunnel traffic without this module
+ *        handshake, lets the UI log tunnel traffic without this module
  *        depending on the DOM.
  * @returns {import("https://esm.sh/@modelcontextprotocol/sdk@1.12.3/server/index.js").Server}
  */
@@ -179,7 +179,7 @@ export function createToolboxServer({ name, onActivity = () => {} }) {
     });
 
     // Fires when an MCP client finishes the initialize handshake through the
-    // tunnel — proof the broker relayed a real client end to end.
+    // tunnel, proof the broker relayed a real client end to end.
     server.oninitialized = () => onActivity("An MCP client completed the initialize handshake.", "ok");
 
     return server;

@@ -25,8 +25,28 @@ For each connected provider slot `<name>`:
 | WS | `/<encodedName>` | Raw WebSocket transport. | Client bearer token (at upgrade) |
 | POST | `/<encodedName>/mcp` | Streamable HTTP request. Holds the response until the provider replies. | Client bearer token |
 | GET | `/<encodedName>/mcp` | Streamable HTTP notification stream (long-lived). | Client bearer token |
+| DELETE | `/<encodedName>/mcp` | Terminates the session named by `Mcp-Session-Id`. | Client bearer token |
 | GET | `/<encodedName>/sse` | Legacy SSE notification stream. Emits one `endpoint` event with the messages URL. | Client bearer token |
 | POST | `/<encodedName>/messages?sessionId=<uuid>` | Legacy SSE request channel. | Client bearer token |
+
+### Sessions on `/<name>/mcp`
+
+This endpoint runs the Streamable HTTP state machine from `mcp-core`, so it
+behaves like any spec-compliant MCP server rather than like a blind relay:
+
+- `initialize` opens a session and its response carries `Mcp-Session-Id`. Every
+  later request must send that header back; one that does not gets `400`, and
+  one naming a terminated session gets `404`, which is the signal to
+  re-`initialize`.
+- A request carrying an `Origin` header is refused with `403` unless that origin
+  was allowed by the operator, which nothing is by default. A request carrying
+  no origin is always accepted, so Claude Desktop, MCP Inspector and the
+  server-side SDKs are unaffected. This is the DNS-rebinding protection the spec
+  asks for; see `allowedOrigins` in the
+  [config reference](../node/packages/broker/docs/config.md#allowedorigins).
+- An `MCP-Protocol-Version` header naming a revision the broker does not
+  implement is refused with `400`.
+- A notification (no `id`) is acknowledged with `202`, since nothing will answer it.
 
 ## Authorization (when the resource server is enabled)
 
@@ -38,7 +58,7 @@ A missing/invalid client token yields `401` with a
 `WWW-Authenticate: Bearer resource_metadata="…"` header; an insufficient scope
 yields `403`. See [authorization.md](authorization.md).
 
-## Reserved `_broker` slot — self-introspection
+## Reserved `_broker` slot: self-introspection
 
 The broker registers itself as a provider under the reserved slot `_broker`.
 The same client-side endpoints apply, with `<encodedName>` = `_broker`:
@@ -50,7 +70,7 @@ The same client-side endpoints apply, with `<encodedName>` = `_broker`:
 | WS | `/_broker` | Raw WebSocket MCP transport to the broker introspection server |
 
 The broker's MCP server is in-process and connected to the routing layer via
-a loopback transport — there is no real network hop. Reachable through every
+a loopback transport, there is no real network hop. Reachable through every
 client-side transport the broker exposes, just like a regular provider slot.
 
 Because `_broker` is a regular slot, it rides the same client authorization gate

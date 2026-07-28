@@ -2,12 +2,12 @@
  * Generates a self-signed TLS certificate for local development.
  *
  * Usage (from the `node/` directory):
- *   npm run gen-cert                  — writes to ../certs/ (repo root)
- *   npm run gen-cert -- --out <dir>   — writes to a custom directory
+ *   npm run gen-cert                 , writes to ../certs/ (repo root)
+ *   npm run gen-cert -- --out <dir>  , writes to a custom directory
  *
  * Outputs:
- *   <outDir>/cert.pem  — TLS certificate (pass as MCP_BROKER_TLS_CERT)
- *   <outDir>/key.pem   — Private key    (pass as MCP_BROKER_TLS_KEY)
+ *   <outDir>/cert.pem , TLS certificate (pass as MCP_BROKER_TLS_CERT)
+ *   <outDir>/key.pem  , Private key    (pass as MCP_BROKER_TLS_KEY)
  *
  * The certificate covers: localhost, 127.0.0.1, ::1
  * Validity: 365 days  |  Key: RSA 2048-bit
@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { resolve, join } from "path";
 import { createRequire } from "module";
 
-// selfsigned is a CJS module — use createRequire for a clean import from ESM.
+// selfsigned is a CJS module, use createRequire for a clean import from ESM.
 const require = createRequire(import.meta.url);
 const selfsigned = require("selfsigned");
 

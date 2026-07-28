@@ -16,7 +16,7 @@
  * - Env-var paths (`MCP_BROKER_*_DIR`, `MCP_BROKER_TLS_*`) are resolved
  *   against `process.cwd()`.
  * - Config-file paths (`tls.cert`, `www.mounts[*].dir`, `stdioUpstreams[*]`,
- *   `mcpbBundles[*]`) are resolved against the **config file's directory** — so a config in
+ *   `mcpbBundles[*]`) are resolved against the **config file's directory**: so a config in
  *   `./.mcp-broker/config.json` referring to `"certs/cert.pem"` points at
  *   `./.mcp-broker/certs/cert.pem`. The folder is self-contained.
  *
@@ -48,6 +48,8 @@
  * |                                |          | provider (Claude Desktop bridge).                      |
  * | MCP_BROKER_LOCALE              | en       | Locale used for tool descriptions on the `_broker`     |
  * |                                |          | slot. ISO 639-1 base; regional variants accepted.      |
+ * | MCP_BROKER_ALLOWED_ORIGINS     | (none)   | Comma-separated browser origins allowed on             |
+ * |                                |          | `/<slot>/mcp`. None means no browser origin passes.    |
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -65,7 +67,7 @@ const cwd = process.cwd();
 
 /**
  * Fills an env var from the config file when the env var is not already set.
- * Used for **non-path** scalars — path-bearing fields are read directly so
+ * Used for **non-path** scalars, path-bearing fields are read directly so
  * they can be resolved against `baseDir` (config file's directory) instead
  * of `cwd` (deploy environment).
  */
@@ -92,7 +94,7 @@ envFromConfig("MCP_BROKER_PROVIDER_SECRET", config.auth?.providerSecret);
 
 const stdioProvider = process.env["MCP_BROKER_STDIO_PROVIDER"];
 
-// In stdio mode stdout is reserved for JSON-RPC — redirect all console output to stderr.
+// In stdio mode stdout is reserved for JSON-RPC, redirect all console output to stderr.
 if (stdioProvider) {
     const toStderr = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n");
     console.log = toStderr;
@@ -125,6 +127,30 @@ if (protocolOverride === "https" && (!tlsCertPath || !tlsKeyPath)) {
 
 const useTls = protocolOverride === "http" ? false : protocolOverride === "https" ? true : !!(tlsCertPath && tlsKeyPath);
 
+// ── Allowed browser origins for /<slot>/mcp ──────────────────────────────────
+// Absent leaves the endpoint closed to browsers, which is the safe default.
+// The env var only carries the list form; a pattern needs the config file,
+// since a regular expression cannot survive comma-splitting.
+const envOrigins = process.env["MCP_BROKER_ALLOWED_ORIGINS"]
+    ?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+let allowedOrigins: readonly string[] | RegExp | undefined;
+if (envOrigins?.length) {
+    allowedOrigins = envOrigins;
+} else if (Array.isArray(config.allowedOrigins)) {
+    allowedOrigins = config.allowedOrigins;
+} else if (config.allowedOrigins) {
+    try {
+        allowedOrigins = new RegExp(config.allowedOrigins.pattern, config.allowedOrigins.flags);
+    } catch (err) {
+        // Falling back to the closed default rather than starting with a rule
+        // the operator believes is in force but which never compiled.
+        console.error(`[mcp-broker] Ignoring allowedOrigins.pattern: ${(err as Error).message}`);
+    }
+}
+
 // ── Env-var static mount shortcuts (relative to cwd) ─────────────────────────
 const envWwwDir = process.env["MCP_BROKER_WWW_DIR"] ? path.resolve(cwd, process.env["MCP_BROKER_WWW_DIR"]) : null;
 const envBundleDir = process.env["MCP_BROKER_BUNDLE_DIR"] ? path.resolve(cwd, process.env["MCP_BROKER_BUNDLE_DIR"]) : null;
@@ -147,6 +173,10 @@ async function main(): Promise<void> {
 
     if (useTls) {
         builder.withTlsFiles(tlsCertPath!, tlsKeyPath!);
+    }
+
+    if (allowedOrigins) {
+        builder.withAllowedOrigins(allowedOrigins);
     }
 
     // ── Static mounts ────────────────────────────────────────────────────────
@@ -254,7 +284,7 @@ async function main(): Promise<void> {
 
     // ── Provider authentication (independent of client OAuth) ────────────────
     // Requires every provider connecting to /provider/<slot> or /providers to
-    // present the shared secret — closes off slot occupation by strangers.
+    // present the shared secret, closes off slot occupation by strangers.
     const providerSecret = process.env["MCP_BROKER_PROVIDER_SECRET"];
     if (providerSecret) {
         builder.withProviderSecret(providerSecret);
@@ -298,7 +328,7 @@ async function main(): Promise<void> {
 
     // ── Signal handlers ─────────────────────────────────────────────────────
     const shutdown = async (signal: string): Promise<void> => {
-        console.log(`\n⛔  ${signal} received — shutting down…`);
+        console.log(`\n⛔  ${signal} received, shutting down…`);
         await tunnel.stop();
         process.exit(0);
     };

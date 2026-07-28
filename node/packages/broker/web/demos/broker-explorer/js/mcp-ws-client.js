@@ -1,10 +1,10 @@
 /**
- * mcp-ws-client.js — a minimal MCP client over a raw WebSocket.
+ * mcp-ws-client.js: a minimal MCP client over a raw WebSocket.
  *
  * The broker exposes every slot as a raw-WebSocket client transport at
  * `ws://<host>/<slot>`: the frames are plain newline-free JSON-RPC, relayed
  * untouched to whatever server backs the slot (`_broker`, `_all`, or any
- * tunnelled provider). There is therefore nothing broker-specific here — this
+ * tunnelled provider). There is therefore nothing broker-specific here: this
  * is a standard MCP client. It is kept separate from `app.js` the same way the
  * provider-tunnel demo keeps its MCP server in `toolbox-server.js`.
  *

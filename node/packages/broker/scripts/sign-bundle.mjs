@@ -1,22 +1,22 @@
 /**
- * Signs `.mcpb` bundles for the broker's bundle loader — built-ins only.
+ * Signs `.mcpb` bundles for the broker's bundle loader, built-ins only.
  *
  * The broker verifies a **detached signature** of a `.mcpb` file against a
  * trusted public key (see `src/mcpb.loader.ts`). This script produces that
- * signature using `node:crypto` only — no dependency on OpenSSL or the
+ * signature using `node:crypto` only: no dependency on OpenSSL or the
  * `@anthropic-ai/mcpb` CLI.
  *
  * Usage (from the `node/` directory):
  *
  *   node scripts/sign-bundle.mjs keygen [outDir]
  *       Generates an Ed25519 key pair:
- *         <outDir>/mcpb-signing.key.pem  — private key (keep secret)
- *         <outDir>/mcpb-signing.pub.pem  — public key  (point `publicKey` at this)
+ *         <outDir>/mcpb-signing.key.pem , private key (keep secret)
+ *         <outDir>/mcpb-signing.pub.pem , public key  (point `publicKey` at this)
  *       outDir defaults to the current directory.
  *
  *   node scripts/sign-bundle.mjs sign <bundle.mcpb> <privateKey.pem> [signaturePath]
  *       Writes the detached signature. signaturePath defaults to
- *       `<bundle.mcpb>.sig` — the path the broker looks for by default.
+ *       `<bundle.mcpb>.sig`: the path the broker looks for by default.
  */
 import { generateKeyPairSync, createPrivateKey, sign } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -57,5 +57,5 @@ if (command === "keygen") {
     writeFileSync(sigPath, signature);
     console.log(`[sign-bundle] signature (${keyType}) → ${sigPath}`);
 } else {
-    fail('unknown command — use "keygen" or "sign". See the file header for usage.');
+    fail('unknown command, use "keygen" or "sign". See the file header for usage.');
 }

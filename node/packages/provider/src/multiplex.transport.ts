@@ -2,7 +2,7 @@ import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import { decodeEnvelope, encodeEnvelope, encodeRegisterEnvelope, envelopeFrame, tunnelErrorOf } from "./protocol/index";
 
 // ---------------------------------------------------------------------------
-// MultiplexSocket — shared WebSocket singleton (internal)
+// MultiplexSocket, shared WebSocket singleton (internal)
 // ---------------------------------------------------------------------------
 
 /**
@@ -10,7 +10,7 @@ import { decodeEnvelope, encodeEnvelope, encodeRegisterEnvelope, envelopeFrame, 
  * instances. All traffic goes through the tunnel envelope protocol, whose
  * definition lives in `./protocol` and is shared with the broker.
  *
- * Reconnection is handled centrally here — individual transports do not reconnect.
+ * Reconnection is handled centrally here, individual transports do not reconnect.
  * Use {@link getOrCreate} to obtain a per-URL singleton.
  */
 class MultiplexSocket {
@@ -52,7 +52,7 @@ class MultiplexSocket {
             this._announceProvider(name);
             transport.onOpen?.();
         } else if (!this._ws) {
-            // First registration — open the connection.
+            // First registration, open the connection.
             this._stopped = false;
             this._connect();
         }
@@ -134,7 +134,7 @@ class MultiplexSocket {
 
     private _routeIncoming(raw: string): void {
         const envelope = decodeEnvelope(raw);
-        if (!envelope) return; // malformed — drop silently
+        if (!envelope) return; // malformed, drop silently
 
         const transport = this._transports.get(envelope.provider);
         if (!transport) return;
@@ -169,7 +169,7 @@ class MultiplexSocket {
 }
 
 // ---------------------------------------------------------------------------
-// MultiplexTransport — per-server transport (public)
+// MultiplexTransport, per-server transport (public)
 // ---------------------------------------------------------------------------
 
 /**
@@ -215,7 +215,7 @@ export class MultiplexTransport implements IMessageTransport {
     /**
      * Registers this transport with the shared socket.
      *
-     * Safe to call multiple times — subsequent calls are no-ops.
+     * Safe to call multiple times, subsequent calls are no-ops.
      */
     activate(): void {
         if (!this._registered) {

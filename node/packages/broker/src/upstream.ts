@@ -5,8 +5,8 @@
  * onto the single upstream connection, regardless of the underlying transport.
  *
  * Implementations:
- * - `StdioUpstream`  — a local child process (newline-delimited JSON-RPC over stdio).
- * - `RemoteUpstream` — a remote MCP server reached by URL (Streamable HTTP / SSE / WebSocket).
+ * - `StdioUpstream` : a local child process (newline-delimited JSON-RPC over stdio).
+ * - `RemoteUpstream`: a remote MCP server reached by URL (Streamable HTTP / SSE / WebSocket).
  *
  * `StdioUpstream` is reused as-is by the future `.mcpb` bundle loader: a bundle
  * is a local server whose `mcp_config` maps directly onto a stdio upstream.

@@ -10,7 +10,7 @@
 
 /** The RFC 9728 metadata document for a single protected resource. */
 export interface IProtectedResourceMetadata {
-    /** Canonical resource identifier (RFC 8707) — the slot's `/mcp` endpoint. */
+    /** Canonical resource identifier (RFC 8707): the slot's `/mcp` endpoint. */
     resource: string;
     /** Authorization server issuer URLs; MUST contain at least one. */
     authorization_servers: string[];

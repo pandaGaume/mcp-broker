@@ -7,7 +7,7 @@
             "description": "List every provider slot on this broker, connected or not. Each entry tells you the transport kind, current client count, and how many requests are in flight. Use this to discover what you can route to."
         },
         "provider_status": {
-            "description": "Get the full status of one provider slot by name. Returns an error if the slot does not exist — start with providers_list if you are not sure of the name.",
+            "description": "Get the full status of one provider slot by name. Returns an error if the slot does not exist, start with providers_list if you are not sure of the name.",
             "properties": {
                 "name": "The exact provider slot name. Case-sensitive. Use providers_list to discover valid values."
             }

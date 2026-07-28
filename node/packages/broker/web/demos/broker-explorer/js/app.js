@@ -1,5 +1,5 @@
 /**
- * app.js — UI wiring for the broker explorer demo.
+ * app.js, UI wiring for the broker explorer demo.
  *
  * Owns the DOM: console log, status badge, live catalog, and the connect /
  * disconnect lifecycle. The MCP-over-WebSocket client is imported from
@@ -30,7 +30,7 @@ function setStatus(next) {
 }
 
 // =====================================================================
-// Catalog panel — rendered live from the slot's tools/list response.
+// Catalog panel, rendered live from the slot's tools/list response.
 // =====================================================================
 const catalogEl = document.getElementById("catalog");
 
@@ -174,7 +174,7 @@ const slotInput = document.getElementById("slot-name");
 const endpointsEl = document.getElementById("endpoints");
 
 // Derive the client WebSocket base from the page origin: ws:// over HTTP,
-// wss:// over HTTPS — avoids mixed-content errors under TLS.
+// wss:// over HTTPS, avoids mixed-content errors under TLS.
 (function deriveClientUrl() {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     wsUrlInput.value = `${scheme}//${window.location.host}`;
@@ -238,7 +238,7 @@ startBtn.addEventListener("click", async () => {
         client = c;
         const info = await c.initialize();
         const serverName = info?.serverInfo?.name ?? slot;
-        log(`Connected — initialized against "${serverName}".`, "ok");
+        log(`Connected, initialized against "${serverName}".`, "ok");
 
         const tools = await c.listTools();
         renderCatalog(tools);

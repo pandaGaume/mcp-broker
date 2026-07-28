@@ -63,10 +63,10 @@
         "prepublishOnly": "npm run lint && npm run build && npm test"
     },
     "peerDependencies": {
-        "@cyanmycelium/mcp-core": "^0.5.0"
+        "@cyanmycelium/mcp-core": "^0.7.0"
     },
     "devDependencies": {
-        "@cyanmycelium/mcp-core": "^0.5.0",
+        "@cyanmycelium/mcp-core": "^0.7.0",
         "@types/node": "^20.11.0",
         "@typescript-eslint/eslint-plugin": "^7.0.0",
         "@typescript-eslint/parser": "^7.0.0",

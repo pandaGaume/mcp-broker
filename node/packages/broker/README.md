@@ -32,7 +32,7 @@ The broker starts on `http://localhost:3000` by default.
 
 Two sources, env vars **always win** over the file. The file is the static baseline you ship with the broker; env vars are deploy-specific overrides.
 
-### Option A — `.mcp-broker/` folder (recommended)
+### Option A: `.mcp-broker/` folder (recommended)
 
 Drop a `.mcp-broker/` folder next to where you launch the broker. Paths
 inside `config.json` are resolved against this folder, so it stays
@@ -79,7 +79,7 @@ cp -r node_modules/@cyanmycelium/mcp-broker/.mcp-broker.example .mcp-broker
 
 Full reference (every field, defaults, recipes, grammar overrides): **[docs/config.md](docs/config.md)**.
 
-### Option B — Environment variables
+### Option B: Environment variables
 
 | Variable | Default | Notes |
 |---|---|---|

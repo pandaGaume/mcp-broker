@@ -21,8 +21,8 @@ export interface IJwtValidatorOptions {
  * no per-request round-trip to the AS, no shared introspection secret.
  *
  * Audience binding (RFC 8707) is enforced by passing the per-request canonical
- * resource URI as the required `audience`, so a token minted for another slot —
- * or another service — is rejected.
+ * resource URI as the required `audience`, so a token minted for another slot ,
+ * or another service, is rejected.
  *
  * The JWKS is fetched lazily and cached (with rotation/cooldown) by
  * `jose.createRemoteJWKSet`.

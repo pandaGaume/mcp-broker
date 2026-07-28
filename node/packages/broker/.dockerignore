@@ -30,7 +30,7 @@ tests/
 coverage/
 vitest.config.ts
 
-# Generated TLS material — never bake into image
+# Generated TLS material, never bake into image
 ../certs/
 
 # Logs
