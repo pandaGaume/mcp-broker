@@ -1,22 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "http";
+import { bearerToken, buildChallengeHeader, PROTECTED_RESOURCE_METADATA_PREFIX } from "@cyanmycelium/mcp-core";
 import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types";
 import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata";
 import { SubjectMappingError } from "../authorization/index";
 
-/** Well-known prefix under which per-slot Protected Resource Metadata is served. */
-const PRM_PREFIX = "/.well-known/oauth-protected-resource/";
-
-/** Extracts the bearer token from an `Authorization` header, or `null`. */
-function extractBearer(header: string | string[] | undefined): string | null {
-    if (typeof header !== "string") return null;
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-    return match ? match[1].trim() : null;
-}
-
-/** Strips characters that would break (or inject into) an HTTP header value. */
-function headerSafe(value: string): string {
-    return value.replace(/[\r\n"]/g, " ").trim();
-}
+/**
+ * Well-known prefix under which per-slot Protected Resource Metadata is served.
+ *
+ * Carries a trailing slash because every use here splits a slot off it, while
+ * `mcp-core` exports the bare RFC 9728 prefix.
+ */
+const PRM_PREFIX = `${PROTECTED_RESOURCE_METADATA_PREFIX}/`;
 
 /**
  * The HTTP enforcement point for the resource-server layer. Wraps a
@@ -81,7 +75,7 @@ export class HttpAuthGuard {
      * `403` insufficient scope) otherwise.
      */
     async authorize(req: IncomingMessage, slot: string): Promise<IPrincipal> {
-        const token = extractBearer(req.headers["authorization"]);
+        const token = bearerToken(req.headers["authorization"]);
         if (!token) {
             throw new AuthError(401, "invalid_token", "Missing bearer token");
         }
@@ -114,10 +108,12 @@ export class HttpAuthGuard {
      * authorization server and retry. Shared by the HTTP and WebSocket paths.
      */
     challengeHeader(slot: string, err: AuthError): string {
-        const params = [`resource_metadata="${this.metadataUrlFor(slot)}"`, `error="${err.code}"`];
-        if (err.description) params.push(`error_description="${headerSafe(err.description)}"`);
-        if (err.scope) params.push(`scope="${headerSafe(err.scope)}"`);
-        return `Bearer ${params.join(", ")}`;
+        return buildChallengeHeader({
+            resourceMetadata: this.metadataUrlFor(slot),
+            error: err.code,
+            errorDescription: err.description,
+            scope: err.scope,
+        });
     }
 
     /**

@@ -6,73 +6,44 @@
  * Protected Resource Metadata (RFC 9728). These types are the seam every other
  * auth module builds on, so a host can drop in a custom {@link ITokenValidator}
  * (e.g. RFC 7662 introspection) without touching the enforcement code.
+ *
+ * Everything the MCP specification itself defines comes from `mcp-core` and is
+ * re-exported here under the broker's historical names: the claim shape, the
+ * validator seam, the error carrying a challenge. What stays broker-owned is
+ * what the spec does not define, namely a multi-slot resource server whose
+ * principals feed a hierarchical policy engine.
  */
+import { McpAuthError, scopesOf as mcpScopesOf, type IAccessTokenClaims, type IMcpPrincipal, type ITokenValidator } from "@cyanmycelium/mcp-core";
 import type { IAuthorizationSubject, IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
 
-/**
- * The subset of OAuth 2.1 / RFC 9068 access-token claims a resource server
- * cares about. `aud` carries the audience binding (RFC 8707), `scope` the
- * space-delimited granted scopes; some authorization servers emit `scopes` as
- * an array instead. Unknown claims are preserved via the index signature.
- */
-export interface IAccessTokenClaims {
-    /** Subject: the principal the token was issued for. */
-    sub?: string;
-    /** Intended audience(s). MUST include the slot's canonical resource URI. */
-    aud?: string | string[];
-    /** Issuer (the authorization server). */
-    iss?: string;
-    /** Expiry, seconds since the epoch. */
-    exp?: number;
-    /** Space-delimited granted scopes (RFC 8693). */
-    scope?: string;
-    /** Array-form granted scopes, emitted by some authorization servers. */
-    scopes?: string[];
-    [claim: string]: unknown;
-}
-
-/**
- * Validates a bearer access token for a specific resource. Implementations MUST
- * verify the token's signature/validity **and** that it was issued for
- * `resource` (audience binding, RFC 8707). On any failure they MUST throw an
- * {@link AuthError} with status `401` and code `invalid_token`; unexpected
- * infrastructure failures (e.g. JWKS unreachable) should throw a plain error so
- * the caller can surface a `500` rather than a misleading `401`.
- */
-export interface ITokenValidator {
-    validate(token: string, resource: string): Promise<IAccessTokenClaims>;
-}
+export type { IAccessTokenClaims, ITokenValidator } from "@cyanmycelium/mcp-core";
 
 /** OAuth 2.1 error codes the broker emits in `WWW-Authenticate` challenges. */
-export type AuthErrorCode = "invalid_token" | "insufficient_scope" | "invalid_request";
+export type AuthErrorCode = import("@cyanmycelium/mcp-core").McpAuthErrorCode;
 
 /**
  * A thrown authorization failure carrying the HTTP status and OAuth error code
  * the enforcement point should surface. `scope` is set for `insufficient_scope`
  * challenges to advertise the scope(s) the resource requires.
+ *
+ * The broker's own name for `mcp-core`'s `McpAuthError`, kept so `instanceof`
+ * checks and the published API survive the consolidation. There is one class at
+ * runtime, so an error thrown by `mcp-core` is caught by the broker and the
+ * other way round.
  */
-export class AuthError extends Error {
-    readonly status: 401 | 403 | 400;
-    readonly code: AuthErrorCode;
-    readonly description?: string;
-    readonly scope?: string;
-
-    constructor(status: 401 | 403 | 400, code: AuthErrorCode, description?: string, scope?: string) {
-        super(description ?? code);
-        this.name = "AuthError";
-        this.status = status;
-        this.code = code;
-        this.description = description;
-        this.scope = scope;
-    }
-}
+export const AuthError = McpAuthError;
+export type AuthError = McpAuthError;
 
 /**
  * The authenticated caller, produced once a token passes validation and the
  * required scopes are satisfied. Threaded through the request so downstream
  * components (e.g. the `_all` aggregate) can make scope-aware decisions.
+ *
+ * Extends `mcp-core`'s principal with the subject the policy engine reasons
+ * about, which the specification says nothing about and which therefore stays
+ * here.
  */
-export interface IPrincipal {
+export interface IPrincipal extends IMcpPrincipal {
     readonly claims: IAccessTokenClaims;
     readonly scopes: ReadonlySet<string>;
     /** Subjects derived exclusively from validated token claims. */
@@ -121,16 +92,20 @@ export interface IResolvedAuth {
 }
 
 /**
- * Extracts the effective set of granted scopes from token claims, unioning the
- * space-delimited `scope` string and the array-form `scopes` claim.
+ * Extracts the effective set of granted scopes from token claims.
+ *
+ * A deliberate superset of `mcp-core`'s: OAuth 2.1 only defines the
+ * space-delimited `scope` string, which is what the spec-level helper reads,
+ * but several authorization servers emit an array-form `scopes` claim instead.
+ * Dropping that here would silently strip every scope for those deployments, so
+ * the two are unioned. The `scope` half is parsed by `mcp-core` rather than
+ * re-implemented.
  */
 export function scopesOf(claims: IAccessTokenClaims): Set<string> {
-    const set = new Set<string>();
-    if (typeof claims.scope === "string") {
-        for (const s of claims.scope.split(/\s+/)) if (s) set.add(s);
-    }
-    if (Array.isArray(claims.scopes)) {
-        for (const s of claims.scopes) if (typeof s === "string" && s) set.add(s);
+    const set = new Set<string>(mcpScopesOf(claims));
+    const arrayForm: unknown = claims["scopes"];
+    if (Array.isArray(arrayForm)) {
+        for (const scope of arrayForm) if (typeof scope === "string" && scope) set.add(scope);
     }
     return set;
 }

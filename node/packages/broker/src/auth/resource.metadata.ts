@@ -8,33 +8,26 @@
  * `<publicBaseUrl>/.well-known/oauth-protected-resource/<slot>/<mcp>`.
  */
 
+import { buildProtectedResourceMetadata, type IProtectedResourceMetadata } from "@cyanmycelium/mcp-core";
+
 /** The RFC 9728 metadata document for a single protected resource. */
-export interface IProtectedResourceMetadata {
-    /** Canonical resource identifier (RFC 8707): the slot's `/mcp` endpoint. */
-    resource: string;
-    /** Authorization server issuer URLs; MUST contain at least one. */
-    authorization_servers: string[];
-    /** Scopes the resource understands, when advertised. */
-    scopes_supported?: string[];
-    /** How bearer tokens may be presented. The broker only reads the header. */
-    bearer_methods_supported: string[];
-}
+export type { IProtectedResourceMetadata } from "@cyanmycelium/mcp-core";
 
 /**
- * Builds the RFC 9728 metadata document for one slot. `bearer_methods_supported`
- * is fixed to `["header"]` because the broker rejects tokens passed any other
- * way (never the query string, per OAuth 2.1 §5).
+ * Builds the RFC 9728 metadata document for one slot.
+ *
+ * The document itself is shaped by `mcp-core`: it is defined by the MCP
+ * specification, identically for every server. What is broker-specific is only
+ * which resource a slot maps to, and that is decided by the caller.
+ * `bearer_methods_supported` comes out fixed to `["header"]`, matching the
+ * broker's refusal to read a token from anywhere but the header (OAuth 2.1 §5).
  */
 export function buildResourceMetadata(params: { resource: string; authorizationServers: string[]; scopesSupported?: string[] }): IProtectedResourceMetadata {
-    const doc: IProtectedResourceMetadata = {
+    return buildProtectedResourceMetadata({
         resource: params.resource,
-        authorization_servers: params.authorizationServers,
-        bearer_methods_supported: ["header"],
-    };
-    if (params.scopesSupported && params.scopesSupported.length > 0) {
-        doc.scopes_supported = params.scopesSupported;
-    }
-    return doc;
+        authorizationServers: params.authorizationServers,
+        scopesSupported: params.scopesSupported,
+    });
 }
 
 /** @deprecated Use {@link IProtectedResourceMetadata}. */
