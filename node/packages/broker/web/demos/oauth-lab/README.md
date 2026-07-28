@@ -72,3 +72,23 @@ add tokens silently without presenting the identity page again.
 The private signing key, authorization codes, identity sessions, and audit
 events are held only in server memory. Access tokens are held in the browser's
 tab-scoped session storage. Stop the demo with `Ctrl+C`.
+
+## Reading the results
+
+The two layers of refusal look different on the wire, and telling them apart is
+the point of the lab:
+
+| Refusal | Where it happens | What comes back |
+| --- | --- | --- |
+| No token, invalid token, missing scope | Before the request reaches the transport | HTTP `401` or `403` with `WWW-Authenticate` |
+| A policy denies the operation | Once the session is open and the frame is read | HTTP `200` with JSON-RPC `-32001 Forbidden` |
+
+A policy denial is not a transport failure: the request arrived, the session was
+valid, the operation was refused. So the status stays `200` and the refusal
+travels inside the JSON-RPC body, which is also what the raw WebSocket transport
+has always done.
+
+`/<slot>/mcp` runs the real Streamable HTTP state machine: `initialize` opens a
+session and returns `Mcp-Session-Id`, which every later request must send back.
+Requests from a browser also carry an `Origin`, refused by default, so
+`config.json` lists the lab's own origin under `allowedOrigins`.

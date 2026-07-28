@@ -32,9 +32,15 @@ The broker itself keeps the unsuffixed name it was published under: it is the ar
                 (the MCP specification itself)
 ```
 
-The server depends on the provider package, which reads backwards until you notice that **the broker is itself a provider**: it publishes its own `_broker` introspection slot and its `_all` aggregate slot as in-process MCP servers. Sharing the provider's wire contract is therefore the natural way to keep one definition of the envelope, rather than two that drift.
+The server builds against the provider package, which reads backwards until you notice that **the broker is itself a provider**: it publishes its own `_broker` introspection slot and its `_all` aggregate slot as in-process MCP servers. Sharing the provider's wire contract is therefore the natural way to keep one definition of the envelope, rather than two that drift.
 
-All three additionally depend on `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`.
+That sharing is a **build-time** one. The broker uses a single thing from the provider, the envelope codec under `@cyanmycelium/mcp-broker-provider/protocol`, which is dependency-free by design and imports nothing from `mcp-core`. So the broker bundles it (`noExternal` in its tsup config) and lists the provider under `devDependencies`: one definition of the wire format, compiled from one source, but no runtime dependency.
+
+The reason is release ordering. The provider declares a peer range on `mcp-core`; leaving it a runtime dependency meant that a published provider lagging a core release blocked installing the **broker**, over a module that never touches `mcp-core`. Two copies of a stateless codec cost nothing, since what has to agree is the format on the wire, not the identity of the functions.
+
+The published broker therefore installs `@cyanmycelium/mcp-core`, `jose`, `open` and `ws`, and nothing else of ours.
+
+All three packages additionally build against `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`.
 
 ### server
 

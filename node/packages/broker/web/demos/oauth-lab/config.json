@@ -2,6 +2,7 @@
     "port": 3001,
     "host": "127.0.0.1",
     "brokerName": "oauth-policy-lab",
+    "allowedOrigins": ["http://127.0.0.1:3001"],
     "www": {
         "open": false,
         "mounts": [

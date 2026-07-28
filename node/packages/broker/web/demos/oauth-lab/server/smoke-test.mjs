@@ -95,25 +95,75 @@ async function tokenFor(persona, slot) {
     return (await grantFor({ persona, slot })).accessToken;
 }
 
-async function rpc(slot, accessToken, method, params = {}) {
+function post(slot, accessToken, message, mcpSessionId) {
     return json(`${BROKER}/${slot}/mcp`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
             ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            ...(mcpSessionId ? { "Mcp-Session-Id": mcpSessionId } : {}),
         },
-        body: JSON.stringify({
+        body: JSON.stringify(message),
+    });
+}
+
+/** Streamable HTTP session ids, keyed by slot and caller. */
+const sessions = new Map();
+
+/**
+ * The session id for a caller on a slot, opening one on first use.
+ *
+ * Returns `null` when the handshake was turned away, which is the normal
+ * outcome for the calls below that expect a `401`: the token guard runs before
+ * any session exists, so those never get one and do not need one.
+ */
+async function sessionFor(slot, accessToken) {
+    const key = `${slot}:${accessToken}`;
+    if (sessions.has(key)) return sessions.get(key);
+
+    const opened = await post(slot, accessToken, {
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "oauth-lab-smoke", version: "0" } },
+    });
+    const sessionId = opened.response.headers.get("mcp-session-id");
+    sessions.set(key, sessionId);
+    return sessionId;
+}
+
+async function rpc(slot, accessToken, method, params = {}) {
+    const sessionId = await sessionFor(slot, accessToken);
+    return post(
+        slot,
+        accessToken,
+        {
             jsonrpc: "2.0",
             id: Math.floor(Date.now() + Math.random() * 1000),
             method,
             params,
-        }),
-    });
+        },
+        sessionId
+    );
 }
 
 function expectHttp(result, status, label) {
     assert(result.response.status === status, `${label}: expected HTTP ${status}, got ${result.response.status}.`);
+}
+
+/**
+ * Asserts a **policy** refusal, which is not an HTTP failure.
+ *
+ * The two layers answer differently and the difference is the point: a token
+ * that is missing, invalid or short a scope is rejected before the request
+ * reaches the transport, so it is `401`/`403`. A policy denial happens once the
+ * session is established and the frame is read, so the transport succeeded and
+ * the refusal travels inside it as JSON-RPC `-32001`.
+ */
+function expectPolicyDenied(result, label) {
+    expectHttp(result, 200, label);
+    assert(result.body?.error?.code === -32001, `${label}: expected JSON-RPC -32001, got ${JSON.stringify(result.body)}.`);
 }
 
 const metadata = await json(`${BROKER}/.well-known/oauth-protected-resource/motor-7/mcp`);
@@ -134,23 +184,21 @@ expectHttp(
     200,
     "Geordi diagnostic"
 );
-expectHttp(
+expectPolicyDenied(
     await rpc("motor-7", laForgeMotor, "tools/call", {
         name: "start_machine",
         arguments: { confirmation: true },
     }),
-    403,
     "Geordi operational denial"
 );
 expectHttp(await rpc("critical-furnace", laForgeMotor, "tools/list"), 401, "wrong audience");
 
 const laForgeFurnace = await tokenFor("la-forge", "critical-furnace");
-expectHttp(
+expectPolicyDenied(
     await rpc("critical-furnace", laForgeFurnace, "tools/call", {
         name: "reset_baseline",
         arguments: { reason: "smoke test" },
     }),
-    403,
     "critical furnace explicit deny"
 );
 
@@ -173,12 +221,11 @@ expectHttp(
     200,
     "Seven of Nine read grant"
 );
-expectHttp(
+expectPolicyDenied(
     await rpc("site-energy", sevenEnergy, "tools/call", {
         name: "reset_baseline",
         arguments: { reason: "smoke test" },
     }),
-    403,
     "Seven of Nine mutation denial"
 );
 

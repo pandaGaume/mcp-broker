@@ -12,7 +12,10 @@ const state = {
     authorizationMetadata: null,
     tokenCache: readStoredTokenCache(),
     session: null,
-    initialized: new Set(),
+    // Streamable HTTP session ids, keyed by `<slot>:<jti>`. `initialize` mints
+    // one and hands it back in `Mcp-Session-Id`; every later request on that
+    // slot must send it or the broker answers 400.
+    mcpSessions: new Map(),
     auditFingerprint: "",
 };
 
@@ -303,7 +306,7 @@ async function completeAuthorization() {
     const cachedPersona = cachedSessions()[0]?.claims?.demo_persona;
     if (cachedPersona && cachedPersona !== claims.demo_persona) {
         state.tokenCache = {};
-        state.initialized.clear();
+        state.mcpSessions.clear();
     }
     state.tokenCache[pending.resource] = session;
     state.slot = pending.slot;
@@ -320,7 +323,7 @@ async function completeAuthorization() {
 function clearTokenCache() {
     state.tokenCache = {};
     state.session = null;
-    state.initialized.clear();
+    state.mcpSessions.clear();
     sessionStorage.removeItem(TOKEN_CACHE_KEY);
     sessionStorage.removeItem(LEGACY_SESSION_KEY);
     renderSession();
@@ -379,19 +382,19 @@ function expected(action) {
     }
     if (persona === "picard") return { allowed: true, label: "expect allow" };
     if (persona === "seven") {
-        return ["list", "read"].includes(action) ? { allowed: true, label: "expect allow" } : { allowed: false, label: "expect policy 403" };
+        return ["list", "read"].includes(action) ? { allowed: true, label: "expect allow" } : { allowed: false, label: "expect policy deny" };
     }
-    if (slot === "site-energy") return { allowed: false, label: "expect policy 403" };
+    if (slot === "site-energy") return { allowed: false, label: "expect policy deny" };
     if (persona === "la-forge") {
         const allowed = ["list", "read", "diagnose"].includes(action) || (action === "reset" && slot !== "critical-furnace");
         const explicit = action === "reset" && slot === "critical-furnace";
-        return { allowed, label: allowed ? "expect allow" : explicit ? "explicit deny 403" : "expect policy 403" };
+        return { allowed, label: allowed ? "expect allow" : explicit ? "explicit policy deny" : "expect policy deny" };
     }
     if (persona === "worf") {
         const allowed = ["list", "read", "start"].includes(action);
-        return { allowed, label: allowed ? "expect allow" : "expect policy 403" };
+        return { allowed, label: allowed ? "expect allow" : "expect policy deny" };
     }
-    return { allowed: false, label: "expect policy 403" };
+    return { allowed: false, label: "expect policy deny" };
 }
 
 function renderExpectations() {
@@ -425,7 +428,7 @@ function requestForAction(action) {
     return { method: "tools/list", params: {} };
 }
 
-async function sendRpc(slot, method, params, accessToken) {
+async function sendRpc(slot, method, params, accessToken, mcpSessionId) {
     const id = Math.floor(Date.now() + Math.random() * 1000);
     const message = { jsonrpc: "2.0", id, method, params };
     const headers = {
@@ -433,6 +436,7 @@ async function sendRpc(slot, method, params, accessToken) {
         Accept: "application/json, text/event-stream",
     };
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    if (mcpSessionId) headers["Mcp-Session-Id"] = mcpSessionId;
     const startedAt = performance.now();
     const response = await fetch(resourceUrl(slot), {
         method: "POST",
@@ -450,20 +454,33 @@ async function sendRpc(slot, method, params, accessToken) {
         request: {
             url: resourceUrl(slot),
             authorization: accessToken ? "Bearer [redacted]" : "(none)",
+            mcpSessionId: mcpSessionId ?? "(none)",
             body: message,
         },
         response: {
             status: response.status,
             wwwAuthenticate: response.headers.get("www-authenticate"),
+            mcpSessionId: response.headers.get("mcp-session-id"),
             body,
         },
         duration: performance.now() - startedAt,
     };
 }
 
+/** The session key a slot and caller share. */
+function mcpSessionKey(slot, claims) {
+    return `${slot}:${claims?.jti ?? "anonymous"}`;
+}
+
+/**
+ * Opens a Streamable HTTP session on `slot` if this caller has none yet, and
+ * returns its id. The id is what every later request on that slot must carry.
+ */
 async function ensureInitialized(slot, accessToken, claims) {
-    const key = `${slot}:${claims?.jti ?? "anonymous"}`;
-    if (state.initialized.has(key)) return;
+    const key = mcpSessionKey(slot, claims);
+    const known = state.mcpSessions.get(key);
+    if (known) return known;
+
     const initialized = await sendRpc(
         slot,
         "initialize",
@@ -474,9 +491,12 @@ async function ensureInitialized(slot, accessToken, claims) {
         },
         accessToken
     );
-    if (initialized.response.status >= 400 || initialized.response.body?.error) return;
-    await sendRpc(slot, "notifications/initialized", {}, accessToken);
-    state.initialized.add(key);
+    if (initialized.response.status >= 400 || initialized.response.body?.error) return null;
+
+    const sessionId = initialized.response.mcpSessionId;
+    await sendRpc(slot, "notifications/initialized", {}, accessToken, sessionId);
+    if (sessionId) state.mcpSessions.set(key, sessionId);
+    return sessionId;
 }
 
 function alternateSlot(slot) {
@@ -510,10 +530,14 @@ async function runAction(action, button) {
     const accessToken = action === "unauthenticated" ? null : session?.accessToken;
     const request = requestForAction(action);
     try {
+        // `wrong-audience` and `unauthenticated` are meant to be turned away by
+        // the token guard, which runs before any session exists, so neither
+        // opens one.
+        let mcpSessionId = null;
         if (accessToken && action !== "wrong-audience") {
-            await ensureInitialized(target, accessToken, session?.claims);
+            mcpSessionId = await ensureInitialized(target, accessToken, session?.claims);
         }
-        const result = await sendRpc(target, request.method, request.params, accessToken);
+        const result = await sendRpc(target, request.method, request.params, accessToken, mcpSessionId);
         setConsole(result, action);
         if (accessToken && action !== "wrong-audience") {
             document.getElementById("flow-policy").classList.add("complete");

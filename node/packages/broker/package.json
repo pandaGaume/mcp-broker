@@ -68,13 +68,13 @@
         "prepublishOnly": "npm run lint && npm run build && npm test"
     },
     "dependencies": {
-        "@cyanmycelium/mcp-broker-provider": "^0.1.0",
         "@cyanmycelium/mcp-core": "^0.7.0",
         "jose": "^6.2.3",
         "open": "^11.0.0",
         "ws": "^8.18.0"
     },
     "devDependencies": {
+        "@cyanmycelium/mcp-broker-provider": "^0.1.0",
         "@types/node": "^20.11.0",
         "@types/ws": "^8.5.0",
         "@typescript-eslint/eslint-plugin": "^7.0.0",

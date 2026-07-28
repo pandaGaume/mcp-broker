@@ -63,7 +63,7 @@
         "prepublishOnly": "npm run lint && npm run build && npm test"
     },
     "peerDependencies": {
-        "@cyanmycelium/mcp-core": "^0.7.0"
+        "@cyanmycelium/mcp-core": ">=0.4.0 <1.0.0"
     },
     "devDependencies": {
         "@cyanmycelium/mcp-core": "^0.7.0",
