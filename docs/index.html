@@ -10,6 +10,54 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* News link in the topbar */
+    .topbar-links a.news-link { color: var(--blue-bright); }
+    .topbar-links a.news-link::before {
+      content: "";
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--blue-bright);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    /* Featured news banner in the hero */
+    .newsflash {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 24px;
+      padding: 9px 16px 9px 11px;
+      border: 1px solid var(--rule-strong);
+      border-radius: 999px;
+      background: var(--blue-fog);
+      font-size: 14px;
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .newsflash:hover {
+      text-decoration: none;
+      border-color: var(--blue-dim);
+      background: var(--blue-fog-2);
+    }
+    .newsflash .nf-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: #0b0f14;
+      background: var(--blue-bright);
+      border-radius: 999px;
+      padding: 2px 8px;
+      flex: none;
+    }
+    .newsflash .nf-text { color: var(--fg-muted); }
+    .newsflash .nf-text b { color: var(--fg); font-weight: 600; }
+    .newsflash .nf-arrow { color: var(--blue-bright); flex: none; }
+    @media (max-width: 560px) { .newsflash { border-radius: 12px; align-items: flex-start; } }
+  </style>
 </head>
 <body>
 
@@ -26,6 +74,7 @@
       <a href="#quick-start">Quick start</a>
       <a href="#grammar">Grammar</a>
       <a href="#install">Install</a>
+      <a class="news-link" href="mhs.html">MHS</a>
       <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
     </nav>
   </div>
@@ -39,6 +88,12 @@
     <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
 
     <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · v0.1</div>
+
+    <a class="newsflash" href="mhs.html">
+      <span class="nf-tag">New</span>
+      <span class="nf-text"><b>mcp-broker × Model Hardware Standard</b>: securing agent-to-hardware, today</span>
+      <span class="nf-arrow" aria-hidden="true">→</span>
+    </a>
 
     <h1 class="hero-title">
       <span class="at">@</span>cyanmycelium<span class="sl">/</span>mcp-broker
