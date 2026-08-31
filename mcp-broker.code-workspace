@@ -3,7 +3,8 @@
         { "name": "📦 mcp-broker (root)", "path": "." },
         { "name": "🟢 broker", "path": "node/packages/broker" },
         { "name": "🔌 provider", "path": "node/packages/provider" },
-        { "name": "🔷 dotnet", "path": "dotnet" }
+        { "name": "🔷 dotnet", "path": "dotnet" },
+        { "name": "🪼 c99", "path": "c99" }
     ],
     "settings": {
         "files.exclude": {

@@ -1,0 +1,72 @@
+<svg viewBox="0 0 780 470" xmlns="http://www.w3.org/2000/svg" font-family="'Inter', system-ui, -apple-system, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#4a5666"/>
+    </marker>
+  </defs>
+
+  <!-- card -->
+  <rect x="1" y="1" width="778" height="468" rx="16" fill="#0b0f14" stroke="#1f2731"/>
+  <text x="28" y="34" fill="#6b7785" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11" letter-spacing="1.5">GOVERNED EXECUTION · THREE OUTCOMES</text>
+
+  <!-- edges -->
+  <g stroke="#2a3340" stroke-width="1.6" fill="none">
+    <line x1="390" y1="88" x2="390" y2="126" marker-end="url(#arrow)"/>
+    <line x1="330" y1="186" x2="205" y2="242" marker-end="url(#arrow)"/>
+    <line x1="452" y1="186" x2="545" y2="240" marker-end="url(#arrow)"/>
+    <line x1="500" y1="300" x2="472" y2="366" marker-end="url(#arrow)"/>
+    <line x1="600" y1="300" x2="672" y2="366" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- edge labels -->
+  <g font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11" text-anchor="middle">
+    <g><rect x="228" y="200" width="58" height="17" rx="4" fill="#0b0f14"/><text x="257" y="212" fill="#ff8a8a">denied</text></g>
+    <g><rect x="470" y="198" width="66" height="17" rx="4" fill="#0b0f14"/><text x="503" y="210" fill="#9cc2ff">granted</text></g>
+    <g><rect x="459" y="326" width="30" height="17" rx="4" fill="#0b0f14"/><text x="474" y="338" fill="#cde88a">ok</text></g>
+    <g><rect x="612" y="326" width="92" height="17" rx="4" fill="#0b0f14"/><text x="658" y="338" fill="#ffcf9a">unsafe now</text></g>
+  </g>
+
+  <!-- request -->
+  <g text-anchor="middle">
+    <rect x="318" y="46" width="144" height="42" rx="10" fill="#161c25" stroke="#2a3340"/>
+    <text x="390" y="72" fill="#e6edf3" font-size="15" font-weight="600">request</text>
+  </g>
+
+  <!-- authorization gate -->
+  <g text-anchor="middle">
+    <rect x="272" y="128" width="236" height="58" rx="14" fill="#11161d" stroke="#3b82f6"/>
+    <text x="390" y="153" fill="#9cc2ff" font-size="15" font-weight="600">authorization</text>
+    <text x="390" y="172" fill="#6b7785" font-size="11" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace">permission · who / what / where</text>
+  </g>
+
+  <!-- denied -->
+  <g text-anchor="middle">
+    <rect x="112" y="244" width="150" height="52" rx="12" fill="#241316" stroke="#ff5c5c"/>
+    <text x="187" y="267" fill="#ff8a8a" font-size="14" font-weight="600">denied</text>
+    <text x="187" y="284" fill="#8a6a6c" font-size="10.5" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace">authz refusal</text>
+  </g>
+
+  <!-- execution gate -->
+  <g text-anchor="middle">
+    <rect x="430" y="242" width="236" height="58" rx="14" fill="#11161d" stroke="#3b82f6"/>
+    <text x="548" y="267" fill="#9cc2ff" font-size="15" font-weight="600">execution · device</text>
+    <text x="548" y="286" fill="#6b7785" font-size="11" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace">live state · enforced locally</text>
+  </g>
+
+  <!-- completed -->
+  <g text-anchor="middle">
+    <rect x="396" y="368" width="152" height="52" rx="12" fill="#1b2416" stroke="#b8e060"/>
+    <text x="472" y="391" fill="#cde88a" font-size="14" font-weight="600">completed</text>
+    <text x="472" y="408" fill="#7f8f5f" font-size="10.5" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace">executed</text>
+  </g>
+
+  <!-- safety-refused -->
+  <g text-anchor="middle">
+    <rect x="596" y="368" width="172" height="52" rx="12" fill="#26200f" stroke="#ffb86b"/>
+    <text x="682" y="391" fill="#ffcf9a" font-size="14" font-weight="600">safety-refused</text>
+    <text x="682" y="408" fill="#9a835f" font-size="10.5" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace">explicitly (non-)retryable</text>
+  </g>
+
+  <!-- tagline -->
+  <text x="390" y="452" text-anchor="middle" fill="#6b7785" font-size="12">authorization says if you may. the device says if it is safe. two layers, three outcomes.</text>
+</svg>
