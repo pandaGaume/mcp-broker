@@ -54,9 +54,57 @@
 import * as fs from "fs";
 import * as path from "path";
 import open from "open";
-import { WsTunnelBuilder } from "./index";
+import { WsTunnelBuilder, VERSION, PACKAGE_NAME } from "./index";
 import { loadBrokerConfig } from "./config";
 import { loadMcpbBundle } from "./mcpb/mcpb.loader";
+
+// ---------------------------------------------------------------------------
+// CLI flags
+// ---------------------------------------------------------------------------
+// Handled before ANY other work (config load, logging, server start) so that
+// `--help` / `--version` never boot a server or bind a port.
+
+const argv = process.argv.slice(2);
+
+if (argv.includes("--help") || argv.includes("-h")) {
+    printHelp();
+    process.exit(0);
+}
+if (argv.includes("--version") || argv.includes("-v")) {
+    process.stdout.write(`${PACKAGE_NAME} ${VERSION}\n`);
+    process.exit(0);
+}
+
+function printHelp(): void {
+    process.stdout.write(
+        `\n${PACKAGE_NAME} ${VERSION}\n` +
+            `WebSocket-based Model Context Protocol broker.\n\n` +
+            `USAGE\n` +
+            `  npx @cyanmycelium/mcp-broker             Start the broker (foreground)\n` +
+            `  npx @cyanmycelium/mcp-broker --help      Show this help\n` +
+            `  npx @cyanmycelium/mcp-broker --version   Print the version\n\n` +
+            `The broker takes no positional arguments. Configure it with a\n` +
+            `.mcp-broker/config.json file or MCP_BROKER_* environment variables\n` +
+            `(env vars win over the file).\n\n` +
+            `COMMON ENVIRONMENT VARIABLES\n` +
+            `  MCP_BROKER_CONFIG            Path to a JSON config file\n` +
+            `  MCP_BROKER_PORT             TCP port (default 3000)\n` +
+            `  MCP_BROKER_HOST             Bind interface (default 0.0.0.0)\n` +
+            `  MCP_BROKER_PROTOCOL         "http" | "https" (default: auto from TLS)\n` +
+            `  MCP_BROKER_TLS_CERT         PEM certificate path (enables HTTPS/WSS)\n` +
+            `  MCP_BROKER_TLS_KEY          PEM private key path\n` +
+            `  MCP_BROKER_STDIO_PROVIDER   Bridge stdin/stdout to this provider (Claude Desktop)\n` +
+            `  MCP_BROKER_LOCALE           Locale for _broker tool descriptions (default en)\n` +
+            `  MCP_BROKER_ALLOWED_ORIGINS  Comma-separated browser origins allowed on /<slot>/mcp\n\n` +
+            `AUTHORIZATION (OAuth 2.1, opt-in)\n` +
+            `  MCP_BROKER_AUTH_ENABLED     "1" to require bearer tokens on client endpoints\n` +
+            `  MCP_BROKER_PUBLIC_BASE_URL  Public origin, e.g. https://mcp.example.com\n` +
+            `  MCP_BROKER_JWKS             Authorization server JWKS URL\n` +
+            `  MCP_BROKER_ISSUER           Expected token issuer\n` +
+            `  MCP_BROKER_PROVIDER_SECRET  Shared secret required from providers\n\n` +
+            `Full reference: https://github.com/pandaGaume/mcp-broker/tree/main/node\n\n`
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
