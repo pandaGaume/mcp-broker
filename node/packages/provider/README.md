@@ -115,7 +115,7 @@ One limitation worth knowing before you deploy: if the broker is configured with
 
 ## Status
 
-This package is the only home of the tunnel transports. They also shipped in `@cyanmycelium/mcp-core@0.4.x`, were removed there in `0.5.0`, and are gone from the current `0.7.x`, so migrate those imports here before upgrading `mcp-core`.
+This package is the only home of the tunnel transports. They also shipped in `@cyanmycelium/mcp-core@0.4.x`, were removed there in `0.5.0`, and are absent from `0.7.x` and `1.x`, so migrate those imports here before upgrading `mcp-core`.
 
 The protocol is shared with the broker, and later with the consumer side. Import it through the `./protocol` subpath rather than the package root, so it can move to a package of its own one day without touching your call sites.
 

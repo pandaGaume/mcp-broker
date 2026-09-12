@@ -305,6 +305,12 @@ diagnoses itself.
   the intended fix.
 - **broker** `stop()` no longer rejects on `ERR_SERVER_NOT_RUNNING`, so a
   double `stop()` is silent. Every other close error still rejects.
+- **broker** The `@cyanmycelium/mcp-core` dependency moves from `^0.7.0` to
+  `^1.0.0`. mcp-core 1.0.0 is source-compatible with 0.7.0; the major bump
+  aligns its version line with the broker's.
+- **provider** The `@cyanmycelium/mcp-core` peer range widens from
+  `>=0.4.0 <1.0.0` to `>=0.7.0 <2.0.0`, so an application on mcp-core 1.x no
+  longer gets a peer warning, and one still on 0.7.x keeps installing.
 - **broker** `start()` can now reject. It previously could not, so this strictly
   widens what an embedder can do, but a caller doing `void tunnel.start()` will
   see an unhandled rejection where it previously saw an uncaught exception.
@@ -376,8 +382,12 @@ diagnoses itself.
 
 ### Coordinated releases
 
-`@cyanmycelium/mcp-core` must publish before the broker can subscribe to the new
-event. Its changes are additive and source-compatible:
+`@cyanmycelium/mcp-core` **1.0.0** ships alongside this release. The broker now
+requires `^1.0.0` and the provider's peer range is `>=0.7.0 <2.0.0`. The broker
+itself does not subscribe to the new events; the dependency is behavioral: the
+provider transports now report post-open failures through `onError`, and
+mcp-core 0.7.0 discarded every such error, so the fix on one side is invisible
+without the other. The mcp-core changes are additive and source-compatible:
 
 - `IMcpServer` gained the optional events `onTransportError: IEventSource<Error>`
   and `onDisconnected: IEventSource<void>`. `McpServer._connect` discarded every
