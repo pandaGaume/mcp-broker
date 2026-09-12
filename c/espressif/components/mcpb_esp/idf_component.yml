@@ -1,0 +1,10 @@
+## IDF Component Manager manifest for mcpb_esp.
+## Not published yet: the component compiles libmcpb from ../../../libmcpb,
+## outside its own directory, which the registry does not allow. Vendoring
+## those files in is the packaging step for that day.
+version: "0.2.0"
+description: "mcp-broker provider client on ESP-IDF: WebSocket over esp-tls, reconnection with jitter, link events on esp_event"
+url: "https://github.com/pandaGaume/mcp-broker"
+license: "Apache-2.0"
+dependencies:
+  idf: ">=5.1"

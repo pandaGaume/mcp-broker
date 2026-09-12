@@ -32,6 +32,12 @@ repository; the changes it needed for this release are listed under
   roundtrip test that drives the Node broker: own slot, `_all`, broker kill
   and restart. Not published anywhere; consumed from the repository. See
   [`c/README.md`](c/README.md).
+- **c** `c/espressif/`: the ESP-IDF component `mcpb_esp` (libmcpb on esp-tls
+  and lwip, TLS through the certificate bundle, one FreeRTOS task, link
+  events on the default `esp_event` loop, an outbox for messages from other
+  tasks, sizes in Kconfig) and a Wi-Fi sample project serving the same `echo`
+  tool as the host sample. Built for the ESP32-S3 in CI with the official
+  IDF 6.0 image; 7.4 KB of flash code and 13 KB of RAM with the defaults.
 
 ## [1.3.0] - 2026-09-02
 

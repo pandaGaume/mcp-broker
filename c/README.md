@@ -8,9 +8,10 @@ The device side of the tunnel. Where [`node/packages/provider`](../node/packages
 |---|---|---|
 | [`libmcpb/`](libmcpb/) | The client: RFC 6455 WebSocket (client role), provider registration with the `_all` opt-in, reconnection with a jittered window, immediate link events carrying the peer's refusal. C99, no allocation, no platform header. Everything system-dependent goes through a six-function port | 0.2.0, 98 checks without a network |
 | [`ports/host/`](ports/host/) | The port for Linux, macOS and Windows: plain TCP over the platform's sockets, no TLS (`tls != 0` is refused, never downgraded). For the roundtrip, the CI, and a provider on a Linux-class device | Done |
-| [`samples/host-provider/`](samples/host-provider/) | The smallest provider that proves the transport: dials, joins `_all`, serves one `echo` tool from static strings, prints every link event as one line. Deliberately without a JSON parser, so it shows exactly what the layer above the transport must supply | Done |
+| [`samples/lib/`](samples/lib/) | The MCP surface both samples serve, from static strings: `initialize`, `ping`, `tools/list`, one `echo` tool, the request id echoed verbatim. Deliberately without a JSON parser, so it shows exactly what the layer above the transport must supply | Done |
+| [`samples/host-provider/`](samples/host-provider/) | The smallest provider that proves the transport on a PC: dials, joins `_all`, serves `echo`, prints every link event as one line | Done |
 | [`tests/roundtrip/`](tests/roundtrip/) | The only test that crosses a real network: `host-provider` against the Node broker of this repository, through its own slot and through `_all`, then a broker kill and restart | Done |
-| `espressif/` | ESP-IDF component: port over esp-tls and lwip, a FreeRTOS task running the poll loop, link events republished on `esp_event` | Planned |
+| [`espressif/`](espressif/) | ESP-IDF: the `mcpb_esp` component (port over esp-tls and lwip, one FreeRTOS task, link events on `esp_event`) and a Wi-Fi sample project serving the same `echo` tool. Built for the S3 in CI | Done, see [its README](espressif/README.md) |
 
 **The scope stops at the transport.** `libmcpb` carries opaque bytes: it embeds no JSON parser, no JSON-RPC and no MCP server, because every firmware that would adopt it already has those, in its own language. On a CyanMycelium device that is the C++17 `JsonReader` / `JsonRpc::Server` / `McpServer`, plugged through an `IMessageTransport` around `mcpb_provider_t`. A C MCP layer is not planned; the byte boundary keeps that door open should a third party ever need one.
 
@@ -40,7 +41,13 @@ The roundtrip needs the Node broker built (`npm run build` in `node/`), then:
 node c/tests/roundtrip/run.mjs
 ```
 
-All three paths are exercised by [`ci-c.yml`](../.github/workflows/ci-c.yml), on gcc and clang, with warnings as errors.
+The ESP-IDF sample, with the IDF environment exported:
+
+```bash
+idf.py -C c/espressif/samples/provider set-target esp32s3 build
+```
+
+All four paths are exercised by [`ci-c.yml`](../.github/workflows/ci-c.yml): gcc and clang with warnings as errors, the Makefile, the roundtrip against the Node broker, and the S3 build in the official IDF image.
 
 ## Try it against a broker
 

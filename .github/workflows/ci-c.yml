@@ -66,3 +66,17 @@ jobs:
             - run: cmake -S c -B c/build -DCMAKE_C_FLAGS=-Werror
             - run: cmake --build c/build
             - run: node c/tests/roundtrip/run.mjs
+
+    # The ESP-IDF component and its sample, built for the S3 in the official
+    # IDF image. No hardware: this proves the component compiles against the
+    # IDF it targets, and that libmcpb still passes its own warning set on
+    # Xtensa. Running it is the user's board's job.
+    espressif:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: espressif/esp-idf-ci-action@v1
+              with:
+                  esp_idf_version: v6.0
+                  target: esp32s3
+                  path: c/espressif/samples/provider

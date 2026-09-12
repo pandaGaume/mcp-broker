@@ -1,0 +1,10 @@
+# Target: any ESP32 with Wi-Fi. The S3 is what this sample is developed on.
+CONFIG_IDF_TARGET="esp32s3"
+
+# The broker is reached over TLS in production; the bundle is what validates
+# its certificate without shipping one in the firmware.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+
+# One provider socket plus Wi-Fi is well within the defaults; nothing to
+# raise here. Keep the log readable.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

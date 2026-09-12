@@ -1,0 +1,59 @@
+menu "mcp-broker provider (mcpb_esp)"
+
+    config MCPB_ESP_RX_BUFFER
+        int "Receive buffer (bytes)"
+        default 8192
+        range 512 65536
+        help
+            Bounds the largest JSON-RPC message the device can receive in one
+            WebSocket message. A larger one is refused with code 1009 and the
+            connection reopened, never truncated. Also holds the HTTP upgrade
+            request during the handshake. Static, allocated once.
+
+    config MCPB_ESP_TX_BUFFER
+        int "Reply buffer (bytes)"
+        default 4096
+        range 256 65536
+        help
+            The buffer the message handler writes its reply into. A tools/list
+            with many tools or a large tool result needs more. Static.
+
+    config MCPB_ESP_TASK_STACK
+        int "Provider task stack (bytes)"
+        default 6144
+        range 3072 32768
+        help
+            The handler runs on this task, so size it for your JSON layer and
+            tool implementations, not only for libmcpb (which needs under 1 KB
+            on top of esp-tls).
+
+    config MCPB_ESP_TASK_PRIORITY
+        int "Provider task priority"
+        default 5
+        range 1 24
+
+    config MCPB_ESP_TASK_CORE
+        int "Provider task core (-1: any)"
+        default -1
+        range -1 1
+
+    config MCPB_ESP_POLL_MS
+        int "Poll timeout (ms)"
+        default 200
+        range 10 5000
+        help
+            How long one poll waits for a message before returning to drain
+            the outbox and check the stop flag. Keep it well under the
+            broker's provider heartbeat (30 s by default): the broker's ping
+            is answered from inside the poll.
+
+    config MCPB_ESP_TX_QUEUE_LEN
+        int "Outbox depth (messages)"
+        default 8
+        range 1 64
+        help
+            Messages queued with mcpb_esp_send from other tasks, waiting for
+            the provider task to send them. mcpb_esp_send fails with
+            ESP_ERR_NO_MEM when it is full.
+
+endmenu

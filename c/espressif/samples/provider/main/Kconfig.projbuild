@@ -1,0 +1,51 @@
+menu "Provider sample"
+
+    config SAMPLE_WIFI_SSID
+        string "Wi-Fi SSID"
+        default "myssid"
+
+    config SAMPLE_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default "mypassword"
+
+    config SAMPLE_BROKER_HOST
+        string "Broker host"
+        default "192.168.1.10"
+        help
+            Host name or address of the mcp-broker. The device dials out, so
+            the broker needs no route to the device, only the other way round.
+
+    config SAMPLE_BROKER_PORT
+        int "Broker port"
+        default 3000
+        range 1 65535
+
+    config SAMPLE_BROKER_TLS
+        bool "Use TLS (wss://)"
+        default n
+        help
+            Validates the broker's certificate against the bundle built into
+            the image. A broker on the LAN with a self-signed certificate
+            needs that certificate pinned instead; see mcpb_port_esp.c.
+
+    config SAMPLE_BROKER_SLOT
+        string "Slot name (empty: esp32-<MAC>)"
+        default ""
+        help
+            The name the device publishes under, as /provider/<name> on the
+            broker. Empty takes "esp32-" plus the last three bytes of the
+            station MAC, so a fleet of identical firmwares gets distinct
+            slots without configuration.
+
+    config SAMPLE_BROKER_TOKEN
+        string "Provider token (empty: none)"
+        default ""
+        help
+            Sent as X-Provider-Token when the broker has provider
+            authentication enabled.
+
+    config SAMPLE_BROKER_AGGREGATE
+        bool "Join the _all aggregate slot"
+        default y
+
+endmenu

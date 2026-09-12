@@ -192,8 +192,10 @@ async function main() {
         step(`Call the tool through the provider's own slot /${SLOT}/mcp`);
         {
             const client = await connectMcp(base, SLOT);
-            if (client.serverInfo?.name !== "host-provider") {
-                fail(`serverInfo.name is ${JSON.stringify(client.serverInfo)}, expected host-provider`);
+            // The device names itself after its slot, so a client can tell
+            // which of several identical firmwares answered.
+            if (client.serverInfo?.name !== SLOT) {
+                fail(`serverInfo.name is ${JSON.stringify(client.serverInfo)}, expected "${SLOT}"`);
             }
             ok(`initialize negotiated with serverInfo ${client.serverInfo.name} ${client.serverInfo.version}`);
 
