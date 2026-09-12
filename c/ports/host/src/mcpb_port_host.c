@@ -20,6 +20,7 @@
 #  include <windows.h>
 #  include <bcrypt.h>
 typedef SOCKET sock_t;
+typedef int socklen_arg_t;     /* Winsock takes int where POSIX takes socklen_t */
 #  define SOCK_INVALID INVALID_SOCKET
 #  define sock_errno() WSAGetLastError()
 #  define SOCK_EINPROGRESS WSAEWOULDBLOCK
@@ -27,7 +28,8 @@ typedef SOCKET sock_t;
 #  define sock_close(s) closesocket(s)
 #else
 #  define _POSIX_C_SOURCE 200809L
-#  define _DEFAULT_SOURCE
+#  define _DEFAULT_SOURCE   /* getrandom, MSG_NOSIGNAL on glibc */
+#  define _DARWIN_C_SOURCE  /* arc4random_buf, SO_NOSIGPIPE on macOS */
 #  include <errno.h>
 #  include <fcntl.h>
 #  include <netdb.h>
@@ -47,6 +49,7 @@ typedef SOCKET sock_t;
 #    include <stdio.h>  /* /dev/urandom */
 #  endif
 typedef int sock_t;
+typedef socklen_t socklen_arg_t;
 #  define SOCK_INVALID (-1)
 #  define sock_errno() errno
 #  define SOCK_EINPROGRESS EINPROGRESS
@@ -176,7 +179,7 @@ static int h_open(void *ctx, const char *host, uint16_t port, int tls,
         }
 
         int ok = 0;
-        if (connect(s, ai->ai_addr, (int)ai->ai_addrlen) == 0)
+        if (connect(s, ai->ai_addr, (socklen_arg_t)ai->ai_addrlen) == 0)
         {
             ok = 1;
         }
@@ -190,13 +193,8 @@ static int h_open(void *ctx, const char *host, uint16_t port, int tls,
             else if (w > 0)
             {
                 int err = 0;
-#if defined(_WIN32)
-                int len = (int)sizeof(err);
+                socklen_arg_t len = (socklen_arg_t)sizeof(err);
                 getsockopt(s, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
-#else
-                socklen_t len = (socklen_t)sizeof(err);
-                getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len);
-#endif
                 if (err == 0)
                     ok = 1;
                 else
@@ -230,9 +228,10 @@ static int h_open(void *ctx, const char *host, uint16_t port, int tls,
          * next chunk and add a round trip per message. */
         int one = 1;
         (void)setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one,
-                         (int)sizeof(one));
+                         (socklen_arg_t)sizeof(one));
 #if defined(SO_NOSIGPIPE)
-        (void)setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, (int)sizeof(one));
+        (void)setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one,
+                         (socklen_arg_t)sizeof(one));
 #endif
 
         h->fd = (intptr_t)s;
