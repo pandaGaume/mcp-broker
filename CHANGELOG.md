@@ -18,6 +18,21 @@ repository; the changes it needed for this release are listed under
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **c** A new `c/` folder, the device side of the tunnel in C99. `libmcpb`
+  (moved from the CyanMycelium repository, now 0.2.0) gains the `_all` opt-in
+  (`aggregate`, sending `notifications/register` as the first frame after
+  every connection) and link events that carry the peer's refusal: the
+  WebSocket close code and reason (a broker `1008` names the mismatch or the
+  policy), and the HTTP status of a refused handshake. A host port for Linux,
+  macOS and Windows, a transport-only sample provider (`host-provider`), and a
+  roundtrip test that drives the Node broker: own slot, `_all`, broker kill
+  and restart. Not published anywhere; consumed from the repository. See
+  [`c/README.md`](c/README.md).
+
 ## [1.3.0] - 2026-09-02
 
 The theme of this release is **turning silent failures into named ones**. Nearly

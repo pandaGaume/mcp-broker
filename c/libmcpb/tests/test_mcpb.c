@@ -156,6 +156,33 @@ static void push_handshake_ok(fake_t *f)
     fake_push_str(f, resp);
 }
 
+/* Locates the first frame the client sent after its handshake request, and
+ * unmasks its payload into `out`. Returns the payload length, or -1 when
+ * nothing follows the handshake. */
+static int first_frame_after_handshake(const fake_t *f, uint8_t *opcode,
+                                       char *out, size_t cap)
+{
+    size_t i = 0;
+    while (i + 4u <= f->outbox_len && memcmp(f->outbox + i, "\r\n\r\n", 4) != 0)
+        i++;
+    if (i + 4u > f->outbox_len)
+        return -1;
+    i += 4u;
+    if (i >= f->outbox_len)
+        return -1;
+    const unsigned char *fr = f->outbox + i;
+    *opcode = (uint8_t)(fr[0] & 0x0Fu);
+    size_t len = fr[1] & 0x7Fu, h = 2;
+    if (len == 126u) { len = ((size_t)fr[2] << 8) | fr[3]; h = 4; }
+    const unsigned char *mask = fr + h;
+    if (len >= cap) return -1;
+    size_t k;
+    for (k = 0; k < len; k++)
+        out[k] = (char)(fr[h + 4u + k] ^ mask[k & 3u]);
+    out[len] = 0;
+    return (int)len;
+}
+
 /* Builds a SERVER frame (unmasked). */
 static size_t make_frame(unsigned char *out, int fin, uint8_t opcode,
                          const void *payload, size_t len)
@@ -788,6 +815,145 @@ int main(void)
         mcpb_provider_init(&pr, &p, &c);
         check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT,
               "no sink declared: no callback, no crash");
+    }
+
+    printf("== _all opt-in ==\n");
+    {
+        /* The register frame is the FIRST thing after the handshake: the
+         * broker inspects exactly one frame per socket for it. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        const char *out; size_t olen;
+        char payload[256]; uint8_t op = 0;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.aggregate = 1;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0); /* connects */
+        const int n = first_frame_after_handshake(&f, &op, payload, sizeof(payload));
+        check(n > 0 && op == 0x1, "with aggregate, a text frame follows the handshake");
+        check(n == (int)strlen(MCPB_REGISTER_FRAME) &&
+              strcmp(payload, MCPB_REGISTER_FRAME) == 0,
+              "and it is notifications/register {aggregate:true}");
+        check(pr.tx_messages == 0, "not counted as an application message");
+        check(mcpb_provider_is_connected(&pr), "the link is up");
+    }
+    {
+        /* Without it, nothing: a provider that does not ask stays on its own
+         * slot, and the broker must not see a frame it would route. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        const char *out; size_t olen;
+        char payload[256]; uint8_t op = 0;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0);
+        check(first_frame_after_handshake(&f, &op, payload, sizeof(payload)) == -1,
+              "without aggregate, nothing follows the handshake");
+    }
+    {
+        /* A register frame that cannot be sent is a failed attempt, not a
+         * connection: the link never served, so it is RETRY_FAILED and the
+         * socket is closed rather than left open in a half-registered state. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        const char *out; size_t olen;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.aggregate = 1;
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        /* Room for the handshake request but not for one more frame. */
+        f.outbox_len = sizeof(f.outbox) - 240u;
+        mcpb_provider_poll(&pr, &out, &olen, 0);
+        check(!mcpb_provider_is_connected(&pr) && f.closed,
+              "a register frame that cannot be sent closes the socket");
+        check(log.n == 1 && log.ev[0].type == MCPB_EVENT_RETRY_FAILED &&
+              log.ev[0].error == MCPB_ERR_IO,
+              "and is reported as a failed attempt, not a lost link");
+    }
+
+    printf("== the peer's reason travels with the event ==\n");
+    {
+        /* The broker closes with 1008 and a sentence naming the fix. A client
+         * that keeps only the code leaves its operator with "policy
+         * violation" and nothing else. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[256]; const char *out; size_t olen;
+        const char *why = "transport/path mismatch: this is the slot-scoped path";
+        unsigned char body[128];
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        body[0] = 0x03; body[1] = 0xF0; /* 1008 */
+        memcpy(body + 2, why, strlen(why));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        fake_push(&f, fr, make_frame(fr, 1, 0x8, body, 2 + strlen(why)));
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0);   /* connects */
+        check(log.ev[0].close_code == 0 && log.ev[0].http_status == 0 &&
+              log.ev[0].reason != NULL && log.ev[0].reason[0] == 0,
+              "CONNECTED carries no refusal");
+        mcpb_provider_poll(&pr, &out, &olen, 100); /* receives the Close */
+        check(log.n == 2 && log.ev[1].error == MCPB_ERR_CLOSED, "closed by the peer");
+        check(log.ev[1].close_code == 1008, "with its code");
+        check(strcmp(log.ev[1].reason, why) == 0, "and its reason, verbatim");
+    }
+    {
+        /* No payload at all: 1005 by convention, and an empty reason rather
+         * than a NULL the caller would have to guard before printing. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[256]; const char *out; size_t olen;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        fake_push(&f, fr, make_frame(fr, 1, 0x8, NULL, 0));
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0);
+        mcpb_provider_poll(&pr, &out, &olen, 100);
+        check(log.n == 2 && log.ev[1].close_code == 1005 &&
+              log.ev[1].reason != NULL && log.ev[1].reason[0] == 0,
+              "a bare Close reports 1005 and an empty reason");
+    }
+    {
+        /* A refused handshake: the HTTP status is the whole diagnosis, since
+         * the body is never read. 401 says authentication, not network. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[512];
+        const char *out; size_t olen;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        fake_push_str(&f, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0);
+        check(log.n == 1 && log.ev[0].type == MCPB_EVENT_RETRY_FAILED &&
+              log.ev[0].error == MCPB_ERR_HANDSHAKE,
+              "a non-101 answer is a handshake failure");
+        check(log.ev[0].http_status == 401, "and the event carries the HTTP status");
+        check(log.ev[0].close_code == 0 && log.ev[0].reason[0] == 0,
+              "with no websocket close, since none happened");
     }
 
     printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all pass");

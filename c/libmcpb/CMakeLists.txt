@@ -14,8 +14,10 @@ project(mcpb VERSION 0.1.0 LANGUAGES C)
 # The same warnings the library is developed under. -Wconversion is not
 # decoration here: this code shifts and masks its way through frame headers,
 # and a silent narrowing is exactly how a length field gets truncated.
-set(MCPB_WARNINGS
-    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
+if(NOT DEFINED MCPB_WARNINGS)
+    set(MCPB_WARNINGS
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
+endif()
 
 add_library(mcpb STATIC
     src/mcpb_common.c

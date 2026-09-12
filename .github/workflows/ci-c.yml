@@ -6,15 +6,18 @@ on:
         paths:
             - "c/**"
             - ".github/workflows/ci-c.yml"
+            # The roundtrip drives the Node broker: a change there must keep
+            # the C client passing too.
+            - "node/packages/broker/**"
     pull_request:
         branches: [main]
         paths:
             - "c/**"
             - ".github/workflows/ci-c.yml"
+            - "node/packages/broker/**"
 
-defaults:
-    run:
-        working-directory: c
+env:
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
     build:
@@ -24,6 +27,9 @@ jobs:
                 cc: [gcc, clang]
         env:
             CC: ${{ matrix.cc }}
+        defaults:
+            run:
+                working-directory: c
         steps:
             - uses: actions/checkout@v4
             # Warnings are errors here and nowhere else: the library is
@@ -39,4 +45,24 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
-            - run: make -C libmcpb test
+            - run: make -C c/libmcpb test
+
+    # The only test that crosses a real network: the C provider against the
+    # Node broker of this repository, through its own slot and through _all,
+    # then a broker kill and restart.
+    roundtrip:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20.x
+                  cache: "npm"
+                  cache-dependency-path: node/package-lock.json
+            - run: npm ci
+              working-directory: node
+            - run: npm run build
+              working-directory: node
+            - run: cmake -S c -B c/build -DCMAKE_C_FLAGS=-Werror
+            - run: cmake --build c/build
+            - run: node c/tests/roundtrip/run.mjs

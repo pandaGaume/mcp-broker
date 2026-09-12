@@ -105,6 +105,13 @@ static void _notify(mcpb_provider_t *p, mcpb_event_type_t type, int error,
     ev.window_ms = p->retry_window_ms;
     ev.attempts = p->attempts;
     ev.down_ms = down_ms;
+    /* Only with the error they explain. The websocket keeps a 101 after a
+     * good handshake and a stale close after a later I/O failure; neither is
+     * a refusal, and the event promises 0 and "" outside of one. */
+    const int closed = (error == MCPB_ERR_CLOSED);
+    ev.close_code = closed ? p->ws.close_code : 0u;
+    ev.http_status = (error == MCPB_ERR_HANDSHAKE) ? p->ws.http_status : 0;
+    ev.reason = closed ? p->ws.close_reason : "";
     p->cfg.on_event(p->cfg.event_user, &ev);
 }
 
@@ -164,6 +171,23 @@ static int _connect(mcpb_provider_t *p)
     {
         _drop(p, rc);
         return rc;
+    }
+
+    /* First frame on the socket, before the caller can send anything: the
+     * broker inspects exactly one frame for it. Not counted in tx_messages,
+     * which counts what the application sent. */
+    if (p->cfg.aggregate)
+    {
+        const int src = mcpb_ws_send_text(&p->ws, MCPB_REGISTER_FRAME,
+                                          sizeof(MCPB_REGISTER_FRAME) - 1u);
+        if (src != MCPB_OK)
+        {
+            /* Not CONNECTED yet, so _drop would not close the socket and
+             * would rightly report RETRY_FAILED: the link never served. */
+            mcpb_ws_close(&p->ws, 1000u);
+            _drop(p, src);
+            return src;
+        }
     }
 
     const uint32_t now = p->port->now_ms(p->port->ctx);

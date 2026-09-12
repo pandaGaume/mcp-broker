@@ -55,6 +55,7 @@ mcpb_provider_config_t cfg = {0};
 cfg.host = "broker.example.com";
 cfg.port = 3000;
 cfg.name = "MAC:ACA70405A4EC";   /* encoded as MAC%3AACA70405A4EC */
+cfg.aggregate = 1;               /* also join the _all aggregate slot */
 cfg.rx_buffer = rx;
 cfg.rx_capacity = sizeof(rx);
 
@@ -74,6 +75,17 @@ for (;;) {
 ```
 
 `mcpb_provider_init` opens nothing: the connection happens on the first `poll`, so a device booting without a network does not stall its startup on an unreachable broker.
+
+`aggregate` sends `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}` as the first frame after every connection, which is how a provider asks into the `_all` slot (opt-in, because `_all` is a content-confidentiality boundary). The broker then sends `initialize` at once; `poll` delivers it like any other request. Without the flag the provider is reachable on its own slot only.
+
+## What the broker expects of the device
+
+Two obligations, both broker defaults and both configurable there:
+
+- **Poll at least every 30 s** (`providerHeartbeatIntervalMs`). The broker pings every provider socket and terminates one that misses a full interval. The Pong is answered from inside `poll`, so a device busy elsewhere for longer than that is dropped as dead; it gets its slot back on the next `poll`, but every client request in between failed.
+- **Answer within 60 s** (`providerRequestTimeoutMs`). Past that the broker fails the request for the client and drops the late reply as unmatched. A tool that runs longer answers first and reports later, through a notification.
+
+In return a device that reboots gets its slot back at once: the broker pings the previous socket and hands the slot over when it does not answer, instead of holding it until the OS gives up on the half-open TCP connection.
 
 ## Recovery: a doubling window, a wait drawn inside it
 
@@ -117,13 +129,19 @@ static void on_link(void *user, const mcpb_event_t *e)
     case MCPB_EVENT_DISCONNECTED:
         /* The link WAS up. This is where the alarm belongs, and only
            here: e->error says why, e->next_retry_ms when the retry
-           will happen. */
+           will happen. e->close_code and e->reason carry the peer's
+           own account when it closed: the broker's 1008 comes with the
+           sentence naming the mismatch or the policy that refused. */
         alarm_raise(ALARM_BROKER_LINK, e->error);
+        log("%s (%u %s)", mcpb_strerror(e->error), e->close_code, e->reason);
         break;
     case MCPB_EVENT_RETRY_FAILED:
         /* Follow-up, not an incident: we were already offline.
            e->attempts carries the consecutive failures, which is what
-           an escalation should key on. */
+           an escalation should key on. e->http_status is set when the
+           server answered the handshake with a refusal: 401 or 403 is
+           authentication, 400 a path the broker rejects, 404 a wrong
+           prefix, 503 a broker not ready. */
         break;
     }
 }
@@ -133,6 +151,8 @@ cfg.event_user = &my_context;
 ```
 
 `DISCONNECTED` and `RETRY_FAILED` are separate on purpose: the first is an incident, the second is its follow-up. Merging them would raise an alarm on every attempt.
+
+`reason` is never NULL and is valid for the duration of the callback; copy it to keep it. Outside a refusal the three fields are 0, 0 and "".
 
 The sink is **called from the caller's own task**, inside `poll` or `send`, never from a thread the library created, since it creates none. In exchange, do not call any `mcpb_provider_*` function from the sink: the library is mid-transition. Set a flag and act in your own loop.
 
@@ -147,13 +167,17 @@ gcc -std=c99 -Wall -Wextra -Iinclude -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-83 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+98 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
 
 ## Known limits
 
 Client role only. No extensions (a server-imposed `permessage-deflate` fails the handshake rather than being ignored). No binary frames on receive, the broker only sends text. No HTTP redirect following: a 3xx is a refusal, because following one would dial a different host from the one that was logged.
+
+## Origin
+
+Written in the CyanMycelium repository (`libmcpb/`, last commit there `c76102c`, 2026-08-31) and moved to mcp-broker on 2026-09-12, where it now lives under `c/libmcpb`. The 0.2.0 changes (the `_all` opt-in, the refusal fields on events, the broker's obligations) were made here.
 
 ## Licence
 

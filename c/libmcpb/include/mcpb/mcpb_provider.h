@@ -15,6 +15,26 @@
  * The dedicated endpoint, not the multiplexed /providers one. That envelope
  * exists for a host fronting several providers; a device is one provider and
  * would be paying an encoding to name itself on every frame.
+ *
+ * Two obligations the broker puts on the device (its defaults, both
+ * configurable on the broker side):
+ *
+ *  - Call mcpb_provider_poll at least every providerHeartbeatIntervalMs
+ *    (30 s). The broker pings every provider socket and terminates one that
+ *    misses a full interval; the Pong is answered from inside poll, so a
+ *    device busy elsewhere for longer than that is dropped as dead. It gets
+ *    its slot back on the next poll, but every client request in between
+ *    failed.
+ *
+ *  - Answer a request within providerRequestTimeoutMs (60 s). Past that the
+ *    broker fails the request on the client's behalf and a late reply is
+ *    dropped as unmatched. A tool that runs longer must answer first and
+ *    report later, through a notification.
+ *
+ * In exchange, a device that reboots gets its slot back at once: the broker
+ * pings the previous socket and hands the slot over when it does not answer
+ * (providerTakeover "liveness"), instead of holding it until the OS gives up
+ * on the half-open TCP connection.
  */
 
 #include "mcpb.h"
@@ -26,6 +46,14 @@ extern "C" {
 #endif
 
 #define MCPB_PROVIDER_NAME_MAX 64
+
+/* The opt-in for the `_all` aggregate slot, sent as the FIRST frame after
+ * every (re)connection when `aggregate` is set. The broker inspects exactly
+ * one frame per socket for it, consumes it, and then opens an internal
+ * client that sends `initialize`: the poll after the connection receives that
+ * request like any other. (mcp-broker/docs/protocol.md, "Registration and
+ * the _all opt-in".) */
+#define MCPB_REGISTER_FRAME     "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/register\",\"params\":{\"aggregate\":true}}"
 
 /* Hard cap on the retry wait. retry_max_ms is clamped to this whatever the
  * caller asks for.
@@ -79,6 +107,20 @@ typedef struct
     uint32_t attempts;       /* consecutive failures; escalate on this */
     uint32_t down_ms;        /* CONNECTED: how long the link was missing.
                               * On the first connection, time since init. */
+
+    /* The peer's own account of a refusal, when there is one. That is where
+     * the broker says why: a 1008 comes with the sentence naming the
+     * transport/path mismatch or the policy that refused the slot, a 401 or
+     * 403 handshake says authentication. Log them next to `error`; a bare
+     * code leaves the operator guessing.
+     *
+     * close_code and reason are set with error == MCPB_ERR_CLOSED (1005 and
+     * "" when the peer sent none), http_status with MCPB_ERR_HANDSHAKE once
+     * the server answered. Otherwise 0 and "". `reason` is never NULL and is
+     * valid for the duration of the callback: copy it to keep it. */
+    uint16_t    close_code;
+    int         http_status;
+    const char *reason;
 } mcpb_event_t;
 
 /* Called from the caller's own task, inside mcpb_provider_poll or
@@ -97,6 +139,16 @@ typedef struct
     /* Slot name. URL-encoded by the library, so a qualified name like
      * "MAC:ACA70405A4EC" travels as MAC%3AACA70405A4EC. */
     const char *name;
+
+    /* Non-zero: ask to join the `_all` aggregate slot, by sending
+     * MCPB_REGISTER_FRAME first thing after each connection. Opt-in on the
+     * broker side too, because `_all` is a content-confidentiality boundary:
+     * a provider that does not ask stays reachable only on its own slot.
+     *
+     * The broker then sends `initialize` at once. Nothing to prepare here,
+     * poll delivers it, but a device that does not answer it is removed from
+     * `_all` and logged on the broker, with no retry until it reconnects. */
+    int aggregate;
 
     const char *extra_headers; /* authorization, etc. */
 
