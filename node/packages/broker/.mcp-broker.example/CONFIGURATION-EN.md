@@ -22,15 +22,25 @@ Basic reading rules:
 - Spaces used to align values do not change behavior.
 - Relative file paths are resolved from the `.mcp-broker/` directory.
 
+Each section below is named after the key it explains, not after a line number,
+so the guide stays correct when the example file grows.
+
+One thing to know before anything else: **the template ships with
+`auth.enabled: false`**. A fresh copy starts and answers every client, which is
+what you want while you are finding your way. The whole `auth` block is present
+as the reference for the day you turn it on. Read
+[`docs/authorization.md`](../../../../docs/authorization.md) before you do.
+
 ## The mental model
 
-The file answers five questions:
+The file answers six questions:
 
 1. Where does the broker listen?
 2. How are network connections encrypted?
-3. How does the broker identify clients and providers?
-4. What may each client do, and on which resources?
-5. Which local or packaged MCP servers should be loaded?
+3. Which browser pages, if any, may call it?
+4. How does the broker identify clients and providers?
+5. What may each client do, and on which resources?
+6. Which local or packaged MCP servers should be loaded?
 
 The `auth` block is the most security-sensitive part. Read it this way:
 
@@ -84,7 +94,7 @@ This separation is important:
 - Resources describe where it is allowed.
 - Subjects describe who receives the permission.
 
-## Lines 1 to 5: general settings
+## General settings
 
 ```json
 {
@@ -125,16 +135,68 @@ Logical name displayed by the broker introspection tools.
 
 - It helps distinguish multiple broker instances.
 - It has no effect on authorization.
+- **Library-only today.** The tunnel honors it, but the command-line broker has
+  no way to forward it yet, so setting it here changes nothing. Set it through
+  the programmatic API (`IWsTunnelOptions.brokerName`) if you need it now.
 
-## Lines 7 to 11: HTTP and WebSocket paths
+## Browser origins
+
+```json
+"allowedOrigins": ["https://app.factory.local", "https://mcp.factory.local"]
+```
+
+The list of web-page origins allowed to call this broker over HTTP. It is
+checked on `/<slot>/mcp`, `/<slot>/sse` and `/<slot>/messages`.
+
+Three rules worth memorizing, because each one surprises somebody:
+
+1. **Absent means closed.** With no `allowedOrigins`, every request carrying an
+   `Origin` header is refused with `403`. That is deliberate: without the check,
+   any page the user happens to have open could drive your broker.
+2. **A request with no `Origin` header always passes.** Claude Desktop, the MCP
+   Inspector and every server-side SDK send none, which is why the broker
+   appears to work perfectly until the first browser tries.
+3. **Being served by this broker exempts nothing.** A page loaded from the `www`
+   mount is still a browser origin and must be listed.
+
+Origins are compared verbatim, so the scheme and the port are part of the value:
+`https://app.factory.local` does not match `http://app.factory.local` or
+`https://app.factory.local:8443`, and a trailing slash never matches. This
+template sets `tls.cert`/`tls.key`, so the broker speaks HTTPS and the entries
+use `https://`. Drop the TLS block and they must become `http://...:3001`.
+
+A regular expression is accepted instead of a list when the origins are not
+known in advance:
+
+```json
+"allowedOrigins": { "pattern": "^https://[a-z0-9-]+\\.factory\\.local$" }
+```
+
+`MCP_BROKER_ALLOWED_ORIGINS` overrides the file with a comma-separated list. It
+cannot carry the pattern form, since a regular expression does not survive
+comma-splitting.
+
+## HTTP and WebSocket paths
 
 ```json
 "paths": {
-    "provider": "/provider",
-    "client": "/",
-    "mcp": "/mcp"
+    "provider":  "/provider",
+    "providers": "/providers",
+    "client":    "/",
+    "mcp":       "/mcp",
+    "sse":       "/sse",
+    "messages":  "/messages"
 }
 ```
+
+All six keys are honored, and each is also settable through an environment
+variable, which wins: `MCP_BROKER_PROVIDER_PATH`, `MCP_BROKER_PROVIDERS_PATH`,
+`MCP_BROKER_CLIENT_PATH`, `MCP_BROKER_MCP_PATH`, `MCP_BROKER_SSE_PATH`,
+`MCP_BROKER_MESSAGES_PATH`.
+
+Change one and you move the endpoint for everybody: the provider SDK, the
+clients, and the URLs printed in the startup banner. Leave them alone unless you
+have a reason.
 
 ### `paths.provider`
 
@@ -146,7 +208,34 @@ Example:
 wss://mcp.factory.local/provider/spoony-00452
 ```
 
-The provider requests the `spoony-00452` slot.
+The provider requests the `spoony-00452` slot. The socket carries plain
+JSON-RPC frames, one provider per socket. In
+`@cyanmycelium/mcp-broker-provider` this is `DirectTransport`.
+
+### `paths.providers`
+
+Exact WebSocket path (no slot appended) used by a provider that carries several
+slots over a single socket, wrapping each frame in an envelope that names the
+slot. In `@cyanmycelium/mcp-broker-provider` this is `MultiplexTransport`.
+
+```text
+wss://mcp.factory.local/providers
+```
+
+`paths.provider` and `paths.providers` are one letter apart and are **not
+interchangeable**: they differ by framing, not just by URL. Pointing a
+`MultiplexTransport` at `/provider/<name>`, or a `DirectTransport` at
+`/providers`, is the single most common integration failure. The broker now
+names the mismatch and refuses the socket rather than hanging, but the pairing
+is worth getting right the first time:
+
+| Endpoint            | Framing            | Transport            |
+|---------------------|--------------------|----------------------|
+| `/provider/<name>`  | plain JSON-RPC     | `DirectTransport`    |
+| `/providers`        | envelopes          | `MultiplexTransport` |
+
+`/providers/<name>` is neither, and is taken as a *client* connection on a slot
+literally named `providers/<name>`.
 
 ### `paths.client`
 
@@ -167,10 +256,84 @@ For the `spoony-00452` slot, the URL becomes:
 https://mcp.factory.local/spoony-00452/mcp
 ```
 
-The `providers`, `sse`, and `messages` paths are not overridden in this
-example, so the broker uses their default values.
+This is the transport to reach for. The two below it are the legacy pair.
 
-## Lines 13 to 16: TLS
+### `paths.sse`
+
+Suffix of the legacy SSE stream, opened with `GET`. The broker answers it with
+an `endpoint` event carrying the URL to post to.
+
+```text
+https://mcp.factory.local/spoony-00452/sse
+```
+
+### `paths.messages`
+
+Suffix the legacy SSE client `POST`s its JSON-RPC requests to, paired with the
+stream above.
+
+```text
+https://mcp.factory.local/spoony-00452/messages
+```
+
+Both legacy endpoints are subject to the same `allowedOrigins` check as
+`/<slot>/mcp`.
+
+## Provider liveness
+
+```json
+"providerHeartbeatIntervalMs": 30000,
+"providerRequestTimeoutMs": 60000,
+"providerTakeover": "liveness"
+```
+
+Three optional keys. The defaults shown are the built-in ones, so you can delete
+the block entirely; they are spelled out here because when a provider misbehaves
+these are what you tune.
+
+### `providerHeartbeatIntervalMs`
+
+How often the broker pings each connected provider socket. A provider that
+misses a full interval is disconnected and its slot freed. `0` disables the
+heartbeat. Also `MCP_BROKER_PROVIDER_HEARTBEAT_MS`.
+
+Without it, a socket whose peer vanished without closing (a killed browser tab,
+a slept laptop, a dropped VPN) stays open as far as the operating system is
+concerned for around two hours, during which the broker reports the slot as
+connected and refuses every reconnection attempt.
+
+Be honest about what it proves: a pong is answered by the peer's network stack,
+not by the page's JavaScript. It detects a dead process, machine or network
+path, not a provider that is connected and simply not answering. For that, see
+the next key.
+
+### `providerRequestTimeoutMs`
+
+How long the broker waits for a provider to answer one request before failing it
+with a JSON-RPC error naming the slot. `0` disables the deadline. Also
+`MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS`.
+
+Raise it if you host genuinely long-running tools. Lower it if you would rather
+see an error than a client that waits forever, which is the alternative: a
+browser tab throttled in the background is a connected provider that answers
+nothing.
+
+### `providerTakeover`
+
+What happens when a provider connects to a slot another socket already holds.
+
+- `"reject"`: the incumbent always keeps the slot.
+- `"liveness"` (default): the incumbent keeps it only while it answers the
+  heartbeat.
+- `"always"`: the newcomer wins, but only when provider authentication is
+  configured and it authenticated as the same principal as the incumbent.
+  Without provider authentication the broker falls back to `"liveness"` and says
+  so, because unconditional takeover would let anyone who can reach the URL
+  evict the real provider.
+
+Also `MCP_BROKER_PROVIDER_TAKEOVER`.
+
+## TLS
 
 ```json
 "tls": {
@@ -200,7 +363,7 @@ This key is secret. It must never be committed to the Git repository.
 The broker must be able to read both files. A mismatched certificate and key
 pair prevents HTTPS startup.
 
-## Lines 18 to 23: static web files
+## Static web files
 
 ```json
 "www": {
@@ -213,10 +376,24 @@ pair prevents HTTPS startup.
 
 ### `www.open`
 
-Controls whether the broker automatically opens a web browser.
+Controls whether the broker automatically opens a web browser at startup.
 
-- `false` is suitable for servers, containers, and headless environments.
-- `true` is convenient during local development.
+- `false` (or absent) is suitable for servers, containers, and headless
+  environments.
+- `true` opens the broker root, `https://localhost:3001/`.
+- A string opens a specific page: `"/app/index.html"`, or an absolute URL on
+  this broker's own origin.
+
+A URL on any other origin is refused with a message on stderr, and so is any
+other string: a value that reaches the platform's "open this" command unchecked
+can launch a local file or a registered application, and nothing about starting
+a broker requires visiting another host. Open it yourself instead.
+
+The browser opens only when a `www.mounts` entry actually covers the resolved
+path. If none does, the broker says which prefixes are mounted rather than
+launching a browser onto a `404`.
+
+`MCP_BROKER_OPEN` carries the same values (`"1"` for the root).
 
 ### `www.mounts`
 
@@ -238,11 +415,11 @@ This block does not automatically secure a web application. MCP routes are
 protected by `auth`, but a static web application must also be designed not to
 expose secrets.
 
-## Lines 25 to 35: enabling OAuth
+## Enabling OAuth
 
 ```json
 "auth": {
-    "enabled": true,
+    "enabled": false,
     "publicBaseUrl": "https://mcp.factory.local",
     "authorizationServers": [
         "https://identity.factory.local"
@@ -257,12 +434,22 @@ expose secrets.
 
 ### `auth.enabled`
 
-Enables OAuth authentication for MCP clients.
+Enables OAuth authentication for MCP clients. **This template ships it off.**
 
-- `true` requires a valid bearer token.
-- `false` preserves the historical unauthenticated mode.
+- `false` (the shipped value) preserves the historical unauthenticated mode:
+  every client reaches every slot. Use it on a trusted network, and while you
+  are getting the rest working.
+- `true` requires a valid bearer token on every client request. The rest of this
+  block then has to describe a real authorization server: with `enabled: true`
+  and the placeholder `identity.factory.local` values still in place, the broker
+  answers every client with a `401` whose challenge points at a host that does
+  not resolve, which is a confusing way to spend an afternoon.
 - A detailed policy is useful only when clients have an authenticated
   identity.
+
+Everything below this point (`roles`, `assignments`, `denies`, `slotResources`,
+`toolCapabilities`) is inert while `enabled` is `false`. It is kept in the
+template as a worked example, not because it is doing anything.
 
 ### `auth.publicBaseUrl`
 
@@ -348,7 +535,7 @@ To grant this access, add an assignment such as:
 The JWT must then contain both the `broker:admin` scope and the
 `broker-administrators` group.
 
-## Lines 36 to 40: converting JWT claims into subjects
+## Converting JWT claims into subjects
 
 ```json
 "subjectMapping": {
@@ -415,7 +602,7 @@ client:local-ai-assistant
 A single call may therefore have multiple identities at the same time, such as
 one user, two groups, and one client application.
 
-## Lines 41 to 64: roles and capabilities
+## Roles and capabilities
 
 A role answers only the question "what may be done?" It never contains a
 resource path.
@@ -488,7 +675,7 @@ Declaring a role does not grant it to anyone. The example file contains no
 assignment for `administrator`, so nobody becomes an administrator from this
 block alone.
 
-## Lines 65 to 78: assignments
+## Assignments
 
 An assignment expresses this sentence:
 
@@ -556,7 +743,7 @@ site, but it cannot call tools.
 
 Regular expressions are not supported.
 
-## Lines 79 to 89: explicit deny
+## Explicit deny
 
 ```json
 "denies": [
@@ -585,7 +772,7 @@ in the file.
 
 Use `"capabilities": ["*"]` to deny every capability on a specific resource.
 
-## Lines 90 to 93: technical names and stable resources
+## Technical names and stable resources
 
 ```json
 "slotResources": {
@@ -623,7 +810,7 @@ An undeclared slot normally becomes `/<slot-name>`. In an industrial
 environment, explicit mappings are preferable because they preserve stable
 identities.
 
-## Lines 94 to 99: global tool classification
+## Global tool classification
 
 ```json
 "toolCapabilities": {
@@ -650,7 +837,7 @@ If a tool is absent from every mapping, the broker uses the generic
 This fallback explains why the `maintenance` role also contains
 `mcp.tools.call`.
 
-## Lines 100 to 104: resource-specific tool classification
+## Resource-specific tool classification
 
 ```json
 "providerToolCapabilities": {
@@ -673,7 +860,7 @@ value. This duplication is intentionally educational. In a real deployment,
 this block is useful when the same tool name has a different risk level for a
 particular provider or area.
 
-## Lines 105 to 107: audit logging
+## Audit logging
 
 ```json
 "audit": {
@@ -690,16 +877,30 @@ Temporarily set it to `true` when learning the policy or diagnosing a problem.
 Audit records contain the decision and matching policy identifiers, but never
 the bearer token or provider secret.
 
-## Line 108: shared provider secret
+## Shared provider secret
 
 ```json
 "providerSecret": "change-me"
 ```
 
-This secret authenticates MCP servers connecting to `/provider/<slot>` or
-`/providers`.
+**Deliberately absent from the shipped template.** Add the key inside `auth` to
+turn provider authentication on.
 
-It is independent from client bearer tokens.
+This secret authenticates MCP servers connecting to `/provider/<slot>` or
+`/providers`. Every provider must then present it as `X-Provider-Token` or
+`Authorization: Bearer`, and one that does not is refused at the WebSocket
+handshake.
+
+It is independent from client bearer tokens, and in particular it is **not**
+governed by `auth.enabled`: set it and provider authentication is on, even with
+OAuth off. That is why the template does not ship it. Left in place with the
+placeholder value, it would refuse every provider on a broker the reader
+believes is running wide open.
+
+One consequence to plan around: the browser `WebSocket` constructor cannot set
+request headers, so a provider hosted in a web page cannot present the secret at
+all. With `providerSecret` set, browser-hosted providers are locked out; they
+need provider authentication off, or an authenticating reverse proxy in front.
 
 The `change-me` value is only a placeholder. In production:
 
@@ -712,14 +913,15 @@ The shared secret preserves historical compatibility and allows every resource
 path. To restrict each device to its own subtree, use a custom
 `IProviderAuthenticator` that returns `IProviderPrincipal.allowedResources`.
 
-## Lines 111 to 117: local MCP server started by the broker
+## Local MCP server started by the broker
 
 ```json
 "stdioUpstreams": [
     {
-        "name": "fs",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+        "name":      "fs",
+        "command":   "npx",
+        "args":      ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+        "aggregate": true
     }
 ]
 ```
@@ -747,11 +949,55 @@ Arguments passed to the program:
 Filesystem access is sensitive. Restrict `/data` to the smallest required
 directory.
 
-Add `"aggregate": true` if this provider should also appear in `_all`.
-Without this property, the stdio upstream remains available through its direct
-slot only.
+### `aggregate`
 
-## Lines 119 to 128: signed local MCP bundle
+`true` makes this provider part of the reserved `_all` slot, in addition to its
+own `/fs/mcp`. Without it the stdio upstream is reachable through its own slot
+only.
+
+Note the asymmetry: `stdioUpstreams` entries do **not** join `_all` by default,
+while `mcpServers` and `mcpbBundles` entries do. Set it explicitly either way
+and you never have to remember which is which.
+
+## Bridging an MCP host over stdio
+
+Not in `config.json`, but the reason most people set `aggregate` in the first
+place. A second file in this folder, `config.stdio-bridge.json`, adds one key:
+
+```json
+"stdioProvider": "_all"
+```
+
+With it, the broker also behaves as a stdio MCP server: it reads JSON-RPC from
+its standard input and writes answers to its standard output, bridging a host
+such as Claude Desktop to one slot. Point the host's config at that file:
+
+```json
+{
+    "command": "npx",
+    "args": ["-y", "@cyanmycelium/mcp-broker"],
+    "env": { "MCP_BROKER_CONFIG": "/abs/path/to/.mcp-broker/config.stdio-bridge.json" }
+}
+```
+
+Two things to get right.
+
+- **Pin it to `_all`, not to a real slot.** `_all` exists from startup and
+  answers the handshake itself, so the host connects even though no provider has
+  arrived yet, and it announces new tools as providers join. Pinned to a real
+  slot, the host starts before the provider does, gets "not connected" for its
+  very first message, and gives up. For a provider hosted in a browser page that
+  is guaranteed: the page cannot possibly be open before the host launches.
+  `_broker` also always answers, but it only ever offers the five introspection
+  tools. The broker warns at startup when `stdioProvider` names a slot it does
+  not host.
+- **Keep it in its own file.** With `stdioProvider` set, standard output belongs
+  to the JSON-RPC stream and every log line moves to standard error, so a broker
+  started that way in a terminal looks like it is doing nothing.
+
+`MCP_BROKER_STDIO_PROVIDER` sets the same thing from the environment.
+
+## Signed local MCP bundle
 
 ```json
 "mcpbBundles": [
@@ -839,17 +1085,22 @@ If Alice attempts `start_motor` on the critical furnace:
 
 ## Pre-deployment checklist
 
+- Set `auth.enabled` to `true`. The template ships it off so that a fresh copy
+  runs; leaving it off in production means every client reaches every slot.
 - Replace every `.local` domain with the real address.
 - Confirm that `publicBaseUrl` exactly matches the broker's public address.
 - Confirm that JWTs use this resource as their audience.
 - Verify the JWKS URL and expected issuer.
-- Never keep `change-me`.
+- If you add `providerSecret`, never keep `change-me`.
 - Never publish the private TLS key.
 - Never publish API keys from `userConfig`.
 - Use `127.0.0.1` instead of `0.0.0.0` when network access is unnecessary.
 - Test every role with a representative account.
 - Test denies against critical assets.
 - Confirm that `_all` does not reveal unauthorized providers.
+- List in `allowedOrigins` exactly the browser origins that need access, with
+  the right scheme and port, and no others. Remember that a page served by this
+  broker still counts as a browser origin.
 - Return `audit.logAllowed` to `false` after troubleshooting.
 - Restart the broker after each policy change because policies are loaded only
   once at startup.
@@ -857,5 +1108,10 @@ If Alice attempts `start_motor` on the critical furnace:
 ## Further reading
 
 - [Complete configuration reference](../docs/config.md)
-- [Broker OAuth guide](../../docs/authorization.md)
-- [Hierarchical authorization](../../docs/hierarchical-authorization.md)
+- [Broker OAuth guide](../../../../docs/authorization.md)
+- [Hierarchical authorization](../../../../docs/hierarchical-authorization.md)
+- [Endpoints and transports](../../../../docs/endpoints.md)
+
+Or ask the broker itself: the reserved `_broker` slot exposes a `broker_guide`
+tool (integration walkthroughs, written from the source) and a `broker_diagnose`
+tool (live state plus the problems it can prove, each with a fix).

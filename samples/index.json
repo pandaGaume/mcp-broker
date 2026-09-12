@@ -1,0 +1,157 @@
+{
+    "$comment": "Machine-readable index of the mcp-broker samples. Written for an agent scanning the repo: everything needed to choose a sample and run it is here, without opening the folders. Paths are relative to this file's directory.",
+
+    "package": "@cyanmycelium/mcp-broker",
+    "providerPackage": "@cyanmycelium/mcp-broker-provider",
+    "setup": {
+        "command": "cd samples && npm install",
+        "why": "Links this repo's broker and provider packages into samples/node_modules so every sample resolves them by their real published names. Fast and offline: the dependencies are file: links, nothing is fetched.",
+        "requires": "Node >= 20.11.0. Node 22 is what the samples are verified on; Node 20 has no global WebSocket, so any sample that opens a provider socket from Node needs --experimental-websocket or a ws polyfill assigned to globalThis.WebSocket."
+    },
+
+    "rules": {
+        "$comment": "The invariants every sample obeys, and every failure in the field so far came from breaking one of these.",
+        "transportPathPairing": "The provider URL and the transport class are one decision. /provider/<slot> carries plain JSON-RPC frames and pairs with DirectTransport. /providers carries {provider, payload} envelopes and pairs with MultiplexTransport. /providers/<slot> is NEITHER: it is accepted as a raw-WebSocket CLIENT of a slot with that literal name, and nothing ever answers.",
+        "handlersBeforeConnect": "Assign onMessage (or hand the transport to an MCP server) BEFORE calling connect(). The broker runs initialize against a newly aggregated provider immediately and drops it from _all silently if the handshake times out.",
+        "releaseTheSlot": "Call transport.close() when the provider goes away. In a browser that means window.addEventListener('pagehide', ...). Without it a reload is refused by its own predecessor with WebSocket close code 1008.",
+        "originCheckAppliesToServedPages": "A page served by the broker's own www mount is still a browser origin. /<slot>/mcp, /<slot>/sse and /<slot>/messages compare the Origin header against allowedOrigins verbatim; with no list configured, no browser origin passes. A request with no Origin header (Node, MCP Inspector, any server-side SDK) always passes.",
+        "stdioBridgeTargetsAll": "MCP_BROKER_STDIO_PROVIDER must name _all, not a real slot. The bridge gates every frame including initialize on the slot being occupied, so a host that starts before the provider fails permanently. _all exists from startup, answers initialize itself, and pushes tools/list_changed as providers join.",
+        "neverRebuildAggregatedToolNames": "Through _all a tool is named <slot>-<tool>, but the broker caps long names, hashes the overflow and appends -2 to break ties. Read the name from tools/list; never build it by concatenation.",
+        "aggregateIsOptIn": "A WebSocket provider or a stdioUpstreams entry joins _all only when it asks (transport option { aggregate: true }, or \"aggregate\": true in the config). mcpServers (remote upstreams) and mcpbBundles join by default and opt out with \"aggregate\": false."
+    },
+
+    "reservedSlots": {
+        "_broker": "Introspection and self-documentation. Always present, needs no provider. Tools: broker_info, providers_list, provider_status, broker_guide (integration docs as Markdown), broker_diagnose (live problem report with symptom, evidence and fix).",
+        "_all": "Live aggregate of every opted-in provider. Present from startup, answers initialize itself, prefixes tool names with <slot>-, pushes notifications/tools/list_changed as providers come and go. The right target for an MCP host."
+    },
+
+    "samples": [
+        {
+            "id": "browser-provider",
+            "title": "Publish an MCP server from a browser page",
+            "useThisWhen": "A tool must run in a browser (DOM, canvas, WebGPU, a user session) and be callable by an MCP client.",
+            "importance": "start-here",
+            "dir": "browser-provider",
+            "run": "cd samples && npm install && npm run browser-provider",
+            "alsoRun": ["npm run browser-provider:client", "npm run browser-provider:client -- --all", "node browser-provider/run.mjs --no-open --port 4000"],
+            "expect": "A browser opens at http://localhost:3000/. Press Publish, then the initialize + tools/list + tools/call button; the page log ends with 'round trip complete'. The headless client prints 'round trip complete: Node -> broker -> browser page -> broker -> Node.'",
+            "files": [
+                { "path": "browser-provider/public/app.js", "role": "THE INTEGRATION. Four blocks marked WRONG CHOICE, each naming the wrong line and the failure it produces." },
+                { "path": "browser-provider/public/index.html", "role": "Page shell; holds the import map that stands in for a bundler." },
+                { "path": "browser-provider/public/mcp-server.js", "role": "A hand-written MCP server that knows nothing about the broker." },
+                { "path": "browser-provider/run.mjs", "role": "Starts the broker with the four env vars this topology needs and prints the equivalent shell command." },
+                { "path": "browser-provider/prepare.mjs", "role": "Copies the provider SDK's ESM build into public/vendor/." },
+                { "path": "browser-provider/client.mjs", "role": "The client half, headless." }
+            ],
+            "teaches": ["transportPathPairing", "handlersBeforeConnect", "releaseTheSlot", "originCheckAppliesToServedPages", "aggregateIsOptIn", "neverRebuildAggregatedToolNames"],
+            "apis": ["DirectTransport", "IDirectTransportOptions.aggregate"],
+            "env": {
+                "MCP_BROKER_PROTOCOL": "http",
+                "MCP_BROKER_PORT": "3000",
+                "MCP_BROKER_WWW_DIR": "<abs path to browser-provider/public>",
+                "MCP_BROKER_ALLOWED_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000"
+            },
+            "verified": true
+        },
+        {
+            "id": "host-config",
+            "title": "Wire the broker into an MCP host's config file",
+            "useThisWhen": "Configuring Claude Desktop, Claude Code, Cursor or VS Code to see the broker's slots.",
+            "dir": "host-config",
+            "run": "cd samples && npm install && node host-config/check.mjs",
+            "alsoRun": ["node host-config/check.mjs --port 3210"],
+            "expect": "Six numbered steps ending in 'BOTH ENTRIES WORK AGAINST ONE PROCESS.' Step 2 completes initialize with no provider connected; step 5 shows tools/list_changed arriving when a provider joins late.",
+            "files": [
+                { "path": "host-config/claude_desktop_config.json", "role": "The two-entry pattern, with the reasoning in a _readme array. Copy the mcpServers block." },
+                { "path": "host-config/claude_desktop_config.with-auth.json", "role": "Same with client OAuth and provider authentication, and the difference between them spelled out." },
+                { "path": "host-config/.mcp-broker/config.json", "role": "The broker config entry 1 points at. Runnable." },
+                { "path": "host-config/.mcp-broker/config.auth.json", "role": "Authorization template. NOT runnable: references certs and an authorization server that do not exist here." },
+                { "path": "host-config/check.mjs", "role": "Drives both entries exactly as a host would, over stdio and over HTTP, against one process." }
+            ],
+            "teaches": ["stdioBridgeTargetsAll", "neverRebuildAggregatedToolNames", "aggregateIsOptIn"],
+            "keyPoint": "Entry 1 spawns the broker and bridges it over stdio, pinned to _all. Entry 2 is a URL to the listener entry 1 already opened, and must NEVER be a second command entry: that starts a second broker, which either dies with EADDRINUSE or comes up sharing no slots with the first and silently missing every tool.",
+            "verified": true
+        },
+        {
+            "id": "provider-lifecycle",
+            "title": "Connect, refuse, release, restart, reconnect: the life of a provider socket",
+            "useThisWhen": "A slot is stuck, you saw close code 1008, or you are choosing between DirectTransport and MultiplexTransport.",
+            "dir": "provider-lifecycle",
+            "run": "cd samples && npm install && node provider-lifecycle/run.mjs",
+            "alsoRun": ["node provider-lifecycle/run.mjs --port 4000", "node provider-lifecycle/run.mjs --heartbeat 2000"],
+            "expect": "Six narrated steps, about 30 seconds, with the broker's own log interleaved. Step 3 reproduces the 1008 refusal on purpose and prints the broker's full reason string. Step 5 kills and restarts the broker and shows that MultiplexTransport retries while DirectTransport does not.",
+            "files": [
+                { "path": "provider-lifecycle/run.mjs", "role": "The scenario. Both providers built inline so every callback is visible." },
+                { "path": "provider-lifecycle/broker-control.mjs", "role": "Starts and SIGKILLs a broker process, so the restart is a crash rather than a polite shutdown." }
+            ],
+            "teaches": ["releaseTheSlot", "transportPathPairing"],
+            "keyPoints": [
+                "onOpen fires BEFORE the 1008 refusal: the WebSocket handshake succeeds and the refusal is a close frame that follows. Never treat onOpen as proof you own the slot.",
+                "The NEWCOMER is refused and the incumbent is untouched, so the page you are looking at is the one that breaks while the page that is gone keeps the slot.",
+                "DirectTransport never reconnects. MultiplexTransport does, with backoff, and re-announces its slots.",
+                "Under Node the automatic retry stops after the first attempt that lands while the broker is down, because Node's built-in WebSocket fires error but never close for a connection that failed to open. Browsers fire close(1006) and the loop keeps going. The sample says so and recovers by hand."
+            ],
+            "settings": {
+                "MCP_BROKER_PROVIDER_HEARTBEAT_MS": "30000 default, 0 disables. Reaps a socket that stopped answering pings.",
+                "MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS": "60000 default, 0 disables. Deadline for one provider answer.",
+                "MCP_BROKER_PROVIDER_TAKEOVER": "reject | liveness | always, default liveness. 'always' is honoured only when provider authentication is configured."
+            },
+            "verified": true
+        },
+        {
+            "id": "app-host",
+            "title": "The broker as your application's HTTP host",
+            "useThisWhen": "Shipping a web app whose live state should be callable over MCP, and you want one process, one origin and no start-order dependency.",
+            "dir": "app-host",
+            "run": "cd samples && npm install && node app-host/run.mjs",
+            "alsoRun": ["node app-host/run.mjs --no-open", "node app-host/client.mjs", "node app-host/client.mjs --all", "node app-host/client.mjs --diagnose"],
+            "expect": "The banner lists TWO static mounts and the browser opens at http://localhost:3400/app/, not at /. The page publishes itself on load with no button. client.mjs increments a counter five times and the number on the page changes while you watch.",
+            "files": [
+                { "path": "app-host/.mcp-broker/config.json", "role": "THE SAMPLE. Two www.mounts entries, www.open on a sub-path, the origin list, the liveness defaults written out." },
+                { "path": "app-host/public/app/app.js", "role": "The application, which is also the provider. Publishes on load." },
+                { "path": "app-host/public/site/index.html", "role": "Mounted at /, a different directory from the app." },
+                { "path": "app-host/run.mjs", "role": "Sets exactly one env var, MCP_BROKER_CONFIG, and lets the file carry the rest." },
+                { "path": "app-host/client.mjs", "role": "Drives the open page over Streamable HTTP." }
+            ],
+            "teaches": ["originCheckAppliesToServedPages", "releaseTheSlot", "aggregateIsOptIn"],
+            "keyPoints": [
+                "MCP_BROKER_WWW_DIR mounts exactly one directory at /. There is no env var for an arbitrary set of mounts; www.mounts in the config file is the only way.",
+                "Paths inside a config file resolve against the config file's directory; env-var paths resolve against the working directory.",
+                "www.open accepts true, an absolute path, or an absolute URL on this broker's own origin. A foreign origin is refused. Keep the trailing slash on a sub-path, or the page's relative script URLs resolve one level too high."
+            ],
+            "verified": true
+        },
+        {
+            "id": "embedded",
+            "title": "Embed the broker as a library with WsTunnelBuilder",
+            "useThisWhen": "Your application is already a Node process and should BE the broker rather than spawn one.",
+            "dir": "embedded",
+            "run": "cd samples && npm install && node embedded/server.mjs --once",
+            "alsoRun": ["node embedded/server.mjs", "node embedded/server.mjs --port 4000"],
+            "expect": "The broker starts in-process, an in-process provider is registered on 'job-runner' with no socket, it is called through openInternalClient and then over HTTP, and getProvidersInfo() lists four slots. Ends with 'stopped cleanly'.",
+            "files": [{ "path": "embedded/server.mjs", "role": "The whole sample: builder, loopback transport, internal client, shutdown." }],
+            "apis": ["WsTunnelBuilder", "WsTunnel.start", "WsTunnel.stop", "WsTunnel.registerLoopbackProvider", "WsTunnel.openInternalClient", "WsTunnel.getProvidersInfo"],
+            "keyPoints": [
+                "await start() and catch it: it rejects on a listen failure and the rejection carries the whole diagnosis, including err.cause with the original errno.",
+                "await stop(): it closes sockets, clears the heartbeat and request-timeout timers and closes the listener.",
+                "In a loopback transport both halves face the BROKER: the broker calls send() with a client's request, and you call onMessage() with your server's answer. The broker assigns onMessage and onClose.",
+                "A loopback provider CANNOT join _all: registerLoopbackProvider takes no aggregate argument and the aggregate server is not public. To reach _all, publish over a DirectTransport to your own 127.0.0.1 address with { aggregate: true }."
+            ],
+            "verified": true
+        }
+    ],
+
+    "sharedLibrary": [
+        { "path": "lib/mcp-http-client.mjs", "role": "A minimal MCP client over Streamable HTTP in ~90 lines of fetch. Isomorphic: the same file runs in Node and, copied into a page's vendor directory, in a browser." },
+        { "path": "lib/node-provider.mjs", "role": "publishProvider({ brokerUrl, slot, aggregate, tools, call }): a provider in Node in one call, obeying the same three rules as the browser sample." },
+        { "path": "lib/broker-bin.mjs", "role": "Resolves the broker's CLI inside node_modules and spawns it with a given environment." },
+        { "path": "lib/vendor.mjs", "role": "Copies the provider package's ESM build into a directory the broker serves, so a page can import it with no bundler." }
+    ],
+
+    "diagnosis": {
+        "$comment": "Before reading any of these samples, ask the broker itself.",
+        "guide": "Call the broker_guide tool on the _broker slot, or read broker://guide/index, broker://guide/publish-provider, broker://guide/connect-client, broker://guide/host-config, broker://guide/deploy, broker://guide/troubleshooting.",
+        "diagnose": "Call the broker_diagnose tool on the _broker slot. It returns live per-slot state plus proven problems, each with a symptom, the evidence behind it and a fix.",
+        "howToReachIt": "POST an initialize frame to http://<broker>/_broker/mcp with Accept: application/json, text/event-stream, then reuse the Mcp-Session-Id it returns. samples/lib/mcp-http-client.mjs does exactly that, and samples/app-host/client.mjs --diagnose is a one-line example."
+    }
+}

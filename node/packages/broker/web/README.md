@@ -1,7 +1,10 @@
-# `node/web/`: broker instance UI
+# `node/packages/broker/web/`: broker instance UI
 
 Static web UI served by the broker. No build step: plain ES modules and CSS,
 served as-is over the broker's static mount.
+
+The folder is listed in the package's `files`, so it also ships to npm and is
+available at `node_modules/@cyanmycelium/mcp-broker/web`.
 
 ## Layout
 
@@ -78,6 +81,7 @@ Point a `www` mount at this folder from a broker config:
 
 ```json
 {
+    "allowedOrigins": ["http://localhost:3000"],
     "www": {
         "open": true,
         "mounts": [{ "urlPrefix": "/", "dir": "../web" }]
@@ -85,10 +89,33 @@ Point a `www` mount at this folder from a broker config:
 }
 ```
 
-(`../web` is resolved against the config file's directory, e.g. `.mcp-broker/`.)
+Mount `dir` values are resolved against the **config file's** directory. With
+the config at `node/packages/broker/.mcp-broker/config.json`, `../web` resolves
+to `node/packages/broker/web`, this folder.
 
-Or with an environment variable, from the `node/` directory:
+`allowedOrigins` is not decoration. `broker-explorer` and `oauth-lab` are MCP
+clients, and a page reaching `/<slot>/mcp`, `/<slot>/sse` or `/<slot>/messages`
+is origin-checked even when the broker itself served that page. Omit the key and
+those demos get `403 invalid_origin`. `provider-tunnel` uses only WebSockets,
+which are not origin-checked, so it works either way.
+
+Or with environment variables. From a checkout, in `node/packages/broker`:
 
 ```sh
-MCP_BROKER_WWW_DIR=web npm start
+MCP_BROKER_WWW_DIR=web MCP_BROKER_ALLOWED_ORIGINS=http://localhost:3000 npm start
 ```
+
+The workspace root (`node/`) has **no** `start` script; run this from the broker
+package, or use `node dist/bin.js` after `npm run build`.
+
+From an installed package, with no checkout at all:
+
+```sh
+MCP_BROKER_WWW_DIR=node_modules/@cyanmycelium/mcp-broker/web \
+MCP_BROKER_ALLOWED_ORIGINS=http://localhost:3000 \
+MCP_BROKER_OPEN=1 \
+npx @cyanmycelium/mcp-broker
+```
+
+`MCP_BROKER_WWW_DIR` is resolved against the working directory, not against a
+config file.

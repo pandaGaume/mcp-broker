@@ -7,5 +7,5 @@
  * ends of the tunnel share one definition of the wire format.
  */
 export * from "./protocol/index";
-export { DirectTransport } from "./direct.transport";
-export { MultiplexTransport } from "./multiplex.transport";
+export { DirectTransport, type IDirectTransportOptions } from "./direct.transport";
+export { MultiplexTransport, type IMultiplexTransportOptions } from "./multiplex.transport";

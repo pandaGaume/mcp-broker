@@ -11,6 +11,18 @@
             "properties": {
                 "name": "The exact provider slot name. Case-sensitive. Use providers_list to discover valid values."
             }
+        },
+        "broker_guide": {
+            "description": "Read the broker's own integration documentation. This is the authoritative source for how to wire anything to this broker, and it is more current than any README you may find in the repository. Call it with no argument first: the index tells you which of the five pages you actually need (publish-provider, connect-client, host-config, deploy, troubleshooting). If you are about to connect a provider, read publish-provider before writing code, the transport and the URL path are a matched pair and getting it wrong fails silently.",
+            "properties": {
+                "topic": "The page to read: index, publish-provider, connect-client, host-config, deploy, or troubleshooting. Omit it to get the index, which is short and says which page to read next."
+            }
+        },
+        "broker_diagnose": {
+            "description": "Ask the broker what is wrong with itself. Returns the live state plus a list of detected problems, each with the symptom a caller sees, the evidence that proves it, and a fix you can apply without reading anything else. Call this before you start investigating by hand: it already correlates the transport kind with the pending-request count, which is what identifies the silent transport/path mismatch, and it checks the aggregate, the stdio bridge target, the origin allow-list and leaked sessions.",
+            "properties": {
+                "slot": "Narrow the report to one provider slot, case-sensitive. Omit it to diagnose the whole broker, which is what you want unless you already know which slot is misbehaving."
+            }
         }
     }
 }

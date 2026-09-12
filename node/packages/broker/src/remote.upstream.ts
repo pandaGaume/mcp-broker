@@ -44,7 +44,10 @@ export class RemoteUpstream implements IUpstream {
 
     connect(): void {
         const kind = this._config.transport ?? detectTransport(this._config.url);
-        const transport = createRemoteTransport(this._config.url, kind, this._config.headers ?? {});
+        // The slot name is handed to the transport so its own diagnostics (a lost
+        // server stream, a non-JSON body) name the upstream an operator configured
+        // rather than a bare URL.
+        const transport = createRemoteTransport(this._config.url, kind, this._config.headers ?? {}, this.name);
         this._transport = transport;
 
         transport.onOpen = (): void => {

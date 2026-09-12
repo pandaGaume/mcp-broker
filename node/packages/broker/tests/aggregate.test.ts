@@ -179,7 +179,11 @@ describe("aggregate _all slot", () => {
             if (brokerTools.length < 3) await delay(50);
         }
 
-        expect(brokerTools.sort()).toEqual(["_broker-broker_info", "_broker-provider_status", "_broker-providers_list"]);
+        // Containment, not equality: the `_broker` slot grows tools over time
+        // (the guide and the self-diagnosis joined the three introspection
+        // ones), and this test is about the aggregate prefixing them, not
+        // about how many there are.
+        expect(brokerTools).toEqual(expect.arrayContaining(["_broker-broker_info", "_broker-provider_status", "_broker-providers_list"]));
 
         // The aggregated call routes back into the broker's own server.
         const call = await client.request("tools/call", { name: "_broker-broker_info", arguments: {} });

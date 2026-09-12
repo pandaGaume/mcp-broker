@@ -11,6 +11,18 @@
             "properties": {
                 "name": "Le nom exact de l'emplacement provider. Sensible à la casse. Utilise providers_list pour découvrir les valeurs valides."
             }
+        },
+        "broker_guide": {
+            "description": "Lis la documentation d'intégration que le broker embarque. C'est la source qui fait autorité pour brancher quoi que ce soit sur ce broker, et elle est plus à jour que n'importe quel README du dépôt. Appelle-le d'abord sans argument : l'index te dit laquelle des cinq pages te concerne (publish-provider, connect-client, host-config, deploy, troubleshooting). Si tu t'apprêtes à connecter un provider, lis publish-provider avant d'écrire du code : le transport et le chemin URL forment une paire, et se tromper échoue silencieusement.",
+            "properties": {
+                "topic": "La page à lire : index, publish-provider, connect-client, host-config, deploy ou troubleshooting. Omets-le pour obtenir l'index, qui est court et indique quelle page lire ensuite."
+            }
+        },
+        "broker_diagnose": {
+            "description": "Demande au broker ce qui ne va pas chez lui. Retourne l'état en direct plus la liste des problèmes détectés, chacun avec le symptôme vu par un appelant, les preuves qui l'établissent et un correctif applicable sans rien lire d'autre. Appelle-le avant d'enquêter à la main : il corrèle déjà le type de transport avec le nombre de requêtes en attente, ce qui identifie l'incompatibilité silencieuse transport/chemin, et il vérifie l'agrégat, la cible du pont stdio, la liste d'origines autorisées et les sessions fuyantes.",
+            "properties": {
+                "slot": "Restreint le rapport à un seul emplacement de provider, sensible à la casse. Omets-le pour diagnostiquer tout le broker, ce que tu veux tant que tu ne sais pas déjà quel emplacement pose problème."
+            }
         }
     }
 }

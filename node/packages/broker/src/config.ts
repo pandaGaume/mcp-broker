@@ -64,8 +64,60 @@ export interface IBrokerConfig {
     /** Bridge stdin/stdout for a Claude-Desktop-style client. Maps to `MCP_BROKER_STDIO_PROVIDER`. */
     stdioProvider?: string;
 
-    /** Logical broker name reported by `broker_info`. */
+    /**
+     * Logical broker name reported by `broker_info`.
+     *
+     * **Library-only today.** `WsTunnel` honors it
+     * (`IWsTunnelOptions.brokerName`), but `WsTunnelBuilder` has no
+     * `withBrokerName()`, so the CLI cannot forward it and setting it in
+     * `config.json` has no effect. Set it through the programmatic API until
+     * the setter exists.
+     */
     brokerName?: string;
+
+    /**
+     * How often (ms) the broker pings each connected provider socket to check
+     * it is still there. `0` disables the heartbeat. Maps to
+     * `MCP_BROKER_PROVIDER_HEARTBEAT_MS`.
+     *
+     * A provider that misses a full interval is terminated and its slot freed,
+     * which is what stops a half-open socket (a killed browser tab, a slept
+     * laptop, a dropped VPN) from holding a slot for the ~2 hours the OS takes
+     * to give up on the TCP connection, refusing every reconnect meanwhile.
+     *
+     * @default 30000
+     */
+    providerHeartbeatIntervalMs?: number;
+
+    /**
+     * How long (ms) the broker waits for a provider to answer one request
+     * before failing it with a JSON-RPC error naming the slot. `0` disables the
+     * deadline. Maps to `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS`.
+     *
+     * Raise it if you host genuinely long-running tools; without it a provider
+     * that stays connected and never answers (a throttled background browser
+     * tab is the ordinary case) leaves the caller waiting forever.
+     *
+     * @default 60000
+     */
+    providerRequestTimeoutMs?: number;
+
+    /**
+     * What happens when a provider connects to a slot another socket already
+     * holds. Maps to `MCP_BROKER_PROVIDER_TAKEOVER`.
+     *
+     * - `"reject"`: the incumbent always keeps the slot.
+     * - `"liveness"` (default): the incumbent keeps it only while it answers
+     *   the heartbeat.
+     * - `"always"`: the newcomer wins, but only when provider authentication is
+     *   configured and it authenticated as the same principal as the incumbent.
+     *   Without provider auth the broker falls back to `"liveness"` and says so,
+     *   because unconditional takeover would let anyone who can reach the URL
+     *   evict the real provider.
+     *
+     * @default "liveness"
+     */
+    providerTakeover?: "reject" | "liveness" | "always";
 
     /**
      * Browser origins allowed to reach `/<slot>/mcp`.
@@ -101,13 +153,29 @@ export interface IBrokerConfig {
      */
     auth?: IBrokerAuthConfig;
 
-    /** URL paths (override the defaults). */
+    /**
+     * URL paths (override the defaults). Every key is also settable through an
+     * environment variable, which wins.
+     *
+     * Changing one moves an endpoint for **every** peer: a provider SDK, a
+     * client, and the startup banner all have to agree. The two provider paths
+     * are not interchangeable, they carry different framing:
+     * `provider` is a prefix (`<provider>/<slot>`) speaking plain JSON-RPC
+     * frames (`DirectTransport`), `providers` is matched exactly and speaks
+     * multiplex envelopes (`MultiplexTransport`).
+     */
     paths?: {
+        /** Prefix for one-slot-per-socket provider connections. Maps to `MCP_BROKER_PROVIDER_PATH`. @default "/provider" */
         provider?: string;
+        /** Exact path for multiplexed provider connections. Maps to `MCP_BROKER_PROVIDERS_PATH`. @default "/providers" */
         providers?: string;
+        /** Prefix raw-WebSocket clients connect to. Maps to `MCP_BROKER_CLIENT_PATH`. @default "/" */
         client?: string;
+        /** Per-slot suffix for the Streamable HTTP transport. Maps to `MCP_BROKER_MCP_PATH`. @default "/mcp" */
         mcp?: string;
+        /** Per-slot suffix for the legacy SSE stream (GET). Maps to `MCP_BROKER_SSE_PATH`. @default "/sse" */
         sse?: string;
+        /** Per-slot suffix for legacy SSE JSON-RPC posts. Maps to `MCP_BROKER_MESSAGES_PATH`. @default "/messages" */
         messages?: string;
     };
 
@@ -122,8 +190,22 @@ export interface IBrokerConfig {
      * always take precedence.
      */
     www?: {
-        /** Auto-launch the default browser at the root URL on startup. */
-        open?: boolean;
+        /**
+         * Auto-launch the default browser on startup. Maps to `MCP_BROKER_OPEN`.
+         *
+         * - `false` / absent / `""` / `"0"`: do not open anything.
+         * - `true` / `"1"`: open the broker root, `<scheme>://localhost:<port>/`.
+         * - a path (`"/app/index.html"`): open that page on this broker.
+         * - an absolute URL on this broker's own origin: opened as given.
+         *
+         * A URL on any other origin is refused with a message, and so is any
+         * other string. See {@link resolveOpenTarget} for why.
+         *
+         * The browser opens only when a static mount actually covers the
+         * resolved path; otherwise the broker says which mounts exist instead of
+         * launching a browser onto a 404.
+         */
+        open?: boolean | string;
         /** URL-prefix → directory mappings. Longest-prefix match wins. */
         mounts?: Array<{
             urlPrefix: string;
@@ -253,6 +335,111 @@ export function loadBrokerConfig(path?: string): ILoadedBrokerConfig {
         process.stderr.write(`[mcp-broker] Failed to parse config file at ${sourcePath}: ${(err as Error).message}\n`);
         return { config: {}, baseDir: cwd, sourcePath: null };
     }
+}
+
+/**
+ * Outcome of {@link resolveOpenTarget}. Exactly one of the three states holds:
+ *
+ * - `{ url: null, path: null }` and no `error`: nothing should be opened.
+ * - `{ url, path }`: open `url`; `path` is what a static mount has to cover.
+ * - `{ url: null, path: null, error }`: the value was refused, `error` is a
+ *   sentence to print verbatim that names both the fault and the fix.
+ */
+export interface IOpenTargetResolution {
+    /** Absolute URL to hand to the platform opener, or `null` to open nothing. */
+    url: string | null;
+    /** Path portion of {@link url} (always starts with `/`), or `null`. */
+    path: string | null;
+    /** Set when the raw value was refused. Human-readable, names the fix. */
+    error?: string;
+}
+
+/**
+ * Resolves `www.open` / `MCP_BROKER_OPEN` into an absolute URL to launch.
+ *
+ * Lives here rather than in `bin.ts` because `bin.ts` starts a server the
+ * moment it is imported, so nothing in it can be unit-tested.
+ *
+ * Accepted forms (leading/trailing whitespace is trimmed):
+ *
+ * | `raw`                      | result                                    |
+ * |----------------------------|-------------------------------------------|
+ * | `undefined`, `false`, `""`, `"0"`, `"false"` | open nothing            |
+ * | `true`, `"1"`, `"true"`    | `<baseUrl>/`                              |
+ * | `"/app/"`, `"/index.html"` | resolved against `baseUrl`                |
+ * | `"http://localhost:3000/x"`| passed through when the origin is `baseUrl`'s |
+ * | anything else              | refused, with `error` explaining why       |
+ *
+ * Two refusals are security-load-bearing rather than pedantic:
+ *
+ * - **A foreign origin is refused.** Auto-opening is a startup convenience, and
+ *   a config file (or an env var inherited from a parent process) that can make
+ *   the broker launch a browser at an arbitrary site is a phishing primitive
+ *   with no upside: nothing about starting a broker requires visiting another
+ *   host. Open it yourself, or point `open` at a page this broker serves.
+ * - **`//host/path` is refused** even though it starts with `/`: it is a
+ *   protocol-relative URL, so `new URL("//evil.example/x", base)` resolves to
+ *   `evil.example` and a naive "starts with a slash so it is local" test lets
+ *   it through.
+ *
+ * Anything that is neither is refused rather than forwarded, because the
+ * platform opener performs no validation of its own: a typo'd relative path is
+ * handed to the shell and can launch a local file or a registered application.
+ *
+ * @param raw     The configured value (`config.www.open`) or the raw env string.
+ * @param baseUrl Origin this broker is reachable at, e.g. `http://localhost:3000`.
+ */
+export function resolveOpenTarget(raw: boolean | string | undefined | null, baseUrl: string): IOpenTargetResolution {
+    const nothing: IOpenTargetResolution = { url: null, path: null };
+
+    if (raw === undefined || raw === null || raw === false) return nothing;
+    if (raw === true) return resolveOpenTarget("/", baseUrl);
+
+    const value = String(raw).trim();
+    if (value === "" || value === "0" || value === "false") return nothing;
+    if (value === "1" || value === "true") return resolveOpenTarget("/", baseUrl);
+
+    const refuse = (why: string): IOpenTargetResolution => ({
+        url: null,
+        path: null,
+        error:
+            `${why} Set it to true (or "1") for the broker root, to a path on this broker such as "/app/index.html", ` +
+            `or to an absolute URL on ${baseUrl}. Leave it out to open nothing.`,
+    });
+
+    // Protocol-relative: starts with a slash but resolves off-origin.
+    if (value.startsWith("//")) {
+        return refuse(`Refusing to open "${value}": a value starting with "//" is a protocol-relative URL and points at another host, not at this broker.`);
+    }
+
+    // Only two spellings are accepted, so that a bare word (almost always a
+    // typo) is reported rather than silently resolved onto the broker root.
+    const isAbsolutePath = value.startsWith("/");
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);
+    if (!isAbsolutePath && !hasScheme) {
+        return refuse(`Refusing to open "${value}": it is neither a path starting with "/" nor an absolute http(s) URL.`);
+    }
+
+    let resolved: URL;
+    try {
+        resolved = new URL(value, baseUrl);
+    } catch {
+        return refuse(`Refusing to open "${value}": it is not a valid path or URL.`);
+    }
+
+    if (hasScheme) {
+        // Decide on the parsed form, not on the raw string: `localhost:3000/x`
+        // looks like a host but parses with the scheme `localhost:`.
+        if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
+            return refuse(`Refusing to open "${value}": only http and https URLs are opened, and "${resolved.protocol}" is neither.`);
+        }
+        const base = new URL(baseUrl);
+        if (resolved.origin !== base.origin) {
+            return refuse(`Refusing to open "${value}": it points at ${resolved.origin}, which is not this broker (${base.origin}).`);
+        }
+    }
+
+    return { url: resolved.toString(), path: resolved.pathname };
 }
 
 /** @deprecated Use {@link IBrokerAuthConfig}. */

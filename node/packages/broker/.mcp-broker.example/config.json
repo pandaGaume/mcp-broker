@@ -4,11 +4,20 @@
     "locale": "fr",
     "brokerName": "broker-eu-west",
 
+    "allowedOrigins": ["https://app.factory.local", "https://mcp.factory.local"],
+
     "paths": {
-        "provider": "/provider",
-        "client":   "/",
-        "mcp":      "/mcp"
+        "provider":  "/provider",
+        "providers": "/providers",
+        "client":    "/",
+        "mcp":       "/mcp",
+        "sse":       "/sse",
+        "messages":  "/messages"
     },
+
+    "providerHeartbeatIntervalMs": 30000,
+    "providerRequestTimeoutMs": 60000,
+    "providerTakeover": "liveness",
 
     "tls": {
         "cert": "certs/cert.pem",
@@ -23,7 +32,7 @@
     },
 
     "auth": {
-        "enabled": true,
+        "enabled": false,
         "publicBaseUrl": "https://mcp.factory.local",
         "authorizationServers": [
             "https://identity.factory.local"
@@ -104,15 +113,15 @@
         },
         "audit": {
             "logAllowed": false
-        },
-        "providerSecret": "change-me"
+        }
     },
 
     "stdioUpstreams": [
         {
-            "name":    "fs",
-            "command": "npx",
-            "args":    ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+            "name":      "fs",
+            "command":   "npx",
+            "args":      ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+            "aggregate": true
         }
     ],
 

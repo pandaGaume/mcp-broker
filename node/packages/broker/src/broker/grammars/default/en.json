@@ -11,6 +11,18 @@
             "properties": {
                 "name": "Exact provider name (case-sensitive)."
             }
+        },
+        "broker_guide": {
+            "description": "Returns the broker's own integration documentation as Markdown: how to publish a provider, how to reach a slot as a client, how to configure an MCP host, how to deploy, and a symptom-to-fix troubleshooting page. Read this instead of looking for a README. Call with no argument for the index.",
+            "properties": {
+                "topic": "Which page to return: index, publish-provider, connect-client, host-config, deploy, or troubleshooting. Omit for the index, which says which page to read next."
+            }
+        },
+        "broker_diagnose": {
+            "description": "Returns the broker's live state plus the problems it can detect about its own wiring, each with the symptom, the evidence, and a concrete fix. Call this first when something does not work: it correlates the counters for you and names the cause.",
+            "properties": {
+                "slot": "Narrow the report to one provider slot (case-sensitive). Omit to diagnose the whole broker."
+            }
         }
     },
     "resources": {
@@ -21,12 +33,40 @@
         "broker://providers": {
             "name": "Broker providers",
             "description": "List of every provider slot known to the broker, including disconnected ones."
+        },
+        "broker://guide/index": {
+            "name": "Guide index",
+            "description": "What the broker is, the transport/path pairing rule that costs the most time to get wrong, and which guide page to read next."
+        },
+        "broker://guide/publish-provider": {
+            "name": "Guide: publish a provider",
+            "description": "Put an MCP server into a slot: the transport/path pairing rule, the wire formats, the aggregate opt-in, the connect/register/release lifecycle, and the browser limits."
+        },
+        "broker://guide/connect-client": {
+            "name": "Guide: connect a client",
+            "description": "Reach a slot as a client: the four client transports, the reserved _broker and _all slots, the origin check, authorization, and every error code you can receive."
+        },
+        "broker://guide/host-config": {
+            "name": "Guide: MCP host configuration",
+            "description": "Wire Claude Desktop or another stdio MCP host: why the bridge must target _all, the config recipe, the one-broker-per-port rule, and the anonymous-principal caveat."
+        },
+        "broker://guide/deploy": {
+            "name": "Guide: deploy the broker",
+            "description": "Embed the broker as a library or run it as a process: startup ordering, topologies, the config file, static files, TLS, and shutdown."
+        },
+        "broker://guide/troubleshooting": {
+            "name": "Guide: troubleshooting",
+            "description": "Symptom to cause to fix, starting with the silent failures that produce no log line anywhere: hung clients, wedged slots, stale tool lists, blocked origins."
         }
     },
     "templates": {
         "broker://providers/{name}": {
             "name": "Broker provider",
             "description": "Snapshot of one specific provider slot, addressed by its name."
+        },
+        "broker://guide/{topic}": {
+            "name": "Broker guide page",
+            "description": "One page of the broker's integration documentation, addressed by topic: index, publish-provider, connect-client, host-config, deploy, or troubleshooting."
         }
     }
 }

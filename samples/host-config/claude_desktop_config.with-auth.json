@@ -1,0 +1,36 @@
+{
+    "_readme": [
+        "The same two-entry pattern with authorization on. TWO INDEPENDENT MECHANISMS are at play and confusing them is the usual mistake:",
+        "",
+        "1. CLIENT authorization (OAuth 2.1, MCP_BROKER_AUTH_ENABLED). Protects the client HTTP surface: /<slot>/mcp, /<slot>/sse, /<slot>/messages. Entry 2 is on that surface, so it needs a token. Entry 1 is NOT: it speaks over the pipe the host already owns, so it is authorized by the fact that the host spawned it. The broker does not ask a stdio bridge for a bearer token, and there is nowhere to put one.",
+        "",
+        "2. PROVIDER authentication (MCP_BROKER_PROVIDER_SECRET). Protects the two WebSocket provider endpoints, so a stranger cannot occupy a slot. Independent of item 1: turning one on does not turn the other on. It is checked from the X-Provider-Token or Authorization header of the WebSocket upgrade request.",
+        "",
+        "A BROWSER-HOSTED PROVIDER CANNOT USE MECHANISM 2 AT ALL. The browser WebSocket constructor cannot set request headers, and the broker accepts the secret only from a header. Setting MCP_BROKER_PROVIDER_SECRET locks every browser page out of every slot. Use it when all your providers are server-side; put browser providers behind network isolation or client OAuth instead.",
+        "",
+        "The Authorization header on entry 2 below is a STATIC token, which is what most hosts can express. A real deployment normally uses the host's own OAuth flow against MCP_BROKER_PUBLIC_BASE_URL instead; the broker publishes the protected-resource metadata that flow needs at /.well-known/oauth-protected-resource.",
+        "",
+        "auth.enabled additionally requires publicBaseUrl, jwks, and at least one authorization server (or issuer). Missing any of them, the broker exits 1 at startup and says which. See .mcp-broker/config.auth.json next to this file."
+    ],
+
+    "mcpServers": {
+        "broker": {
+            "command": "npx",
+            "args": ["-y", "@cyanmycelium/mcp-broker"],
+            "env": {
+                "MCP_BROKER_CONFIG": "/ABSOLUTE/PATH/TO/mcp-broker/samples/host-config/.mcp-broker/config.auth.json",
+                "MCP_BROKER_STDIO_PROVIDER": "_all",
+
+                "MCP_BROKER_PROVIDER_SECRET": "replace-me-with-a-real-secret-and-keep-it-out-of-git"
+            }
+        },
+
+        "scene-editor": {
+            "type": "http",
+            "url": "https://mcp.example.com/scene-editor/mcp",
+            "headers": {
+                "Authorization": "Bearer ${SCENE_EDITOR_TOKEN}"
+            }
+        }
+    }
+}

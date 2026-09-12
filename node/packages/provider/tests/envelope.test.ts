@@ -5,6 +5,7 @@ import {
     encodeEnvelopeMessage,
     encodeErrorEnvelope,
     encodeRegisterEnvelope,
+    encodeRegisterFrame,
     envelopeFrame,
     TUNNEL_REGISTER_METHOD,
     TunnelErrorCodes,
@@ -64,6 +65,34 @@ describe("registration", () => {
 
     it("carries no id, so a peer that ignores it owes no response", () => {
         expect(encodeRegisterEnvelope("scene-1")).not.toContain('"id"');
+    });
+
+    it("stays byte-identical when no options are passed, which brokers already pin", () => {
+        expect(encodeRegisterEnvelope("scene-1")).toBe('{"provider":"scene-1","payload":{"jsonrpc":"2.0","method":"notifications/register"}}');
+        expect(encodeRegisterEnvelope("scene-1", {})).toBe(encodeRegisterEnvelope("scene-1"));
+    });
+
+    it("carries the aggregate opt-in as params when asked", () => {
+        expect(decodeEnvelope(encodeRegisterEnvelope("scene-1", { aggregate: true }))?.payload).toEqual({
+            jsonrpc: "2.0",
+            method: TUNNEL_REGISTER_METHOD,
+            params: { aggregate: true },
+        });
+    });
+
+    it("keeps an explicit opt-out explicit, rather than dropping it", () => {
+        expect(decodeEnvelope(encodeRegisterEnvelope("scene-1", { aggregate: false }))?.payload).toEqual({
+            jsonrpc: "2.0",
+            method: TUNNEL_REGISTER_METHOD,
+            params: { aggregate: false },
+        });
+    });
+
+    it("also builds the bare frame the slot-scoped path uses, which has no envelope", () => {
+        // The slot name is absent on purpose: on `/provider/<name>` the broker
+        // takes it from the URL at connect time, before any frame exists.
+        expect(encodeRegisterFrame()).toBe('{"jsonrpc":"2.0","method":"notifications/register"}');
+        expect(encodeRegisterFrame({ aggregate: true })).toBe('{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}');
     });
 });
 

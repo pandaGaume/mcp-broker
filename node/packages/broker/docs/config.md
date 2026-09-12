@@ -8,8 +8,16 @@
 3. **Built-in defaults**
 
 Env vars always win over file values. The file is the static baseline you ship
-with the broker; env vars are the deploy-specific overrides. Arrays (`www.mounts`,
-`stdioUpstreams`) are file-only: no env-var equivalent.
+with the broker; env vars are the deploy-specific overrides. Arrays
+(`www.mounts`, `stdioUpstreams`, `mcpServers`, `mcpbBundles`) are file-only: no
+env-var equivalent.
+
+Three keys are **library-only**: `brokerName` is honored by `IWsTunnelOptions`
+but `WsTunnelBuilder` has no `withBrokerName()`, so the CLI cannot forward it;
+`enableBrokerProvider` and `enableAggregateProvider` are `IWsTunnelOptions`
+fields and not config-file keys at all. Call `broker_info` on the `_broker` slot
+to read what a running broker actually resolved, rather than assuming the file
+won.
 
 ---
 
@@ -124,18 +132,15 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
 
 > Pre-0.4 broker used to pre-merge `default:<locale>` into every
 > `<ua>:<locale>` at boot, because `mcp-core` could only look up a single
-> grammar key per session. As of mcp-core@0.3.0, the server walks a
-> candidate chain (e.g. `claude:fr@v2 → claude:fr → default:fr@v2 → default:fr → default:en`)
-> and merges every matching layer (behavior / adapter / static / store),
-> so the broker no longer needs that pre-merge step and gained the
-> version dimension naturally.
-
-> Pre-0.4 broker used to pre-merge `default:<locale>` into every
-> `<ua>:<locale>` at boot, because `mcp-core` could only look up a single
-> grammar key per session. As of mcp-core@0.3.0, the server walks a
-> candidate chain (`claude:fr-CA → claude:fr → default:fr-CA → default:fr
-> → default:en`) and merges every matching layer (behavior / adapter /
-> static / store), so the broker no longer needs that pre-merge step.
+> grammar key per session. As of mcp-core@0.3.0, the server walks a candidate
+> chain and merges every matching layer (behavior / adapter / static / store),
+> so the broker no longer needs that pre-merge step and gained the version
+> dimension naturally. The chain narrows across four dimensions (version,
+> locale region, locale, user agent), most specific first, ending at the
+> configured last-resort key (`default:en`). Which dimensions are narrowed, and
+> in what order, is set by the resolver's `narrowing` option, so a chain such as
+> `claude:fr-CA@v2 → claude:fr-CA → claude:fr → default:fr-CA → default:fr → default:en`
+> is one instance of the shape rather than a fixed sequence.
 
 ---
 
@@ -147,8 +152,13 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
     "host": "0.0.0.0",
     "protocol": "https",
     "locale": "fr",
-    "brokerName": "broker-eu-west",
     "stdioProvider": null,
+
+    "allowedOrigins": ["https://localhost:3001", "http://localhost:5173"],
+
+    "providerHeartbeatIntervalMs": 30000,
+    "providerRequestTimeoutMs": 60000,
+    "providerTakeover": "liveness",
 
     "paths": {
         "provider":  "/provider",
@@ -176,7 +186,8 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
         {
             "name":    "fs",
             "command": "npx",
-            "args":    ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+            "args":    ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+            "aggregate": true
         },
         {
             "name":    "git",
@@ -184,6 +195,14 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
             "args":    ["mcp-server-git", "--repository", "/data/repo"],
             "env":     { "GIT_AUTHOR_NAME": "broker" }
         }
+    ],
+
+    "mcpServers": [
+        { "name": "geo", "url": "https://geo.example.com/mcp" }
+    ],
+
+    "mcpbBundles": [
+        { "name": "plant-tools", "path": "bundles/plant-tools.mcpb", "publicKey": "keys/vendor.pem" }
     ]
 }
 ```
@@ -191,6 +210,12 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
 `certs/cert.pem` → resolves to `.mcp-broker/certs/cert.pem`.
 `www` (in `mounts`) → resolves to `.mcp-broker/www/`.
 `../shared/extras` → resolves to `<your-project>/shared/extras/`.
+
+In the example above, `fs` is in `_all` because it says so, `git` is not
+(`stdioUpstreams` defaults to excluded), and `geo` and `plant-tools` are in
+because `mcpServers` and `mcpbBundles` default to included. `brokerName` is
+deliberately absent: it is a valid key that the CLI cannot forward, so setting
+it here would look functional and do nothing.
 
 ---
 
@@ -204,13 +229,31 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
 | `host` | `string` | `0.0.0.0` | `MCP_BROKER_HOST` | Bind interface |
 | `protocol` | `"http" \| "https"` | auto | `MCP_BROKER_PROTOCOL` | `auto` enables TLS when `tls.cert` + `tls.key` are set |
 | `locale` | `string` | `en` | `MCP_BROKER_LOCALE` | BCP-47 tag (`fr`, `fr-CA`, `zh-CN`, ...) |
-| `brokerName` | `string` | package name | (none) | Logical name in `broker_info` output |
-| `stdioProvider` | `string` | (unset) | `MCP_BROKER_STDIO_PROVIDER` | Bridge stdin/stdout to this provider |
-| `allowedOrigins` | `string[]` or `{ pattern, flags? }` | (unset) | `MCP_BROKER_ALLOWED_ORIGINS` | Browser origins allowed on `/<slot>/mcp`, see below |
+| `brokerName` | `string` | package name | (none) | Logical name in `broker_info` output. **Library-only**, see below |
+| `stdioProvider` | `string` | (unset) | `MCP_BROKER_STDIO_PROVIDER` | Bridge stdin/stdout to this slot. Use `_all`, see below |
+| `allowedOrigins` | `string[]` or `{ pattern, flags? }` | (unset) | `MCP_BROKER_ALLOWED_ORIGINS` | Browser origins allowed on the HTTP client endpoints, see below |
+| `providerHeartbeatIntervalMs` | `number` | `30000` | `MCP_BROKER_PROVIDER_HEARTBEAT_MS` | ws-level ping interval on provider sockets. `0` disables |
+| `providerRequestTimeoutMs` | `number` | `60000` | `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS` | Deadline for one provider request. `0` disables |
+| `providerTakeover` | `"reject" \| "liveness" \| "always"` | `"liveness"` | `MCP_BROKER_PROVIDER_TAKEOVER` | What happens when a second provider claims an occupied slot |
+
+### `brokerName` is library-only
+
+The key is valid, and `WsTunnel` honors `IWsTunnelOptions.brokerName`. But
+`WsTunnelBuilder` has no `withBrokerName()`, so `bin.ts` has nothing to forward
+it through: setting it in `config.json` changes nothing observable. Set it
+through the programmatic options if you need it, and check the result with
+`broker_info`.
 
 ### `allowedOrigins`
 
-Which browser origins may reach `/<slot>/mcp`.
+Which browser origins may reach the HTTP client endpoints: `/<slot>/mcp`,
+`/<slot>/sse` and `/<slot>/messages`.
+
+Scope, precisely. The check covers those three. It does **not** cover WebSocket
+upgrades, so neither a raw-WS client (`ws://<host>/<slot>`) nor either provider
+endpoint is origin-validated, and `allowedOrigins` is not a substitute for
+authentication. Until this release the legacy SSE pair was not covered either;
+see the changelog's Security section.
 
 The MCP specification requires servers to validate the `Origin` header: without
 it, any web page loaded in a browser that can reach the broker is able to drive
@@ -248,16 +291,92 @@ for a decision that needs more than the string:
 builder.withAllowedOrigins((origin) => origin.endsWith(".example.com"));
 ```
 
+**A static mount does not exempt the origin it serves.** A page the broker
+itself serves at `http://localhost:3000/` sends
+`Origin: http://localhost:3000` like any other page, and is refused with `403`
+until that exact string is listed. This is the single most common surprise with
+this key. The 403 body echoes the refused origin and names the env var, so read
+it rather than guessing.
+
+The comparison is verbatim: scheme, host and port must all match as the browser
+sends them, with no trailing slash. A broker running with TLS is reached at
+`https://`, so `http://` entries match nothing.
+
+### `providerHeartbeatIntervalMs`, `providerTakeover`, `providerRequestTimeoutMs`
+
+Three keys covering the two ways a provider stops being useful without closing
+its socket.
+
+**`providerHeartbeatIntervalMs`** (default `30000`, `0` disables) pings every
+connected provider socket. A socket that misses a full interval is terminated
+and its slot freed. Without it, a half-open socket (a hard-killed browser tab, a
+slept laptop, a dropped VPN) holds the slot until the OS TCP keepalive gives up,
+which is roughly two hours, refusing every reconnection with close code `1008`
+meanwhile.
+
+An RFC 6455 pong is answered by the peer's network stack. It proves the
+*process* is alive, not that its JavaScript thread is serving. That second case
+is what the request deadline covers.
+
+**`providerTakeover`** (default `"liveness"`) decides what happens when a
+provider connects to a slot another socket already holds:
+
+| value | behavior |
+|---|---|
+| `"reject"` | the incumbent always keeps the slot |
+| `"liveness"` | the incumbent keeps it only while it answers the heartbeat; a socket known dead is terminated and the newcomer admitted |
+| `"always"` | the newcomer wins, **but only** when provider authentication is configured and it authenticated as the same principal as the incumbent |
+
+With provider auth unconfigured (the default), `"always"` would let anyone who
+can open the provider URL evict the real provider, so the broker logs that it is
+falling back to `"liveness"` and does so. With the heartbeat disabled there is
+no liveness evidence, so `"liveness"` behaves like `"reject"`.
+
+**`providerRequestTimeoutMs`** (default `60000`, `0` disables) fails a request
+the provider never answered with
+`-32000 Provider "<name>" did not respond within <ms>ms`, addressed to the
+caller's own id, plus one log line naming the usual causes. Raise it if you host
+genuinely long-running tools. The counter-argument to a deadline is those tools;
+the argument for one is that a hang with no diagnostic is strictly worse than a
+nameable error, and this is a knob.
+
 ### `paths` (URL routing)
 
-| Field | Default | Env var |
-|---|---|---|
-| `paths.provider` | `/provider` | `MCP_BROKER_PROVIDER_PATH` |
-| `paths.providers` | `/providers` | (none) |
-| `paths.client` | `/` | `MCP_BROKER_CLIENT_PATH` |
-| `paths.mcp` | `/mcp` | `MCP_BROKER_MCP_PATH` |
-| `paths.sse` | `/sse` | (none) |
-| `paths.messages` | `/messages` | (none) |
+Resolution is `env var → config file → default` for all six.
+
+| Field | Default | Env var | Notes |
+|---|---|---|---|
+| `paths.provider` | `/provider` | `MCP_BROKER_PROVIDER_PATH` | **Prefix**; the encoded slot name is appended. Plain JSON-RPC frames, `DirectTransport` |
+| `paths.providers` | `/providers` | `MCP_BROKER_PROVIDERS_PATH` | **Exact match**. Envelope frames, `MultiplexTransport` |
+| `paths.client` | `/` | `MCP_BROKER_CLIENT_PATH` | Prefix for raw WS clients |
+| `paths.mcp` | `/mcp` | `MCP_BROKER_MCP_PATH` | Suffix appended to `/<slot>` |
+| `paths.sse` | `/sse` | `MCP_BROKER_SSE_PATH` | Suffix appended to `/<slot>` |
+| `paths.messages` | `/messages` | `MCP_BROKER_MESSAGES_PATH` | Suffix appended to `/<slot>` |
+
+The two provider paths are **not interchangeable**: they carry different
+framing, and the broker chooses which framing to speak on a socket from the URL
+that socket connected to, never from what arrives on it.
+
+```
+  DirectTransport      <->  <paths.provider>/<slot>   plain JSON-RPC frames
+  MultiplexTransport   <->  <paths.providers>         envelopes { provider, payload }
+```
+
+`<paths.providers>/<name>` is neither. `/providers` is matched exactly and
+`/provider/` as a prefix, so a URL starting with `/providers/` matches neither
+branch and falls through to the client side, where it is accepted as an MCP
+*client* on a slot literally named `providers/<name>`. Nothing errors, and the
+slot you meant stays empty.
+
+> **Changed in 1.3.0.** `paths.providers` and `paths.messages` were previously
+> read by nothing, and `paths.sse` reached only the startup banner, so setting
+> it advertised an endpoint that returned 404. All six now take effect. A
+> deployment that sets a non-default value for any of the three has been running
+> on the default, and those endpoints will move.
+
+Moving a path moves it for **every** peer at once: providers, clients and the
+banner all have to agree. `broker_info` on the `_broker` slot reports the
+effective values.
 
 ### `tls`
 
@@ -275,11 +394,48 @@ when both are present, or `protocol: "https"` to force TLS.
 
 | Field | Type | Env var | Notes |
 |---|---|---|---|
-| `www.open` | `boolean` | `MCP_BROKER_OPEN=1` | Auto-launch browser at the root URL on startup (requires a mount at `/`) |
+| `www.open` | `boolean \| string` | `MCP_BROKER_OPEN` | Auto-launch a browser on startup, see below |
 | `www.mounts` | `Array<{urlPrefix, dir}>` | (file-only) | URL-prefix → directory mappings. Longest-prefix match wins |
 
-JSON-RPC routes always take precedence over static routes. Mounts whose
-target directory does not exist on disk are skipped with a warning.
+JSON-RPC routes always take precedence over static routes, so a slot named like
+a directory shadows that directory. Directory requests fall back to
+`index.html`, and a path escaping its mount is refused with `403`. Mounts whose
+target directory does not exist on disk are skipped with a warning rather than
+failing startup.
+
+**Serving a page does not exempt its origin.** A page at
+`http://localhost:3000/` that reaches `/<slot>/mcp` is refused with `403` until
+`http://localhost:3000` is listed in `allowedOrigins`.
+
+#### `www.open`
+
+| Value | Effect |
+|---|---|
+| absent, `false`, `""`, `"0"`, `"false"` | open nothing |
+| `true`, `"1"`, `"true"` | open the broker root, `<scheme>://localhost:<port>/` |
+| `"/app/index.html"` | open that path on this broker |
+| `"https://localhost:3000/app"` | an absolute URL **on this broker's own origin**, opened as given |
+| anything else | refused, with a message naming the accepted forms |
+
+Refused deliberately: a URL on a foreign origin, a protocol-relative
+`//host/path` (which `new URL` resolves off-origin and a naive "starts with `/`"
+test would let through), a non-`http(s)` scheme, and any bare word. `open` does
+no validation of its own and hands a non-URL string to the platform opener, so a
+config file or an inherited environment variable able to launch a browser at an
+arbitrary target is a phishing primitive with no upside for a startup
+convenience. Refusal is always a warning, never fatal.
+
+The browser opens only when a static mount **actually covers the resolved
+path**, checked against the mounts that were registered, from all three sources
+(`www.mounts`, `MCP_BROKER_WWW_DIR`, `MCP_BROKER_BUNDLE_DIR`). When nothing
+covers it the broker says which prefixes exist instead of launching a browser
+onto a 404. A browser that fails to spawn (a headless box, a container) warns
+and leaves the broker running.
+
+> **Changed in 1.3.0.** `www.open` was a boolean that collapsed any value to
+> `"1"`, always opened `/`, and required a mount at `/` specifically, so
+> `MCP_BROKER_BUNDLE_DIR` plus `MCP_BROKER_OPEN=1` silently opened nothing. The
+> pure resolver behind it is exported as `resolveOpenTarget(raw, baseUrl)`.
 
 #### Env-var shortcuts (additive)
 
@@ -291,9 +447,37 @@ They are **additive** with `www.mounts`, both contribute mount entries.
 | `MCP_BROKER_WWW_DIR=./public` | `www.mounts: [{ "urlPrefix": "/", "dir": "./public" }]` |
 | `MCP_BROKER_BUNDLE_DIR=./bundle` | `www.mounts: [{ "urlPrefix": "/bundle", "dir": "./bundle" }]` |
 
+## Upstream providers: three ways to fill a slot without code
+
+The broker can populate slots itself, so a deployment needs no provider process
+of its own. All three keys are file-only.
+
+| Key | The broker | Slot `transport` reads | In `_all` by default |
+|---|---|---|---|
+| `stdioUpstreams` | spawns a child process | `stdio` | **no** |
+| `mcpServers` | dials out to a URL | `stdio` | **yes** |
+| `mcpbBundles` | verifies, unpacks and spawns a signed `.mcpb` | `stdio` | **yes** |
+
+Two things to read twice.
+
+First, **the `aggregate` default is not uniform.** A `stdioUpstreams` entry is
+excluded from `_all` unless you write `"aggregate": true`; `mcpServers` and
+`mcpbBundles` entries are included unless you write `"aggregate": false`. The
+asymmetry is deliberate for now (inverting the `stdioUpstreams` default would
+silently expose a local server an operator kept out by omission), and it is the
+kind of thing that produces an `_all` slot showing only some of what you
+expected.
+
+Second, **all three report `transport: "stdio"`** in `providers_list` and
+`provider_status`, because the broker tracks them in one upstream registry. A
+`transport: "stdio"` slot is therefore not necessarily a child process; it may
+be a remote URL.
+
 ### `stdioUpstreams`
 
-File-only. Each entry spawns a child process at broker start.
+Each entry spawns a child process at broker start and talks newline-delimited
+JSON-RPC to it, exactly like the MCP stdio transport. Its stderr is inherited,
+so it appears in the broker's logs.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -301,6 +485,122 @@ File-only. Each entry spawns a child process at broker start.
 | `command` | `string` | yes | Executable (looked up in `PATH`) |
 | `args` | `string[]` | no | Arguments passed to the command |
 | `env` | `Record<string, string>` | no | Extra env vars merged with the parent process env |
+| `aggregate` | `boolean` | no | Join the `_all` aggregate slot. **Defaults to `false`**: omit it and this upstream is not in `_all` |
+
+```json
+{
+    "stdioUpstreams": [
+        {
+            "name": "fs",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+            "aggregate": true
+        }
+    ]
+}
+```
+
+Builder equivalent: `withStdioUpstream({ name, command, args, env, aggregate })`.
+It takes **one object**, not positional arguments.
+
+### `mcpServers`
+
+Remote MCP servers the broker connects **out** to and republishes as slots. The
+broker is the client on that hop; the slot's own clients are multiplexed onto
+the single upstream connection exactly as they are onto a child process.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | `string` | yes | Provider slot name the remote server is bound to |
+| `url` | `string` | yes | URL of the remote MCP server |
+| `transport` | `"streamable-http" \| "sse" \| "websocket"` | no | Auto-detected from the URL scheme and path when omitted |
+| `headers` | `Record<string, string>` | no | Extra HTTP / WebSocket headers, e.g. an `Authorization` header for the upstream |
+| `aggregate` | `boolean` | no | **Defaults to `true`**; set `false` to keep this server out of `_all` |
+
+```json
+{
+    "mcpServers": [
+        { "name": "geo", "url": "https://geo.example.com/mcp" },
+        {
+            "name": "partner",
+            "url": "https://partner.example.com/sse",
+            "transport": "sse",
+            "headers": { "Authorization": "Bearer <the-actual-token>" },
+            "aggregate": false
+        }
+    ]
+}
+```
+
+There is **no** variable interpolation in the config file: `headers` values are
+sent literally, so `"Bearer ${SOME_TOKEN}"` transmits those eleven characters.
+Either put the real value there (and keep the file out of version control, which
+the repository's `.gitignore` already does for `.mcp-broker/`), or use the
+programmatic API and read it from the environment yourself.
+
+Local servers should be shipped as `.mcpb` bundles rather than named here.
+
+Builder equivalent: `withRemoteUpstream({ name, url, transport, headers, aggregate })`.
+
+### `mcpbBundles`
+
+Local `.mcpb` bundles the broker loads at startup and runs as stdio provider
+slots. A bundle is a ZIP with a `manifest.json`; the broker verifies a detached
+signature against a trusted public key **before** unpacking and spawning it. A
+bundle that fails verification is skipped and never spawned.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | `string` | yes | Provider slot name the bundle is bound to |
+| `path` | `string` | yes | Path to the `.mcpb` file, resolved against the config file's directory |
+| `publicKey` | `string` | yes | Path to the trusted public key (PEM) used to verify the signature |
+| `signature` | `string` | no | Path to the detached signature file. Defaults to `<path>.sig` |
+| `userConfig` | `Record<string, string \| number \| boolean \| Array<string \| number>>` | no | Values substituted into the manifest's `${user_config.*}` placeholders |
+| `aggregate` | `boolean` | no | **Defaults to `true`**; set `false` to keep this bundle out of `_all` |
+
+```json
+{
+    "mcpbBundles": [
+        {
+            "name": "plant-tools",
+            "path": "bundles/plant-tools.mcpb",
+            "publicKey": "keys/vendor.pem",
+            "userConfig": { "site": "site-a" }
+        }
+    ]
+}
+```
+
+Bundle slot names are known synchronously from the config, before any bundle is
+loaded, so `stdioProvider` may name one.
+
+### `stdioProvider` (the stdio bridge)
+
+Setting it turns the process into a stdio MCP server for a host such as Claude
+Desktop: stdin carries the host's JSON-RPC, stdout carries the replies, and all
+logging is redirected to stderr so it cannot corrupt the channel. The broker
+keeps listening on its port at the same time, so providers can still tunnel in.
+
+**Set it to `_all`.** Pinning a real slot is an ordering failure that happens
+every time: the host sends `initialize` the instant it launches, treats a
+failure as a dead server with no retry, and your provider does not exist yet, so
+the bridge answers `-32000 Provider "<slot>" not connected` and the host gives
+up for the session. `_all` is registered before the broker resumes stdin,
+answers `initialize` itself, already aggregates `_broker`, and pushes
+`notifications/tools/list_changed` when a provider joins later. `_broker` is the
+fallback if you want introspection only.
+
+The broker warns at startup when `stdioProvider` names a slot it does not host,
+listing the slots it does.
+
+The bridge reaches `_all` with **no principal attached**. That is invisible
+until you enable authorization, at which point the host's tool list silently
+empties.
+
+A ready-made pairing ships as
+[`.mcp-broker.example/config.stdio-bridge.json`](../.mcp-broker.example/config.stdio-bridge.json).
+It is a separate file on purpose: `stdioProvider` moves stdout to the JSON-RPC
+stream, so a broker started in a terminal with it set looks dead.
 
 ### `auth` (OAuth 2.1 authorization)
 
@@ -308,11 +608,11 @@ Opt-in. Absent or `enabled: false` ⇒ the broker performs **no** authentication
 (trusted-network mode, the historical behavior). When `enabled: true`, the
 broker becomes an OAuth 2.1 resource server: client requests need a bearer token
 and the broker publishes Protected Resource Metadata (RFC 9728). See the
-language-neutral [authorization guide](../../docs/authorization.md) for the full
+language-neutral [authorization guide](https://github.com/pandaGaume/mcp-broker/blob/main/docs/authorization.md) for the full
 OAuth model, flows, and endpoints. The domain-neutral namespace model, including
 the recommended ISA-95 / IEC 62264-aligned industrial profile and UMD
 compatibility, is in
-[hierarchical authorization](../../docs/hierarchical-authorization.md).
+[hierarchical authorization](https://github.com/pandaGaume/mcp-broker/blob/main/docs/hierarchical-authorization.md).
 
 | Field | Type | Env var | Notes |
 |---|---|---|---|
@@ -335,8 +635,28 @@ compatibility, is in
 | `auth.providerToolCapabilities` | `Record<path,Record<tool,capability>>` | (file-only) | Resource-qualified tool mapping |
 | `auth.audit.logAllowed` | `boolean` | (file-only) | Logs allowed decisions when true. Default false |
 
-`providerSecret` is independent of client auth: set it alone to authenticate
-providers even without turning on the OAuth resource server.
+`providerSecret` is independent of client auth, and is **not gated by
+`auth.enabled`**: setting it alone turns provider authentication on. That is
+deliberate, and it is also the trap in a copied template. A config carrying
+`"providerSecret": "change-me"` inside a disabled `auth` block still refuses
+every provider, while the banner reads `Authorization: disabled` one line above
+`Provider auth: shared secret required`. The shipped
+[`.mcp-broker.example/config.json`](../.mcp-broker.example/config.json)
+deliberately omits the key for that reason.
+
+Two limits worth knowing before you set it:
+
+- **A browser-hosted provider cannot authenticate.** The secret is read from the
+  `X-Provider-Token` header or from `Authorization: Bearer`, and the browser
+  `WebSocket` constructor cannot set headers. Neither SDK transport accepts a
+  credential. Every browser provider is then refused at the handshake with
+  HTTP 401, which surfaces in the page as a bare `error` event with no status.
+  Run without a provider secret, or terminate provider auth in a reverse proxy
+  that injects the header.
+- **The stdio bridge is anonymous.** `stdioProvider` forwards to `_all` with no
+  principal attached, so enabling per-provider scopes or any policy that denies
+  an anonymous subject silently empties an MCP host's tool list: `tools/list`
+  still succeeds and returns `tools: []`.
 
 Hierarchical policy is enabled only when roles, assignments, or denies are
 present. Without them, legacy OAuth behavior is unchanged. When enabled,
@@ -408,11 +728,25 @@ The most frequent use case: no env vars needed across shell sessions.
 
 ### Local TLS
 
+`gen-cert` is a repository script, not part of the published package: it needs
+`selfsigned`, a devDependency. It resolves its output directory against the
+**working directory** and defaults to `../certs`, which for an npm script is
+one level above the package, never `.mcp-broker/certs/`. Pass `--out`:
+
 ```sh
-npm run gen-cert    # writes .mcp-broker/certs/{cert,key}.pem after the migration
+# from a checkout, in node/packages/broker
+npm run gen-cert -- --out .mcp-broker/certs
 ```
 
-In `.mcp-broker/config.json`:
+Outside the repository, `openssl` does the same job:
+
+```sh
+mkdir -p .mcp-broker/certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout .mcp-broker/certs/key.pem -out .mcp-broker/certs/cert.pem \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+Then, in `.mcp-broker/config.json`:
 
 ```json
 {
@@ -423,7 +757,20 @@ In `.mcp-broker/config.json`:
 }
 ```
 
-Self-contained, moving `.mcp-broker/` to another machine carries the certs.
+Self-contained: moving `.mcp-broker/` to another machine carries the certs.
+
+Two consequences of turning TLS on. The switch is **all or nothing**: providers
+then connect with `wss://`, clients with `https://`, and every `allowedOrigins`
+entry must be spelled `https://` or it matches nothing. And both PEMs are read
+synchronously when the tunnel is built, so a path that does not exist fails
+before the port is bound. This is the first wall a copied config template hits;
+the error names both paths and the two path-resolution rules.
+
+To run a config that carries `tls` without the certs, force plain HTTP:
+
+```sh
+MCP_BROKER_PROTOCOL=http npx @cyanmycelium/mcp-broker
+```
 
 ### Bridge a local stdio MCP server
 
@@ -462,7 +809,7 @@ on the resource server and provider auth:
 
 Clients now need a bearer token whose audience is `https://mcp.example.com/<slot>/mcp`;
 providers need the shared secret. Full details in the
-[authorization guide](../../docs/authorization.md).
+[authorization guide](https://github.com/pandaGaume/mcp-broker/blob/main/docs/authorization.md).
 
 ### Customize tool descriptions for your org
 
@@ -485,6 +832,7 @@ on the conflicting keys. No need to fork the package.
 
 ```json
 {
+    "allowedOrigins": ["http://localhost:3000"],
     "www": {
         "open": true,
         "mounts": [
@@ -495,8 +843,21 @@ on the conflicting keys. No need to fork the package.
 ```
 
 Put your `index.html` etc. in `.mcp-broker/www/`. The broker opens
-`http://localhost:3000/` in the default browser on startup. Skipped silently
-in headless / container environments.
+`http://localhost:3000/` in the default browser on startup, and warns rather
+than exiting when no browser can be launched (headless boxes, containers).
+
+`allowedOrigins` is there because the harness is a browser page reaching
+`/<slot>/mcp`, and the broker serving that page does **not** exempt its origin.
+Omit it and every request from the harness comes back `403 invalid_origin`. A
+page that only opens WebSockets does not need it; WebSocket upgrades are not
+origin-checked.
+
+To open a sub-path rather than the root, give `open` a string. It works with a
+mount at any prefix that covers it, not only a mount at `/`:
+
+```json
+{ "www": { "open": "/app/index.html", "mounts": [{ "urlPrefix": "/app", "dir": "app" }] } }
+```
 
 ### Deploy-specific override
 

@@ -41,6 +41,71 @@ export interface IBrokerContext {
 
     /** Snapshot of a single provider slot, or `undefined` if the name is unknown. */
     getProviderInfo(name: string): IBrokerProviderInfo | undefined;
+
+    // -------------------------------------------------------------------------
+    // Optional diagnostic surface
+    //
+    // Every accessor below is optional on purpose. The three members above are
+    // what a context has always had to provide, and making any of these
+    // mandatory would break every existing implementation (including the
+    // hand-written stubs in the test suite) for a purely additive feature.
+    //
+    // `broker_diagnose` treats an absent accessor as "this check cannot run
+    // here" and reports it as skipped, rather than guessing. Implement them to
+    // light up the corresponding rules.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Membership of the reserved `_all` aggregate slot, or `undefined` when the
+     * host cannot report it. Lets a diagnosis distinguish "the aggregate is
+     * empty because nobody opted in" from "the aggregate is disabled".
+     */
+    getAggregateInfo?(): IBrokerAggregateInfo | undefined;
+
+    /**
+     * Security posture of the listening surface, or `undefined` when the host
+     * cannot report it. Lets a diagnosis catch the combination that produces a
+     * `403 invalid_origin` on a page the broker itself serves.
+     */
+    getSecurityInfo?(): IBrokerSecurityInfo | undefined;
+
+    /**
+     * Slot the stdio bridge is pinned to (`MCP_BROKER_STDIO_PROVIDER` /
+     * `withStdioClient`), `null` when no bridge is configured, or `undefined`
+     * when the host cannot report it. Lets a diagnosis catch a bridge pinned to
+     * a slot that cannot exist at host start.
+     */
+    getStdioBridgeTarget?(): string | null | undefined;
+}
+
+/**
+ * Membership snapshot of the reserved `_all` aggregate slot.
+ *
+ * `providers` lists the slot names currently contributing tools and prompts,
+ * which normally includes `_broker`. It is not the same set as "connected
+ * slots": a provider is in `_all` only if it opted in.
+ */
+export interface IBrokerAggregateInfo {
+    /** `false` when the aggregate slot was disabled at construction. */
+    enabled: boolean;
+
+    /** Slot names currently contributing to the aggregate. */
+    providers: readonly string[];
+}
+
+/** What the broker enforces on its listening surface right now. */
+export interface IBrokerSecurityInfo {
+    /** `true` when at least one browser origin is allowed on `/<slot>/mcp`. */
+    allowedOriginsConfigured: boolean;
+
+    /** `true` when clients must present an OAuth 2.1 bearer token. */
+    clientAuthEnabled: boolean;
+
+    /** `true` when providers must authenticate at the WebSocket upgrade. */
+    providerAuthEnabled: boolean;
+
+    /** URL prefixes served as static files, e.g. `["/bundle", "/"]`. */
+    staticMountPrefixes: readonly string[];
 }
 
 /**

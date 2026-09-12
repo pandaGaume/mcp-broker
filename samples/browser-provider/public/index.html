@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>mcp-broker sample: browser provider</title>
+        <link rel="stylesheet" href="styles.css" />
+
+        <!--
+            IMPORT MAP: the only thing standing between this page and the code
+            you would write in a real app.
+
+            `@cyanmycelium/mcp-broker-provider` ships one self-contained ES
+            module with zero import statements, so a browser can load it as-is.
+            What a browser cannot do is turn the BARE SPECIFIER
+            "@cyanmycelium/mcp-broker-provider" into a path. A bundler does that
+            for you; with no bundler, this three-line import map does it instead,
+            pointing at the copy prepare.mjs drops in ./vendor/.
+
+            In your own project: delete this block, keep app.js exactly as it is,
+            and let Vite / webpack / esbuild resolve the specifier normally.
+        -->
+        <script type="importmap">
+            {
+                "imports": {
+                    "@cyanmycelium/mcp-broker-provider": "./vendor/index.js"
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <header>
+            <h1>Browser provider</h1>
+            <p class="sub">
+                This page hosts an MCP server and publishes it to a broker slot over a WebSocket. The broker also serves
+                this page, so there is one process and one origin.
+            </p>
+            <span id="badge" class="badge off">Disconnected</span>
+        </header>
+
+        <main>
+            <section class="panel">
+                <h2>1. Publish</h2>
+                <label for="slot">Slot name</label>
+                <input id="slot" type="text" value="browser-demo" spellcheck="false" />
+                <label class="check">
+                    <input id="aggregate" type="checkbox" checked />
+                    Join the <code>_all</code> aggregate
+                </label>
+                <p class="hint">
+                    Opt-in. With it on, this page's tools also appear on <code>/_all/mcp</code>, which is the slot an MCP
+                    host should be pointed at: <code>_all</code> exists before any provider connects and pushes
+                    <code>tools/list_changed</code> when this page joins.
+                </p>
+                <div class="row">
+                    <button id="connect" class="primary">Publish</button>
+                    <button id="disconnect" disabled>Release</button>
+                </div>
+                <div id="endpoints" hidden></div>
+            </section>
+
+            <section class="panel">
+                <h2>2. Call it back, from this page</h2>
+                <label for="echo-text">Text for the <code>echo</code> tool</label>
+                <input id="echo-text" type="text" value="hello from the broker" spellcheck="false" />
+                <div class="row">
+                    <button id="call" disabled>initialize + tools/list + tools/call</button>
+                </div>
+                <p class="hint">
+                    This runs a real MCP client against <code>/&lt;slot&gt;/mcp</code>. Because the request carries an
+                    <code>Origin</code> header, it is refused with <code>403 invalid_origin</code> unless the broker was
+                    started with this page's origin in <code>MCP_BROKER_ALLOWED_ORIGINS</code>. Being served by the
+                    broker grants nothing.
+                </p>
+            </section>
+
+            <section class="panel">
+                <h2>Tools this page serves</h2>
+                <div id="catalog"></div>
+            </section>
+
+            <section class="panel wide">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </section>
+        </main>
+
+        <script type="module" src="app.js"></script>
+    </body>
+</html>

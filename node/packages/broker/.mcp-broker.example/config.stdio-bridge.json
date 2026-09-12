@@ -1,0 +1,16 @@
+{
+    "port": 3001,
+    "host": "127.0.0.1",
+    "locale": "en",
+
+    "stdioProvider": "_all",
+
+    "stdioUpstreams": [
+        {
+            "name":      "fs",
+            "command":   "npx",
+            "args":      ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+            "aggregate": true
+        }
+    ]
+}

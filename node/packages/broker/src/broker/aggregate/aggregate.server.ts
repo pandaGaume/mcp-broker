@@ -30,6 +30,17 @@ interface ICallParams {
     arguments?: Record<string, unknown>;
 }
 
+/** Renders an unknown thrown value as a one-line message for a log. */
+function describeError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return typeof error === "string" ? error : JSON.stringify(error);
+}
+
+/** Renders a subject for a log line, so an empty one is visibly empty. */
+function describeSubject(subject: IAuthorizationSubject): string {
+    return subject.ids.length > 0 ? subject.ids.join(", ") : "(none)";
+}
+
 /**
  * The `_all` aggregate MCP server. Presents the union of every opted-in
  * provider's tools and prompts as a single MCP server, reachable on the
@@ -87,7 +98,7 @@ export class AggregateServer implements IMessageTransport {
 
     /** WsTunnel hands a client request for the `_all` slot here (no principal). */
     send(data: string): void {
-        void this._handleClientMessage(data, null);
+        this._dispatch(data, null);
     }
 
     /**
@@ -95,7 +106,18 @@ export class AggregateServer implements IMessageTransport {
      * narrows the catalog and routing to the providers the caller may see.
      */
     sendAs(data: string, principal: IPrincipal | null): void {
-        void this._handleClientMessage(data, principal);
+        this._dispatch(data, principal);
+    }
+
+    /**
+     * Runs one client message to completion. The handler is async and the tunnel
+     * calls us synchronously, so an unexpected throw would otherwise surface as
+     * an unhandled rejection with no slot attached and take the process down.
+     */
+    private _dispatch(data: string, principal: IPrincipal | null): void {
+        void this._handleClientMessage(data, principal).catch((error: unknown) => {
+            console.error(`[broker] aggregate: unhandled failure while serving a request on slot "${AggregateServer.SLOT}": ${describeError(error)}`);
+        });
     }
 
     /** Closes every provider session and the aggregate transport. */
@@ -126,7 +148,17 @@ export class AggregateServer implements IMessageTransport {
 
         try {
             await session.initialize();
-        } catch {
+        } catch (error) {
+            // Reachable only because ProviderClientSession now surfaces handshake
+            // failures instead of resolving them away. Before that a provider
+            // whose `initialize` failed stayed registered in `_all` with an empty
+            // catalog and produced no output at all, which reads to a client as
+            // "the aggregate lost my tools".
+            console.error(
+                `[broker] aggregate: provider "${name}" failed its handshake and was not added to "${AggregateServer.SLOT}": ${describeError(error)} ` +
+                    `Its tools and prompts will not appear in the aggregate. The provider must answer the MCP "initialize" request the broker sends as soon as it registers: ` +
+                    `install the message handler before announcing the slot, and reply with the same JSON-RPC id.`
+            );
             this.removeProvider(name);
         }
     }
@@ -152,9 +184,18 @@ export class AggregateServer implements IMessageTransport {
                 }
             );
         } catch (error) {
-            if (!(error instanceof SubjectMappingError)) {
-                console.error("[broker] aggregate authorization subject mapping failed.");
-            }
+            // A SubjectMappingError used to be the one case that produced no
+            // output, on the theory that a bad token is attacker noise. It is not:
+            // the mapper only throws when a claim it was *configured* to read has
+            // the wrong shape, and the empty subject returned below makes the
+            // policy engine deny every request from this caller. The most likely
+            // misconfiguration must not be the silent one.
+            const kind = error instanceof SubjectMappingError ? "malformed JWT subject claim" : "subject mapping error";
+            console.error(
+                `[broker] aggregate authorization: ${kind} on slot "${AggregateServer.SLOT}": ${describeError(error)} ` +
+                    `This caller is now treated as having no subject, so every provider in the aggregate will be denied with "no-matching-grant". ` +
+                    `Fix authorization.subjectMapping (userClaim, groupClaims, clientClaim, serviceClaims) so it names claims this token actually carries as a string or an array of strings.`
+            );
             return { ids: [], claims: principal.claims };
         }
     }
@@ -176,15 +217,22 @@ export class AggregateServer implements IMessageTransport {
             return false;
         }
 
+        // Hoisted out of the try so the catch can name what was being evaluated.
+        // Without them the failure log said nothing at all and the audit event
+        // carried neither capability nor tool.
+        let capability: string | undefined;
+        let tool: string | undefined;
         try {
             const classified = authorization.capabilityClassifier.classify(operation, resource, provider);
             if (!classified) return true;
+            capability = classified.capability;
+            tool = classified.tool;
             const decision = authorization.engine.authorize({
                 subject,
-                capability: classified.capability,
+                capability,
                 resource,
                 provider,
-                tool: classified.tool,
+                tool,
             });
             if (!decision.allowed || authorization.audit.logAllowed) {
                 writeAuthorizationAuditEvent(
@@ -193,25 +241,36 @@ export class AggregateServer implements IMessageTransport {
                             subject,
                             slot: AggregateServer.SLOT,
                             resource,
-                            capability: classified.capability,
+                            capability,
                             provider,
-                            tool: classified.tool,
+                            tool,
                         },
                         decision
                     )
                 );
             }
             return decision.allowed;
-        } catch {
-            console.error("[broker] aggregate policy evaluation failed.");
-            const decision: IAuthorizationDecision = { allowed: false, reason: "no-matching-grant" };
+        } catch (error) {
+            // The request is denied, but nothing was actually decided. Auditing
+            // this as "no-matching-grant" named a cause that did not occur and
+            // sent operators off writing grants that could never help, so it gets
+            // its own reason and a log line carrying the full context.
+            console.error(
+                `[broker] aggregate authorization: policy evaluation threw on slot "${AggregateServer.SLOT}" for provider "${provider}", ` +
+                    `subject [${describeSubject(subject)}], resource "${resource.value}", capability "${capability ?? "(unclassified)"}"` +
+                    `${tool ? `, tool "${tool}"` : ""}: ${describeError(error)} ` +
+                    `The request is denied. This is a broker or policy-configuration fault, not a missing grant: adding grants will not change the outcome until the error above is fixed.`
+            );
+            const decision: IAuthorizationDecision = { allowed: false, reason: "evaluation-error" };
             writeAuthorizationAuditEvent(
                 makeAuthorizationAuditEvent(
                     {
                         subject,
                         slot: AggregateServer.SLOT,
                         resource,
+                        capability,
                         provider,
+                        tool,
                     },
                     decision
                 )
@@ -292,8 +351,16 @@ export class AggregateServer implements IMessageTransport {
             return;
         }
         const args = p.arguments ?? {};
-        const outcome = kind === "tool" ? await session.callTool(route.original, args) : await session.getPrompt(route.original, args);
-        this._reply(id, outcome.error !== undefined ? { error: outcome.error } : { result: outcome.result });
+        try {
+            const outcome = kind === "tool" ? await session.callTool(route.original, args) : await session.getPrompt(route.original, args);
+            this._reply(id, outcome.error !== undefined ? { error: outcome.error } : { result: outcome.result });
+        } catch (error) {
+            // The session rejects rather than resolves on a timeout, so the caller
+            // gets a named error instead of an open request that never settles.
+            const message = describeError(error);
+            console.error(`[broker] aggregate: routing ${kind} "${p.name ?? "(none)"}" to provider "${route.provider}" failed: ${message}`);
+            this._reply(id, { error: { code: -32000, message } });
+        }
     }
 
     private _reply(id: string | number, body: { result?: unknown; error?: unknown }): void {

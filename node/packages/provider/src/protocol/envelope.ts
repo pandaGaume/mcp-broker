@@ -37,6 +37,43 @@ export interface TunnelEnvelope {
  */
 export const TUNNEL_REGISTER_METHOD = "notifications/register";
 
+/** Options carried by the registration notification, as its `params`. */
+export interface ITunnelRegisterOptions {
+    /**
+     * Join the broker's `_all` aggregate slot in addition to the provider's own
+     * slot, so a single MCP client sees every opted-in provider's tools and
+     * prompts through one connection.
+     *
+     * Opt-in on purpose: `_all` is a confidentiality boundary, and a provider
+     * that never asks for it stays reachable only on its own slot.
+     */
+    aggregate?: boolean;
+}
+
+/**
+ * Builds the registration notification as a plain JSON-RPC frame, for the
+ * slot-scoped path `/provider/<name>`, which carries no envelope.
+ *
+ * The slot name is not in the frame: on that path the broker takes it from the
+ * URL at connect time, before any frame exists.
+ *
+ * @param options When `aggregate` is set, it is carried as `params.aggregate`.
+ *                Omitted entirely otherwise, which keeps the frame identical to
+ *                the parameterless form older brokers already accept.
+ */
+export function encodeRegisterFrame(options?: ITunnelRegisterOptions): string {
+    return JSON.stringify(registerMessage(options));
+}
+
+/** The registration notification body, shared by both encoders. */
+function registerMessage(options?: ITunnelRegisterOptions): Record<string, unknown> {
+    const message: Record<string, unknown> = { jsonrpc: "2.0", method: TUNNEL_REGISTER_METHOD };
+    if (options?.aggregate !== undefined) {
+        message.params = { aggregate: options.aggregate };
+    }
+    return message;
+}
+
 /** JSON-RPC error codes the broker returns on the tunnel itself. */
 export const TunnelErrorCodes = {
     /** The slot is taken by another upstream, or the provider is not connected. */
@@ -98,9 +135,16 @@ export function envelopeFrame(envelope: TunnelEnvelope): string {
     return JSON.stringify(envelope.payload);
 }
 
-/** Builds the registration notification that claims `provider`. */
-export function encodeRegisterEnvelope(provider: string): string {
-    return encodeEnvelopeMessage(provider, { jsonrpc: "2.0", method: TUNNEL_REGISTER_METHOD });
+/**
+ * Builds the registration notification that claims `provider`, wrapped for the
+ * multiplexed tunnel.
+ *
+ * @param options When `aggregate` is set, it is carried as `params.aggregate`.
+ *                Omitted entirely otherwise: the parameterless frame is the one
+ *                brokers have always received here, and it stays byte-identical.
+ */
+export function encodeRegisterEnvelope(provider: string, options?: ITunnelRegisterOptions): string {
+    return encodeEnvelopeMessage(provider, registerMessage(options));
 }
 
 /**

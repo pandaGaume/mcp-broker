@@ -10,12 +10,16 @@ import { StdioTransport, StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/n
 // The broker is itself a provider: it publishes its own `_broker` and `_all`
 // slots: so sharing the provider package's wire contract is the natural way to
 // keep one definition of the envelope rather than two that drift.
-import { decodeEnvelope, encodeEnvelope, encodeErrorEnvelope, envelopeFrame, TunnelErrorCodes } from "@cyanmycelium/mcp-broker-provider/protocol";
+import { decodeEnvelope, encodeEnvelope, encodeErrorEnvelope, envelopeFrame, TUNNEL_REGISTER_METHOD, TunnelErrorCodes } from "@cyanmycelium/mcp-broker-provider/protocol";
 import { StdioUpstream } from "../stdio.upstream";
 import { RemoteUpstream } from "../remote.upstream";
 import type { IUpstream } from "../upstream";
 import { startBrokerServer, BROKER_PROVIDER_NAME } from "../broker/index";
 import type { IBrokerContext, IBrokerProviderInfo, BrokerProviderTransport } from "../broker/index";
+// Imported from the defining module rather than the barrel: these two are the
+// optional `IBrokerContext` extensions `broker_diagnose` reads, and the barrel
+// does not re-export them yet.
+import type { IBrokerSecurityInfo } from "../broker/broker.context";
 import { AggregateServer } from "../broker/aggregate/aggregate.server";
 import {
     HttpAuthGuard,
@@ -38,7 +42,18 @@ import {
     type ISlotResourceResolver,
 } from "../authorization/index";
 import { VERSION, PACKAGE_NAME } from "../version";
-import type { AllowedOrigins, IHttpSession, IInternalClient, IProviderState, IWsTunnelOptions, McpEndpointKind } from "./ws.interfaces";
+import type {
+    AllowedOrigins,
+    IHttpSession,
+    IInternalClient,
+    IProviderState,
+    IWsTunnelOptions,
+    McpEndpointKind,
+    ProviderTakeoverMode,
+    ResponseSink,
+    WsConnectRole,
+    WsRouteClassification,
+} from "./ws.interfaces";
 
 // ---------------------------------------------------------------------------
 // Static-file helpers
@@ -78,6 +93,89 @@ function requestIdOf(frame: string): string | number | undefined {
         /* not JSON: nothing to route by */
     }
     return undefined;
+}
+
+/**
+ * Prefix of every broker-assigned JSON-RPC id.
+ *
+ * Requests are re-numbered on their way to a provider so two clients on one
+ * slot cannot collide (see {@link WsTunnel._trackRequest}). The prefix is
+ * cosmetic but deliberate: it makes a stray id recognizable as the broker's in
+ * a provider's own logs, instead of looking like a client's.
+ */
+const BROKER_REQUEST_ID_PREFIX = "brk-";
+
+/** Default heartbeat period, in ms, for `providerHeartbeatIntervalMs`. */
+const DEFAULT_PROVIDER_HEARTBEAT_MS = 30_000;
+
+/** Default per-request deadline, in ms, for `providerRequestTimeoutMs`. */
+const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS = 60_000;
+
+/**
+ * RFC 6455 caps a close reason at 123 bytes and `ws` throws a `RangeError`
+ * rather than truncating, which would turn a diagnostic into a crash inside a
+ * connection handler. Every close reason goes through {@link truncateReason}.
+ */
+const MAX_CLOSE_REASON_BYTES = 123;
+
+/** Shortens a close reason to what RFC 6455 allows, without splitting a character. */
+function truncateReason(reason: string): string {
+    if (Buffer.byteLength(reason, "utf8") <= MAX_CLOSE_REASON_BYTES) return reason;
+    let cut = reason;
+    while (Buffer.byteLength(cut + "...", "utf8") > MAX_CLOSE_REASON_BYTES) {
+        cut = cut.slice(0, -1);
+    }
+    return cut + "...";
+}
+
+/**
+ * `decodeURIComponent` that returns its input instead of throwing.
+ *
+ * A slot name arrives from a URL, so it is attacker-controlled: `%zz` throws a
+ * `URIError`, and both call sites here run inside a WebSocket connection
+ * handler, where an exception is an uncaught one.
+ */
+function safeDecode(raw: string): string {
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        return raw;
+    }
+}
+
+/** Parses a frame into a plain JSON object, or `undefined` for anything else. */
+function parseObjectFrame(text: string): Record<string, unknown> | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        return undefined;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+}
+
+/**
+ * `true` when the frame is the tunnel registration notification asking to join
+ * the `_all` aggregate slot, in either of the two shapes the broker accepts.
+ *
+ * Both are notifications a peer that does not know them ignores, which is why
+ * the opt-in could be added without a protocol version: the JSON-RPC form
+ * `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}`
+ * is what the provider SDK sends on both paths, and the legacy control frame
+ * `{"type":"register","aggregate":true}` is what hand-written providers send on
+ * the slot-scoped path.
+ */
+function registrationAsksForAggregate(payload: unknown): boolean {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+    const frame = payload as { jsonrpc?: unknown; method?: unknown; params?: unknown; type?: unknown; aggregate?: unknown };
+    if (frame.jsonrpc !== undefined) {
+        if (frame.method !== TUNNEL_REGISTER_METHOD) return false;
+        const params = frame.params;
+        if (typeof params !== "object" || params === null) return false;
+        return (params as { aggregate?: unknown }).aggregate === true;
+    }
+    return frame.type === "register" && frame.aggregate === true;
 }
 
 /**
@@ -156,6 +254,53 @@ export class WsTunnel implements IBrokerContext {
 
     /** Maps a multiplexed WebSocket to the set of provider names it feeds. */
     private readonly _multiplexSockets = new Map<WebSocket, Set<string>>();
+
+    /**
+     * Every inbound provider socket the heartbeat watches, dedicated and
+     * multiplexed alike.
+     *
+     * An explicit collection is needed because there was none: `_providers`
+     * holds only the socket that currently owns a slot (so it misses a
+     * multiplex socket that has not announced a name yet), and
+     * `_providerPrincipals` only has entries when provider auth is configured.
+     */
+    private readonly _providerSockets = new Set<WebSocket>();
+
+    /**
+     * Liveness of each provider socket: `true` when it answered the last ping,
+     * `false` while a ping is outstanding.
+     *
+     * A `WeakMap` so a terminated socket needs no cleanup here, and so a socket
+     * the heartbeat never saw (heartbeat disabled) reads back `undefined`,
+     * which the admission check treats as "no evidence either way" and refuses
+     * the takeover.
+     */
+    private readonly _alive = new WeakMap<WebSocket, boolean>();
+
+    /** Heartbeat sweep timer; `null` while stopped or disabled. */
+    private _heartbeatTimer: NodeJS.Timeout | null = null;
+
+    /** Pending-request deadline sweep timer; `null` while stopped or disabled. */
+    private _requestTimeoutTimer: NodeJS.Timeout | null = null;
+
+    /**
+     * Counter behind every broker-assigned request id. Monotonic per process,
+     * which is all the uniqueness the pending maps need.
+     */
+    private _nextRequestId = 1;
+
+    /**
+     * Slots already warned about for answering with an id the broker never
+     * issued, so a provider that does this on every frame warns once.
+     */
+    private readonly _unmatchedIdWarnedProviders = new Set<string>();
+
+    /**
+     * Slots already warned about for emitting a frame that is not JSON-RPC.
+     * A provider that speaks a non-JSON dialect emits one on every message, so
+     * the warning fires once per slot instead of flooding the log.
+     */
+    private readonly _nonJsonWarnedProviders = new Set<string>();
 
     /** Upstream providers (stdio child processes and remote URL servers), keyed by name. */
     private readonly _upstreams = new Map<string, IUpstream>();
@@ -265,6 +410,29 @@ export class WsTunnel implements IBrokerContext {
         };
     }
 
+    /**
+     * What the broker enforces on its listening surface right now, for
+     * `broker_diagnose`.
+     *
+     * The rule it feeds is the one that catches a page the broker serves itself
+     * being refused by its own origin check: static files mounted, no browser
+     * origin allowed. That combination now costs more than it did, because the
+     * check reaches the legacy SSE endpoints too.
+     */
+    public getSecurityInfo(): IBrokerSecurityInfo {
+        return {
+            allowedOriginsConfigured: this._options.allowedOrigins !== undefined,
+            clientAuthEnabled: this._authGuard !== null,
+            providerAuthEnabled: this._providerAuth !== null,
+            staticMountPrefixes: (this._options.staticMounts ?? []).map((m) => m.urlPrefix),
+        };
+    }
+
+    /** Slot the stdio bridge is pinned to, or `null` when there is no bridge. */
+    public getStdioBridgeTarget(): string | null {
+        return this._options.stdioClient?.providerName ?? null;
+    }
+
     public getProvidersInfo(): IBrokerProviderInfo[] {
         const out: IBrokerProviderInfo[] = [];
         for (const [name, state] of this._providers) {
@@ -354,32 +522,18 @@ export class WsTunnel implements IBrokerContext {
             onClose: null,
             send: (message: string): void => {
                 if (closed) return;
-                let id: string | number | null = null;
-                try {
-                    const parsed = JSON.parse(message) as { id?: string | number };
-                    if (parsed?.id != null) id = parsed.id;
-                } catch {
-                    /* forward as-is */
-                }
                 if (this._isProviderConnected(providerName, state)) {
-                    if (id != null) state.pending.set(id, { type: "internal", client });
-                    this._sendToProvider(state, providerName, message);
-                } else if (id != null) {
-                    client.onMessage?.(
-                        JSON.stringify({
-                            jsonrpc: "2.0",
-                            id,
-                            error: { code: -32000, message: `Provider "${providerName}" not connected` },
-                        })
-                    );
+                    this._sendToProvider(state, providerName, this._trackRequest(state, message, { type: "internal", client }));
+                } else if (requestIdOf(message) !== undefined) {
+                    client.onMessage?.(this._notConnectedPayload(providerName, message));
                 }
             },
             close: (): void => {
                 if (closed) return;
                 closed = true;
                 state.internalClients.delete(client);
-                for (const [id, sink] of state.pending) {
-                    if (sink.type === "internal" && sink.client === client) state.pending.delete(id);
+                for (const [brokerId, entry] of state.pending) {
+                    if (entry.sink.type === "internal" && entry.sink.client === client) state.pending.delete(brokerId);
                 }
             },
         };
@@ -420,10 +574,17 @@ export class WsTunnel implements IBrokerContext {
     // -------------------------------------------------------------------------
 
     /**
-     * Starts the broker. Resolves once the HTTP server is listening.
+     * Starts the broker. Resolves once the HTTP server is listening, and
+     * **rejects** when the listen fails.
+     *
+     * The rejection is the point: until the port is bound, a listen failure has
+     * nowhere else to go. `ws` mirrors the HTTP server's `'error'` onto the
+     * `WebSocketServer` from a listener it installs inside its own constructor,
+     * so an unhandled one is rethrown by Node as an uncaught exception, outside
+     * any caller's `await` and outside any `catch` the caller wrote.
      */
     start(): Promise<void> {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const handler = (req: IncomingMessage, res: ServerResponse) => this._handleHttp(req, res);
             this._httpServer = this._options.tls ? https.createServer({ cert: this._options.tls.cert, key: this._options.tls.key }, handler) : http.createServer(handler);
             // Disable perMessageDeflate: payloads may be large base64-encoded blobs
@@ -431,28 +592,76 @@ export class WsTunnel implements IBrokerContext {
             // CPU without reducing size, and caused multi-second stalls in practice.
             this._wss = new WebSocketServer({ server: this._httpServer, perMessageDeflate: false, verifyClient: this._makeVerifyClient() });
 
+            // Server-level errors, of which the one that actually happens is
+            // `EADDRINUSE` on the very first bind.
+            //
+            // `settled` guards the reject: once the server is listening the
+            // promise is spoken for, and a later error (a socket reset during an
+            // upgrade, say) must be logged instead, or it lands as a rejection on
+            // an already-resolved promise, which Node reports as unhandled.
+            //
+            // The same handler goes on BOTH emitters deliberately. `ws` forwards
+            // the HTTP server's `'error'` to the `WebSocketServer` from a listener
+            // registered inside `new WebSocketServer({ server })`; being first, it
+            // rethrows an unhandled event before any listener added here to
+            // `_httpServer` could run. The `_httpServer` listener is still needed
+            // for the errors `ws` does not forward. `lastError` is what stops the
+            // doubly delivered listen failure from being reported twice.
+            let settled = false;
+            let lastError: unknown = null;
+            const onServerError = (err: Error): void => {
+                if (err === lastError) return;
+                lastError = err;
+                if (settled) {
+                    console.error(`[broker] http/websocket server error: ${err.message}`);
+                    return;
+                }
+                settled = true;
+                reject(this._listenError(err));
+            };
+            this._wss.on("error", onServerError);
+            this._httpServer.on("error", onServerError);
+
             this._wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
                 const url = req.url ?? "/";
-                const providerPath = this._options.providerPath ?? "/provider";
-                const providersPath = this._options.providersPath ?? "/providers";
+                const route = this._classifyWsRoute(url);
 
-                if (url === providersPath || url.startsWith(providersPath + "?")) {
-                    // Multiplexed provider: one WebSocket carries N providers via envelopes.
-                    this._onMultiplexProviderConnect(ws, req);
-                } else if (url.startsWith(providerPath + "/") || url === providerPath) {
-                    // Extract name: everything after "<providerPath>/"
-                    const raw = url.slice(providerPath.length).replace(/^\//, "");
-                    const name = decodeURIComponent(raw.split("?")[0]) || "(unnamed)";
-                    this._onProviderConnect(ws, name, req);
-                } else {
-                    // Raw WS MCP client: URL is "/<providerName>" or "/"
-                    const raw = url.replace(/^\//, "").split("?")[0];
-                    const name = decodeURIComponent(raw) || "";
-                    this._onClientConnect(ws, name, req);
+                switch (route.role) {
+                    case "reject":
+                        // Defence in depth. `verifyClient` refuses these before the
+                        // handshake completes, with the full diagnosis in the HTTP
+                        // body, so this branch should be unreachable: it exists so
+                        // the invariant "a rejected path never reaches a handler"
+                        // holds even if the hook is ever changed.
+                        console.warn(`[broker] ws connect path="${url}" REFUSED after handshake: ${route.detail}`);
+                        this._closeWs(ws, 1008, route.closeReason);
+                        return;
+                    case "multiplex-provider":
+                        // Multiplexed provider: one WebSocket carries N providers via envelopes.
+                        this._logWsConnection(url, "multiplex-provider", "(announced per envelope)");
+                        this._onMultiplexProviderConnect(ws, req);
+                        return;
+                    case "dedicated-provider":
+                        this._logWsConnection(url, "dedicated-provider", route.slot);
+                        this._onProviderConnect(ws, route.slot, req);
+                        return;
+                    case "client":
+                        this._logWsConnection(url, "client", route.slot);
+                        this._onClientConnect(ws, route.slot, req);
+                        return;
                 }
             });
 
             this._httpServer.listen(this._options.port, this._options.host ?? "0.0.0.0", () => {
+                // Listening: from here on `onServerError` logs instead of rejecting.
+                settled = true;
+
+                // Both sweeps run on `unref`'d timers cleared by `stop()`, so an
+                // embedder (or a test file) that starts a tunnel is never held
+                // alive by them.
+                this._startHeartbeat();
+                this._startRequestTimeoutSweep();
+
                 // Bring the aggregate `_all` slot up before any upstream connects
                 // (a Streamable HTTP upstream opens synchronously on connect()).
                 this._maybeStartAggregateServer();
@@ -517,10 +726,57 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
+     * Turns a listen failure into an error whose message says what to do next.
+     *
+     * `EADDRINUSE` is the one that happens in practice, and the reflex it
+     * triggers is usually the wrong one: another broker gets spawned on another
+     * port. Two brokers do not share anything, a slot is held by exactly one
+     * process, so the second instance's providers are invisible to the first
+     * instance's clients. Hence the message points at attaching to the running
+     * broker first, and only then at changing the port.
+     */
+    private _listenError(err: Error): Error {
+        const host = this._options.host ?? "0.0.0.0";
+        const port = this._options.port;
+        const code = (err as NodeJS.ErrnoException).code;
+
+        if (code === "EADDRINUSE") {
+            const scheme = this._options.tls ? "https" : "http";
+            // A wildcard bind is not a reachable authority; name one that is.
+            const reachable = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+            return new Error(
+                `Cannot listen on ${host}:${port}: the address is already in use. Another broker (or another process) already holds that port. ` +
+                    `If it is a broker, use it: attach clients to ${scheme}://${reachable}:${port}/<slot>/mcp and inspect it at ${scheme}://${reachable}:${port}/_broker/mcp, ` +
+                    `rather than starting a second instance, which would share no provider slot with the first. ` +
+                    `To run a second one anyway, give it a free port (MCP_BROKER_PORT, or the \`port\` option).`,
+                { cause: err }
+            );
+        }
+
+        if (code === "EACCES") {
+            return new Error(
+                `Cannot listen on ${host}:${port}: permission denied. Ports below 1024 require elevated privileges; ` +
+                    `pick a port above 1024 (MCP_BROKER_PORT, or the \`port\` option), or put a reverse proxy in front.`,
+                { cause: err }
+            );
+        }
+
+        if (code === "EADDRNOTAVAIL") {
+            return new Error(
+                `Cannot listen on ${host}:${port}: the host address is not available on this machine. ` +
+                    `Bind to "0.0.0.0" (every interface) or "127.0.0.1" (local only) via MCP_BROKER_HOST, or the \`host\` option.`,
+                { cause: err }
+            );
+        }
+
+        return new Error(`Cannot listen on ${host}:${port}: ${err.message}`, { cause: err });
+    }
+
+    /**
      * Starts the in-process MCP server that exposes the broker's own behaviors
-     * (`broker_info`, `providers_list`, `provider_status`) under the reserved
-     * provider slot `_broker`. No-op when {@link IWsTunnelOptions.enableBrokerProvider}
-     * is `false`.
+     * (`broker_info`, `providers_list`, `provider_status`, `broker_guide`,
+     * `broker_diagnose`) under the reserved provider slot `_broker`. No-op when
+     * {@link IWsTunnelOptions.enableBrokerProvider} is `false`.
      */
     private async _maybeStartBrokerServer(): Promise<void> {
         if (this._options.enableBrokerProvider === false) return;
@@ -559,6 +815,14 @@ export class WsTunnel implements IBrokerContext {
      * Gracefully closes all connections and stops the HTTP server.
      */
     async stop(): Promise<void> {
+        // First thing, before any `await`: a live interval keeps the event loop
+        // busy, and both of these fire on sockets that are about to be torn
+        // down. They are `unref`'d, so they cannot by themselves hold a process
+        // open, but a test runner that checks for leaked handles counts them.
+        this._stopHeartbeat();
+        this._stopRequestTimeoutSweep();
+        this._providerSockets.clear();
+
         // Stop the embedded broker first so it does not see its loopback close
         // as an unexpected disconnect (and to flush any pending broker responses).
         const brokerServer = this._brokerServer;
@@ -610,8 +874,334 @@ export class WsTunnel implements IBrokerContext {
             this._loopbackProviders.clear();
             this._startedAt = null;
             this._wss?.close();
-            this._httpServer?.close((err) => (err ? reject(err) : resolve()));
+
+            const httpServer = this._httpServer;
+            if (!httpServer) {
+                // Never started: there is no close callback coming, and waiting
+                // for one would hang the caller's teardown.
+                resolve();
+                return;
+            }
+            httpServer.close((err) => {
+                // A tunnel whose `start()` rejected (the port was already taken)
+                // has a server object that never listened, and closing that one
+                // answers `ERR_SERVER_NOT_RUNNING`. Failing the teardown on it
+                // would replace the real diagnosis with a meaningless one, in the
+                // `finally` where the caller is trying to clean up after the first.
+                if (err && (err as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") reject(err);
+                else resolve();
+            });
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Provider liveness (heartbeat) and slot takeover
+    // -------------------------------------------------------------------------
+
+    /** Effective heartbeat period in ms; `0` means the heartbeat is off. */
+    private _heartbeatIntervalMs(): number {
+        const configured = this._options.providerHeartbeatIntervalMs;
+        return Math.max(0, configured ?? DEFAULT_PROVIDER_HEARTBEAT_MS);
+    }
+
+    /** Effective per-request deadline in ms; `0` means requests never expire. */
+    private _requestTimeoutMs(): number {
+        const configured = this._options.providerRequestTimeoutMs;
+        return Math.max(0, configured ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+    }
+
+    /**
+     * Starts watching every provider socket for a missed pong.
+     *
+     * `unref()` is not cosmetic: without it this interval alone keeps the Node
+     * event loop alive, so every test file that starts a tunnel would hang on
+     * teardown, and an embedder's process would refuse to exit.
+     */
+    private _startHeartbeat(): void {
+        const interval = this._heartbeatIntervalMs();
+        if (interval === 0) return;
+        this._heartbeatTimer = setInterval(() => this._sweepHeartbeats(), interval);
+        this._heartbeatTimer.unref?.();
+    }
+
+    private _stopHeartbeat(): void {
+        if (!this._heartbeatTimer) return;
+        clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = null;
+    }
+
+    /**
+     * One heartbeat round: terminate whoever did not answer the previous ping,
+     * then ping everybody still standing.
+     *
+     * The two-phase shape is what gives a provider a full interval to reply,
+     * and it is why {@link _alive} means "answered since the last sweep" rather
+     * than "is connected".
+     */
+    private _sweepHeartbeats(): void {
+        const interval = this._heartbeatIntervalMs();
+        for (const ws of [...this._providerSockets]) {
+            if (ws.readyState !== WebSocket.OPEN) {
+                this._providerSockets.delete(ws);
+                continue;
+            }
+            if (this._alive.get(ws) === false) {
+                const slots = this._slotsOfSocket(ws);
+                console.warn(
+                    `[broker] provider socket for ${slots} did not answer a WebSocket ping within ${interval}ms; terminating it and freeing the slot. ` +
+                        `The provider process, tab or network path is gone. It may reconnect immediately. ` +
+                        `If this provider is alive but slow, raise providerHeartbeatIntervalMs (or set it to 0 to disable the heartbeat).`
+                );
+                this._providerSockets.delete(ws);
+                ws.terminate();
+                continue;
+            }
+            this._alive.set(ws, false);
+            try {
+                ws.ping();
+            } catch (err) {
+                // A socket that died between the readyState check and the ping.
+                // Nothing to diagnose: the close handler is already on its way.
+                this._providerSockets.delete(ws);
+                void err;
+            }
+        }
+    }
+
+    /**
+     * Puts one accepted provider socket under the heartbeat.
+     *
+     * No-op when the heartbeat is disabled, which is what keeps
+     * {@link _alive} empty and makes the admission check fall back to refusing
+     * every takeover: with no liveness evidence, evicting the incumbent would
+     * be a guess.
+     */
+    private _watchProviderSocket(ws: WebSocket): void {
+        if (this._heartbeatIntervalMs() === 0) return;
+        this._alive.set(ws, true);
+        this._providerSockets.add(ws);
+        ws.on("pong", () => this._alive.set(ws, true));
+        ws.on("close", () => this._providerSockets.delete(ws));
+    }
+
+    /** Human-readable list of the slots one provider socket currently serves. */
+    private _slotsOfSocket(ws: WebSocket): string {
+        const announced = this._multiplexSockets.get(ws);
+        if (announced) return announced.size > 0 ? `multiplexed slots [${[...announced].join(", ")}]` : "a multiplexed socket that announced no slot";
+        const owned = [...this._providers.entries()].filter(([, state]) => state.ws === ws).map(([name]) => name);
+        return owned.length > 0 ? `slot "${owned.join('", "')}"` : "a slot it no longer owns";
+    }
+
+    /**
+     * Decides whether a newly connected provider socket may take the slot
+     * `name`, evicting the incumbent when it is allowed to.
+     *
+     * Returns `null` when the newcomer is admitted, or the refusal otherwise:
+     * `detail` is the full diagnosis for the log and for the envelope the
+     * multiplexed path can carry, `closeReason` the same thing squeezed into the
+     * 123 bytes RFC 6455 allows on a close frame, with the actionable part
+     * first so truncation eats the slot name (which the peer already knows)
+     * rather than the instruction.
+     *
+     * See {@link ProviderTakeoverMode} for what each mode means and why
+     * `"always"` is gated on provider authentication.
+     */
+    private _claimSlot(name: string, ws: WebSocket): { detail: string; closeReason: string } | null {
+        const incumbent = this._providers.get(name)?.ws ?? null;
+        if (!incumbent || incumbent === ws || incumbent.readyState !== WebSocket.OPEN) return null;
+
+        const mode: ProviderTakeoverMode = this._options.providerTakeover ?? "liveness";
+
+        if (mode === "always") {
+            if (this._sameProviderPrincipal(incumbent, ws)) {
+                console.warn(`[broker] provider "${name}": takeover mode "always", the incumbent socket is being terminated in favor of the new one from the same principal.`);
+                incumbent.terminate();
+                return null;
+            }
+            // Not a refusal on its own: fall through to the liveness rule. Saying
+            // so out loud matters, because the operator asked for "always" and is
+            // entitled to know why they did not get it.
+            console.warn(
+                `[broker] provider "${name}": takeover mode "always" is not honored here and the broker fell back to "liveness". ` +
+                    `Unconditional takeover is only safe when providerAuth is configured AND the new socket authenticated as the same principal as the incumbent; ` +
+                    `otherwise anyone able to reach the provider URL could evict the real provider at will. Configure providerAuth (withProviderSecret) to enable it.`
+            );
+        }
+
+        if (mode !== "reject" && this._alive.get(incumbent) === false) {
+            console.warn(`[broker] provider "${name}": the incumbent socket missed its last heartbeat, so it is terminated and the new connection takes the slot.`);
+            incumbent.terminate();
+            return null;
+        }
+
+        const heartbeat = this._heartbeatIntervalMs();
+        const why =
+            mode === "reject"
+                ? `providerTakeover is "reject", so a live slot is never handed over.`
+                : heartbeat === 0
+                  ? `The heartbeat is disabled (providerHeartbeatIntervalMs: 0), so the broker has no evidence the incumbent is dead and will not evict it.`
+                  : `The incumbent answered the last heartbeat, so it is treated as alive.`;
+        const recovery =
+            heartbeat === 0
+                ? `Enable the heartbeat (providerHeartbeatIntervalMs) so a dead socket frees its slot on its own`
+                : `wait up to ${heartbeat}ms for the heartbeat to notice a dead socket and reconnect`;
+        return {
+            detail:
+                `Provider "${name}" is already connected. ${why} ` +
+                `If the previous instance really is gone, ${recovery}, close the old socket cleanly from the provider side, or publish on a different slot name. ` +
+                `Call provider_status on the _broker slot to see which socket holds it.`,
+            closeReason: `Slot already held by a live provider; call provider_status on _broker. Slot: "${name}"`,
+        };
+    }
+
+    /**
+     * `true` when two provider sockets authenticated as the same principal.
+     *
+     * Deliberately `false` when provider auth is off: with no authenticator
+     * there are no principals to compare, and treating "both anonymous" as
+     * "the same provider" is exactly the spoofing primitive the gate exists to
+     * prevent.
+     */
+    private _sameProviderPrincipal(a: WebSocket, b: WebSocket): boolean {
+        if (!this._providerAuth) return false;
+        const left = this._providerPrincipals.get(a);
+        const right = this._providerPrincipals.get(b);
+        return left !== undefined && right !== undefined && left.id === right.id;
+    }
+
+    /** Closes a socket with a reason RFC 6455 actually allows on the wire. */
+    private _closeWs(ws: WebSocket, code: number, reason: string): void {
+        ws.close(code, truncateReason(reason));
+    }
+
+    // -------------------------------------------------------------------------
+    // Pending requests: correlation and deadlines
+    // -------------------------------------------------------------------------
+
+    /**
+     * Registers one outbound request against a slot and returns the frame to
+     * put on the wire, with the client's JSON-RPC id replaced by a
+     * broker-assigned one.
+     *
+     * The rewrite is the fix for a cross-client response leak. `state.pending`
+     * is one map per **slot**, written from five different ingresses (raw WS,
+     * legacy SSE, Streamable HTTP, the stdio bridge, in-process clients), and
+     * it used to be keyed by the id the client chose. Two clients on one slot
+     * that both start numbering at 1 (MCP Inspector plus Claude, the pairing
+     * the architecture doc explicitly advertises) therefore shared one entry:
+     * the second write replaced the first, one client received the other's
+     * result, and the overwritten request hung forever with no error. Rewriting
+     * also stops the provider from seeing two concurrent requests with the same
+     * id, which it has no way to answer correctly either.
+     *
+     * Invisible to conforming clients: {@link _routeFromProvider} restores the
+     * original id before the answer is delivered.
+     *
+     * Frames with no usable id (notifications) and JSON-RPC batches (an array,
+     * which has no top-level id) are returned untouched and untracked, exactly
+     * as before.
+     */
+    private _trackRequest(state: IProviderState, frame: string, sink: ResponseSink): string {
+        const message = parseObjectFrame(frame);
+        if (!message) return frame;
+        const clientId = message.id;
+        if (typeof clientId !== "string" && typeof clientId !== "number") return frame;
+
+        const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._nextRequestId++}`;
+        const timeout = this._requestTimeoutMs();
+        state.pending.set(brokerId, { sink, clientId, expiresAt: timeout > 0 ? Date.now() + timeout : 0 });
+        message.id = brokerId;
+        return JSON.stringify(message);
+    }
+
+    /** Delivers one already-addressed frame to the sink that is waiting for it. */
+    private _deliverToSink(state: IProviderState, sink: ResponseSink, data: string): void {
+        switch (sink.type) {
+            case "ws":
+                if (sink.socket.readyState === WebSocket.OPEN) sink.socket.send(data);
+                return;
+            case "sse": {
+                const sseRes = state.sseSessions.get(sink.sessionId);
+                if (sseRes) this._sendSseEvent(sseRes, data);
+                return;
+            }
+            case "http-session":
+                // The session transport decides whether this answers a held-open
+                // POST or travels on the GET stream: it correlates by id.
+                state.httpSessions.get(sink.sessionId)?.transport.send(data);
+                return;
+            case "stdio":
+                this._stdioClientTransport?.send(data);
+                return;
+            case "internal":
+                sink.client.onMessage?.(data);
+                return;
+        }
+    }
+
+    /**
+     * Starts the sweep that fails requests a provider never answered.
+     *
+     * Same `unref()` requirement as the heartbeat. The period is derived from
+     * the deadline rather than fixed, so a short timeout (a test, or a
+     * latency-sensitive deployment) is still honored roughly on time instead of
+     * being rounded up to the next sweep minutes later.
+     */
+    private _startRequestTimeoutSweep(): void {
+        const timeout = this._requestTimeoutMs();
+        if (timeout === 0) return;
+        const period = Math.max(250, Math.min(5_000, Math.floor(timeout / 2)));
+        this._requestTimeoutTimer = setInterval(() => this._sweepPendingTimeouts(), period);
+        this._requestTimeoutTimer.unref?.();
+    }
+
+    private _stopRequestTimeoutSweep(): void {
+        if (!this._requestTimeoutTimer) return;
+        clearInterval(this._requestTimeoutTimer);
+        this._requestTimeoutTimer = null;
+    }
+
+    /**
+     * Fails every request whose deadline has passed.
+     *
+     * Until this existed a pending entry was released only by a matching
+     * response, a provider disconnect, or the client's own close, so a provider
+     * that stayed connected and simply never answered (a browser tab throttled
+     * in the background is the ordinary case) left the caller waiting with
+     * nothing to release it and no trace anywhere. A named error is strictly
+     * better than a hang.
+     */
+    private _sweepPendingTimeouts(): void {
+        const timeout = this._requestTimeoutMs();
+        if (timeout === 0) return;
+        const now = Date.now();
+
+        for (const [name, state] of this._providers) {
+            for (const [brokerId, entry] of state.pending) {
+                if (entry.expiresAt === 0 || entry.expiresAt > now) continue;
+                state.pending.delete(brokerId);
+                console.warn(
+                    `[broker] provider "${name}" did not answer a request within ${timeout}ms; the caller was sent a timeout error. ` +
+                        `The socket is still connected, so this is the provider not replying rather than a disconnect: check that its MCP message handler was installed BEFORE the transport connected, ` +
+                        `that it echoes the JSON-RPC id it was given, and that the page hosting it is not throttled in a background tab. ` +
+                        `Raise providerRequestTimeoutMs for genuinely long-running tools.`
+                );
+                this._deliverToSink(
+                    state,
+                    entry.sink,
+                    JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: entry.clientId,
+                        error: {
+                            code: -32000,
+                            message:
+                                `Provider "${name}" did not respond within ${timeout}ms. The provider socket is still connected but sent no answer for this request. ` +
+                                `Call broker_diagnose on the _broker slot for the live state of this slot.`,
+                        },
+                    })
+                );
+            }
+        }
     }
 
     private _authorizationSubject(principal: IPrincipal | null): IAuthorizationSubject {
@@ -625,9 +1215,18 @@ export class WsTunnel implements IBrokerContext {
                 }
             );
         } catch (error) {
-            if (!(error instanceof SubjectMappingError)) {
-                console.error("[broker] authorization subject mapping failed.");
-            }
+            // Both branches are logged, deliberately. A `SubjectMappingError` used
+            // to be swallowed here, which made the single most likely
+            // misconfiguration the one case that produced no output at all, while
+            // the empty subject returned below makes the policy engine deny every
+            // request from this caller. It is a configuration fault, not attacker
+            // noise, and the HTTP path already diagnoses it out loud (a 403 saying
+            // "Malformed configured JWT subject claim", see `auth/http.auth.ts`).
+            const kind = error instanceof SubjectMappingError ? "malformed configured JWT subject claim" : "subject mapping failed";
+            console.error(
+                `[broker] authorization ${kind}: ${(error as Error).message}` +
+                    ` -- every request from this caller is denied while this stands. Check authorization.subjectMapping against the claims the token actually carries.`
+            );
             return { ids: [], claims: principal.claims };
         }
     }
@@ -683,9 +1282,14 @@ export class WsTunnel implements IBrokerContext {
         for (const value of operations) {
             if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
             const operation = value as Readonly<{ method?: string; params?: unknown }>;
+            // Hoisted out of the `try` so the failure path can still name the
+            // capability when the throw came from the engine rather than from the
+            // classifier.
+            let capability: string | undefined;
             try {
                 const classified = authorization.capabilityClassifier.classify(operation, resource, providerName);
                 if (!classified) continue;
+                capability = classified.capability;
                 const decision = authorization.engine.authorize({
                     subject,
                     capability: classified.capability,
@@ -695,10 +1299,22 @@ export class WsTunnel implements IBrokerContext {
                 });
                 this._auditDecision(subject, providerName, resource, classified.capability, classified.tool, decision);
                 if (!decision.allowed) return false;
-            } catch {
-                console.error("[broker] policy evaluation failed.");
-                const decision: IAuthorizationDecision = { allowed: false, reason: "no-matching-grant" };
-                this._auditDecision(subject, providerName, resource, undefined, undefined, decision);
+            } catch (error) {
+                // The evaluation itself threw: a classifier or engine fault, not a
+                // policy miss. The two call for opposite fixes, and the audit event
+                // used to claim "no-matching-grant", which sends the operator off
+                // to write grants that can never help. So say what actually
+                // happened, with everything needed to reproduce it.
+                console.error(
+                    `[broker] policy evaluation error on slot "${providerName}": ${(error as Error).message}` +
+                        ` -- subject=[${subject.ids.join(", ") || "(none)"}] resource="${resource.value}" capability="${capability ?? "(unclassified)"}" method="${operation.method ?? "(none)"}".` +
+                        ` The request is denied. This is a fault in the authorization configuration or in the frame, not a missing grant.`
+                );
+                // "evaluation-error", not "no-matching-grant": nothing was
+                // decided here, the request is denied because that is the safe
+                // answer to a fault.
+                const decision: IAuthorizationDecision = { allowed: false, reason: "evaluation-error" };
+                this._auditDecision(subject, providerName, resource, capability, undefined, decision);
                 return false;
             }
         }
@@ -775,6 +1391,10 @@ export class WsTunnel implements IBrokerContext {
             const { providerName, endpoint } = route;
             const kind = this._mcpEndpointKind(endpoint, method);
             if (kind) {
+                // The `mcp` kind is left out on purpose: `StreamableHttpEndpoint`
+                // already runs the identical check, with the same predicate.
+                if ((kind === "sse-connect" || kind === "sse-message") && !this._sseOriginAllowed(req, res, providerName, kind)) return;
+
                 if (this._authGuard) {
                     // Gate on a valid bearer token issued for this slot before touching
                     // the provider. On failure, emit an RFC 9728 challenge / 500.
@@ -797,6 +1417,47 @@ export class WsTunnel implements IBrokerContext {
             res.writeHead(404);
             res.end();
         }
+    }
+
+    /**
+     * Applies the browser-origin check to the legacy SSE pair, answering `403`
+     * and returning `false` when the origin is refused.
+     *
+     * This closes a hole, and it is the one behavior change in this release a
+     * browser page can notice. `allowedOrigins` reached exactly one place, the
+     * Streamable HTTP endpoint, so `/<slot>/sse` and `/<slot>/messages` were
+     * open to every page on the machine: `Access-Control-Allow-Origin: *` is
+     * set unconditionally a few lines above, and a POST of JSON to
+     * `/<slot>/messages` is a CORS *simple* request, so any page could open an
+     * `EventSource`, read the session id off the `endpoint` event, and drive the
+     * broker. That is verbatim the attack the origin check exists to stop.
+     *
+     * The contract of the check is preserved exactly: a request carrying **no**
+     * `Origin` always passes, which is every non-browser client (Claude Desktop,
+     * Inspector, the server-side SDKs), and an `Origin` passes only if
+     * `allowedOrigins` names it. The same predicate object is used as for
+     * `/<slot>/mcp`, so the two endpoints cannot drift apart.
+     */
+    private _sseOriginAllowed(req: IncomingMessage, res: ServerResponse, providerName: string, kind: McpEndpointKind): boolean {
+        const origin = req.headers.origin;
+        // A request with no Origin cannot come from a browser, so it is not this
+        // check's business and passes straight through.
+        if (typeof origin !== "string" || origin.length === 0) return true;
+        if (this._allowedOrigins(origin)) return true;
+
+        const endpoint = kind === "sse-connect" ? `/${providerName}${this._options.ssePath ?? "/sse"}` : `/${providerName}${this._options.messagesPath ?? "/messages"}`;
+        const configured = this._options.allowedOrigins !== undefined;
+        const description = configured
+            ? `Origin "${origin}" is not allowed to reach "${endpoint}". It is compared verbatim against the configured allowedOrigins, so a different scheme, port or a trailing slash does not match. ` +
+              `Add the exact origin the browser sends (MCP_BROKER_ALLOWED_ORIGINS, the \`allowedOrigins\` config key, or WsTunnelBuilder.withAllowedOrigins).`
+            : `Origin "${origin}" is refused because no browser origin is allowed: \`allowedOrigins\` is unset, and the default is closed. ` +
+              `A page served by this broker is not exempt, its origin has to be listed too. ` +
+              `Set MCP_BROKER_ALLOWED_ORIGINS (the \`allowedOrigins\` config key, or WsTunnelBuilder.withAllowedOrigins) to "${origin}" to open it, and only then.`;
+
+        console.warn(`[broker] refused SSE request on "${endpoint}": ${description}`);
+        res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "invalid_origin", error_description: description }));
+        return false;
     }
 
     /**
@@ -857,38 +1518,117 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
-     * Builds the `ws` verifyClient hook that authenticates every WebSocket
-     * upgrade before the connection is accepted, returning a real `401`/`403`
-     * during the handshake rather than a post-handshake close:
+     * Decides, from the URL alone, what one WebSocket upgrade is asking for.
      *
+     * One function rather than the two `startsWith` chains this used to be, one
+     * in the connection handler and one in `verifyClient`. They agreed by
+     * coincidence, and a disagreement would mean a socket authenticated as one
+     * role and then served as another.
+     *
+     * The three refusals are paths that cannot work whatever is behind them:
+     * a provider URL with no slot name (which used to mint a slot literally
+     * named `(unnamed)` that nothing could ever address) and a slot-scoped
+     * provider URL with more than one segment (`/provider/a/b`, which aliases
+     * the `%2F`-encoded spelling of the same slot, so refusing it removes
+     * nothing and forces one spelling).
+     *
+     * What is deliberately **not** refused: a slot name that matches nothing
+     * configured. Claiming a free slot by connecting to it is how a provider
+     * registers, so an unknown name is the normal case, not an error.
+     */
+    private _classifyWsRoute(url: string): WsRouteClassification {
+        const providerPath = this._options.providerPath ?? "/provider";
+        const providersPath = this._options.providersPath ?? "/providers";
+
+        // Exact match plus query string: the multiplex endpoint takes its slot
+        // names from the envelopes, never from the path.
+        if (url === providersPath || url.startsWith(providersPath + "?")) return { role: "multiplex-provider" };
+
+        // `${providerPath}?x=1` is deliberately absent from this test: it has
+        // always been served as a client on a slot named after the path, and
+        // narrowing that is not this change's business.
+        if (url === providerPath) {
+            return {
+                role: "reject",
+                detail:
+                    `"${providerPath}" is the provider path PREFIX, not an endpoint. A slot-scoped provider appends its slot name: "${providerPath}/<name>". ` +
+                    `If you meant the shared multiplexed socket, that is "${providersPath}" (exact path, one socket for many slots, envelope framing). ` +
+                    `Connecting here used to occupy a slot literally named "(unnamed)", which no client could address.`,
+                closeReason: `Missing slot name: connect to ${providerPath}/<name>, or to ${providersPath}`,
+            };
+        }
+
+        if (url.startsWith(providerPath + "/")) {
+            const raw = url.slice(providerPath.length + 1).split("?")[0];
+            if (raw.length === 0) {
+                return {
+                    role: "reject",
+                    detail: `"${url}" has an empty slot name. Append the slot the provider publishes: "${providerPath}/<name>".`,
+                    closeReason: `Empty slot name: connect to ${providerPath}/<name>`,
+                };
+            }
+            // Tested on the RAW segment, before decoding: hierarchical slot names
+            // are legitimate and travel percent-encoded (`%2Fsite-a%2Fline-3`),
+            // so decoding first would refuse exactly the shape the authorization
+            // layer is built around.
+            if (raw.includes("/")) {
+                return {
+                    role: "reject",
+                    detail:
+                        `"${url}" has more than one path segment after "${providerPath}/". A slot-scoped provider URL carries exactly one segment. ` +
+                        `A slot name containing "/" must be percent-encoded: "${providerPath}/${encodeURIComponent(safeDecode(raw))}". ` +
+                        `Both spellings resolve to the same slot, so only the encoded one is accepted.`,
+                    closeReason: `Too many path segments: percent-encode the slot name after ${providerPath}/`,
+                };
+            }
+            return { role: "dedicated-provider", slot: safeDecode(raw) };
+        }
+
+        // Raw WS MCP client: URL is "/<slot>" or "/".
+        return { role: "client", slot: safeDecode(url.replace(/^\//, "").split("?")[0]) };
+    }
+
+    /**
+     * Builds the `ws` verifyClient hook, which decides every WebSocket upgrade
+     * before the connection is accepted, returning a real HTTP status during
+     * the handshake rather than a post-handshake close:
+     *
+     * - Paths that cannot work are refused with `400` and the full reason as the
+     *   response body (see {@link _classifyWsRoute}).
      * - **Raw MCP clients** (`/<slot>`) are gated by the OAuth 2.1 resource
      *   server ({@link _authGuard}) with the RFC 9728 `WWW-Authenticate` challenge.
      * - **Providers** (`/provider/<slot>`, `/providers`) are gated by the
      *   {@link _providerAuth} shared-secret / custom authenticator.
      *
-     * Each side is independent: a branch with no authenticator configured is let
-     * through unchanged. Returns `undefined` (no hook) when neither is set.
+     * Each authentication side is independent: a branch with no authenticator
+     * configured is let through unchanged. The hook is always installed now,
+     * because the path check applies whether or not anything is authenticated.
      */
-    private _makeVerifyClient(): VerifyClientCallbackAsync | undefined {
+    private _makeVerifyClient(): VerifyClientCallbackAsync {
         const guard = this._authGuard;
         const providerAuth = this._providerAuth;
-        if (!guard && !providerAuth) return undefined;
-
-        const providerPath = this._options.providerPath ?? "/provider";
-        const providersPath = this._options.providersPath ?? "/providers";
 
         return (info, cb) => {
             const url = info.req.url ?? "/";
-            const isMultiplex = url === providersPath || url.startsWith(providersPath + "?");
-            const isDedicated = url.startsWith(providerPath + "/") || url === providerPath;
+            const route = this._classifyWsRoute(url);
 
-            if (isMultiplex || isDedicated) {
+            if (route.role === "reject") {
+                // `ws` writes this string as the body of the refused upgrade, so
+                // a Node client reads it off `unexpected-response`. A browser
+                // gets no status from script, which is why the connect log line
+                // carries the same diagnosis on the server side.
+                console.warn(`[broker] ws upgrade REFUSED path="${url}": ${route.detail}`);
+                cb(false, 400, route.detail);
+                return;
+            }
+
+            if (route.role === "multiplex-provider" || route.role === "dedicated-provider") {
                 // Provider (engine) upgrade, shared-secret / custom authenticator.
                 if (!providerAuth) {
                     cb(true);
                     return;
                 }
-                const slot = isDedicated ? decodeURIComponent(url.slice(providerPath.length).replace(/^\//, "").split("?")[0]) || undefined : undefined;
+                const slot = route.role === "dedicated-provider" ? route.slot : undefined;
                 Promise.resolve(providerAuth.authenticate(info.req, slot)).then(
                     (rawResult) => {
                         const result = normalizeProviderAuthentication(rawResult);
@@ -965,8 +1705,8 @@ export class WsTunnel implements IBrokerContext {
 
         req.on("close", () => {
             state.sseSessions.delete(sessionId);
-            for (const [id, sink] of state.pending) {
-                if (sink.type === "sse" && sink.sessionId === sessionId) state.pending.delete(id);
+            for (const [brokerId, entry] of state.pending) {
+                if (entry.sink.type === "sse" && entry.sink.sessionId === sessionId) state.pending.delete(brokerId);
             }
         });
     }
@@ -997,33 +1737,15 @@ export class WsTunnel implements IBrokerContext {
                 res.end(this._policyDeniedPayload(body));
                 return;
             }
-            try {
-                const msg = JSON.parse(body) as { id?: string | number };
-                if (msg.id != null) state.pending.set(msg.id, { type: "sse", sessionId });
-            } catch {
-                /* malformed, forward anyway */
-            }
-
             if (this._isProviderConnected(providerName, state)) {
-                this._sendToProvider(state, providerName, body, principal);
+                // Tracked only once the frame is actually on its way out: an
+                // entry added before the connectivity check has nothing to
+                // answer it and would pin that id until the slot next
+                // disconnects (the raw-WS path had the same ordering bug).
+                this._sendToProvider(state, providerName, this._trackRequest(state, body, { type: "sse", sessionId }), principal);
             } else {
                 const sseRes = state.sseSessions.get(sessionId);
-                if (sseRes) {
-                    let errId: string | number | null = null;
-                    try {
-                        errId = (JSON.parse(body) as { id?: string | number }).id ?? null;
-                    } catch {
-                        /* */
-                    }
-                    this._sendSseEvent(
-                        sseRes,
-                        JSON.stringify({
-                            jsonrpc: "2.0",
-                            id: errId,
-                            error: { code: -32000, message: `Provider "${providerName}" not connected` },
-                        })
-                    );
-                }
+                if (sseRes) this._sendSseEvent(sseRes, this._notConnectedPayload(providerName, body));
             }
 
             res.writeHead(202);
@@ -1088,8 +1810,8 @@ export class WsTunnel implements IBrokerContext {
                         state.httpSessions.delete(sessionId);
                         // Nothing can answer the requests this session had in
                         // flight; leaving them would pin the ids forever.
-                        for (const [id, sink] of state.pending) {
-                            if (sink.type === "http-session" && sink.sessionId === sessionId) state.pending.delete(id);
+                        for (const [brokerId, entry] of state.pending) {
+                            if (entry.sink.type === "http-session" && entry.sink.sessionId === sessionId) state.pending.delete(brokerId);
                         }
                     },
                 };
@@ -1111,10 +1833,7 @@ export class WsTunnel implements IBrokerContext {
             return;
         }
 
-        const id = requestIdOf(frame);
-        if (id !== undefined) state.pending.set(id, { type: "http-session", sessionId });
-
-        this._sendToProvider(state, providerName, frame, session.principal);
+        this._sendToProvider(state, providerName, this._trackRequest(state, frame, { type: "http-session", sessionId }), session.principal);
     }
 
     /** Writes one JSON-RPC message as an SSE `message` event. */
@@ -1126,6 +1845,39 @@ export class WsTunnel implements IBrokerContext {
     // -------------------------------------------------------------------------
     // WebSocket connection handlers
     // -------------------------------------------------------------------------
+
+    /**
+     * Prints one line for every accepted WebSocket upgrade: the path asked for,
+     * the role the router gave it, and the slot it landed on.
+     *
+     * Without it a successful connect produces no output whatsoever, so a
+     * mistyped provider URL looks exactly like a working one until nothing ever
+     * answers. The last router branch accepts **any** unmatched path as a client
+     * slot, so `/providers/foo` (neither the multiplex endpoint `/providers` nor
+     * a dedicated `/provider/foo`) becomes a client on a slot literally named
+     * `providers/foo`; that case gets the fix spelled out in the same line.
+     *
+     * `console.log` is safe here: in stdio mode `bin.ts` rebinds the console to
+     * stderr before the tunnel starts, so this never reaches the JSON-RPC stream.
+     */
+    private _logWsConnection(path: string, role: WsConnectRole, slot: string): void {
+        let hint = "";
+        if (role === "client") {
+            const providerPath = this._options.providerPath ?? "/provider";
+            const providersPath = this._options.providersPath ?? "/providers";
+            const providerSlot = providerPath.replace(/^\//, "");
+            const providersSlot = providersPath.replace(/^\//, "");
+            // `/provider?x=1` matches neither provider branch (they test the bare
+            // path and the `<path>/` prefix), and `/providers/foo` matches neither
+            // the exact multiplex path nor the dedicated prefix.
+            if (slot === providerSlot || slot === providersSlot || slot.startsWith(providersSlot + "/")) {
+                hint =
+                    ` -- this looks like a provider URL but matched no provider route, so it was accepted as a CLIENT slot and nothing will ever answer it. ` +
+                    `Connect a MultiplexTransport to "${providersPath}" (exact path, slots announced per envelope), or a DirectTransport to "${providerPath}/<name>".`;
+            }
+        }
+        console.log(`[broker] ws connect path="${path}" role=${role} slot="${slot}"${hint}`);
+    }
 
     private _logProviderRegistration(principal: IProviderPrincipal, slot: string, resource: ResourcePath | undefined, allowed: boolean): void {
         const event = {
@@ -1150,24 +1902,26 @@ export class WsTunnel implements IBrokerContext {
             console.warn(
                 `[broker] WARNING: WebSocket provider "${name}" rejected: a stdio upstream with the same name is already configured. ` + `Rename one of them to avoid the conflict.`
             );
-            ws.close(1008, `Provider "${name}" is managed by a stdio upstream`);
+            this._closeWs(ws, 1008, `Provider "${name}" is managed by a stdio upstream`);
             return;
         }
 
         if (this._loopbackProviders.has(name)) {
             console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected: the slot is held by an in-process loopback (reserved system slot).`);
-            ws.close(1008, `Provider "${name}" is reserved by the broker`);
+            this._closeWs(ws, 1008, `Provider "${name}" is reserved by the broker`);
             return;
         }
 
-        const existing = this._providers.get(name);
-        if (existing?.ws?.readyState === WebSocket.OPEN) {
-            ws.close(1008, `Provider "${name}" is already connected`);
+        const refusal = this._claimSlot(name, ws);
+        if (refusal) {
+            console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected. ${refusal.detail}`);
+            this._closeWs(ws, 1008, refusal.closeReason);
             return;
         }
 
         const state = this._getOrCreateProviderState(name);
         state.ws = ws;
+        this._watchProviderSocket(ws);
         if (providerPrincipal) {
             this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
         }
@@ -1181,35 +1935,164 @@ export class WsTunnel implements IBrokerContext {
             const text = data.toString();
             if (!registrationChecked) {
                 registrationChecked = true;
+                if (this._refuseEnvelopeOnSlotPath(ws, name, text)) return;
                 if (this._tryHandleRegistration(name, text)) return;
             }
             this._routeFromProvider(state, name, text);
         });
 
         ws.on("close", () => {
+            // Only the socket that currently holds the slot may release it.
+            //
+            // A provider that reconnects while its predecessor is still CLOSING
+            // is admitted (the incumbent is no longer OPEN), takes `state.ws`,
+            // and would then have its own registration nulled out by the
+            // predecessor's deferred close. The slot stays wedged: the socket is
+            // open and answering, `provider_status` reports `connected: false`,
+            // and `_failProviderDisconnected` has already evicted the slot from
+            // `_all`, which the aggregate opt-in cannot restore because it is
+            // checked once per socket, on the first frame. The multiplexed path
+            // has always guarded this way.
+            if (state.ws !== ws) return;
             state.ws = null;
             this._failProviderDisconnected(state, name);
+        });
+
+        // `ws` emits 'error' for receive-side protocol faults, an invalid UTF-8
+        // text frame or a bad opcode among them, and Node rethrows an unhandled
+        // 'error' event as an uncaught exception. Without this listener one
+        // malformed frame from one provider takes the whole broker down and every
+        // other provider with it. Log and let the socket close on its own: `ws`
+        // closes it right after emitting.
+        ws.on("error", (err: Error) => {
+            console.error(`[broker] provider "${name}" socket error: ${err.message}. The socket is being closed; the provider should reconnect.`);
         });
     }
 
     /**
-     * Inspects a provider's first WebSocket message for an optional registration
-     * control frame `{ "type": "register", "aggregate": boolean }`. Returns
-     * `true` when the message was a registration frame: and thus consumed, not
-     * routed as MCP traffic. A normal MCP frame always carries `jsonrpc`, so it
+     * Inspects a provider's first WebSocket message for a registration frame,
+     * and consumes it when that is what it is. Returns `true` when the message
+     * was a registration, and thus must not be routed as MCP traffic.
+     *
+     * Two shapes are accepted, both notifications a peer that does not know them
+     * ignores:
+     *
+     * - `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}`,
+     *   what `@cyanmycelium/mcp-broker-provider` sends on **both** paths. This
+     *   is the shape to write new providers against: the multiplexed socket has
+     *   always used it (wrapped in an envelope), so there is now one
+     *   registration to learn instead of one per path.
+     * - `{"type":"register","aggregate":true}`, the legacy control frame, kept
+     *   working indefinitely for hand-written providers already sending it.
+     *
+     * `aggregate` is opt-in and stays that way. Joining `_all` publishes a
+     * provider's tools and prompts to every client of the aggregate slot, which
+     * is a confidentiality boundary: a provider that never asks is reachable
+     * only on its own slot.
+     *
+     * A normal MCP frame carries `jsonrpc` with some other `method`, so it
      * returns `false` and the provider stays non-aggregated.
      */
     private _tryHandleRegistration(name: string, text: string): boolean {
-        let frame: { type?: unknown; jsonrpc?: unknown; aggregate?: unknown };
-        try {
-            frame = JSON.parse(text) as typeof frame;
-        } catch {
-            return false;
-        }
-        if (frame.jsonrpc !== undefined || frame.type !== "register") return false;
-        if (frame.aggregate === true) {
+        const frame = parseObjectFrame(text);
+        if (!frame) return false;
+
+        const isJsonRpcRegister = frame.jsonrpc !== undefined && frame.method === TUNNEL_REGISTER_METHOD;
+        const isLegacyRegister = frame.jsonrpc === undefined && frame.type === "register";
+        if (!isJsonRpcRegister && !isLegacyRegister) return false;
+
+        if (registrationAsksForAggregate(frame)) {
             void this._aggregateServer?.addProvider(name);
         }
+        return true;
+    }
+
+    /**
+     * Detects a `MultiplexTransport` connected to a slot-scoped provider URL,
+     * the single most reported way to wire this broker up wrong, and refuses it
+     * instead of letting it look like it worked.
+     *
+     * What the mistake looks like without this check: the socket connects, the
+     * broker registers the slot from the URL before any frame exists, so
+     * `provider_status` reports the provider connected; then every frame the
+     * broker sends is a plain JSON-RPC one that the peer's envelope decoder
+     * drops on the floor, and every frame the peer sends is an envelope with no
+     * top-level `id`, so it matches no pending request. Both sides believe they
+     * are connected and no request is ever answered. Nothing is logged anywhere.
+     *
+     * Only an **unambiguous** envelope closes the socket: a JSON object with no
+     * `jsonrpc` member that decodes as `{provider, payload}`. A malformed frame
+     * is left alone and routed as before, since a provider is entitled to speak
+     * a dialect the broker does not recognize. The legacy
+     * `{"type":"register","aggregate":true}` frame has no `provider`/`payload`
+     * pair and so is never mistaken for one.
+     *
+     * The diagnosis goes out three ways because each reaches a different reader:
+     * the broker log, an error **envelope** (the only framing this particular
+     * peer can decode), and the close reason, which the provider SDK surfaces
+     * through `onError` and prints to the browser console.
+     */
+    private _refuseEnvelopeOnSlotPath(ws: WebSocket, name: string, text: string): boolean {
+        const frame = parseObjectFrame(text);
+        if (!frame || frame.jsonrpc !== undefined) return false;
+        const envelope = decodeEnvelope(text);
+        if (!envelope) return false;
+
+        const providerPath = this._options.providerPath ?? "/provider";
+        const providersPath = this._options.providersPath ?? "/providers";
+        const detail =
+            `Provider "${name}" is registered on the slot-scoped path "${providerPath}/${name}", which carries plain JSON-RPC frames, but its first frame is a multiplex envelope ` +
+            `(it announced slot "${envelope.provider}"). This is a MultiplexTransport pointed at a DirectTransport URL. Two corrections, either works: ` +
+            `use DirectTransport for "${providerPath}/${name}" (plain frames, one slot fixed by the URL), or keep MultiplexTransport and connect it to "${providersPath}" ` +
+            `(exact path, envelope framing, slots announced per frame). The connection is being closed; it would otherwise look connected and answer nothing.`;
+
+        console.warn(`[broker] ${detail}`);
+        try {
+            // Addressed to the slot the peer announced, not to the URL's: that is
+            // the name its own decoder will match the envelope against.
+            ws.send(encodeErrorEnvelope(envelope.provider, TunnelErrorCodes.ProviderUnavailable, detail));
+        } catch {
+            /* the socket may already be gone; the log and the close reason stand */
+        }
+        this._closeWs(ws, 1008, `Envelope frame on slot-scoped path ${providerPath}/${name}: use DirectTransport here, or connect to ${providersPath}`);
+        return true;
+    }
+
+    /**
+     * The mirror image: a `DirectTransport` connected to the shared multiplexed
+     * base. Refuses it instead of dropping its frames one by one in silence.
+     *
+     * Signature of the mistake: the socket opens, the broker never learns a slot
+     * name (they only arrive inside envelopes), so no slot is ever claimed and
+     * every client is told the provider is not connected, while the provider
+     * believes it published successfully.
+     *
+     * Only a frame that is unambiguously plain JSON-RPC (a JSON object carrying
+     * `jsonrpc`, that did not decode as an envelope) closes the socket. Anything
+     * else keeps the old behavior of dropping the frame, now with one warning.
+     */
+    private _refusePlainFrameOnMultiplexPath(ws: WebSocket, text: string): boolean {
+        const frame = parseObjectFrame(text);
+        if (!frame || frame.jsonrpc === undefined) return false;
+
+        const providerPath = this._options.providerPath ?? "/provider";
+        const providersPath = this._options.providersPath ?? "/providers";
+        const detail =
+            `A provider connected to the multiplexed path "${providersPath}", which carries envelope frames {"provider":"<slot>","payload":{...}}, but sent a plain JSON-RPC frame ` +
+            `(method "${String(frame.method ?? "(none)")}"). This is a DirectTransport pointed at a MultiplexTransport URL. Two corrections, either works: ` +
+            `use MultiplexTransport for "${providersPath}" (it wraps every frame and announces its slots), or keep DirectTransport and connect it to "${providerPath}/<name>" ` +
+            `(the slot comes from the URL there). The connection is being closed; on this path the broker never learns a slot name, so every client would be told the provider is not connected.`;
+
+        console.warn(`[broker] ${detail}`);
+        try {
+            // A bare JSON-RPC error, matching what this peer speaks: an envelope
+            // would be dropped by a DirectTransport exactly the way its own
+            // frames are being dropped here.
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: TunnelErrorCodes.ProviderUnavailable, message: detail } }));
+        } catch {
+            /* the socket may already be gone; the log and the close reason stand */
+        }
+        this._closeWs(ws, 1008, `Plain JSON-RPC on multiplex path ${providersPath}: use MultiplexTransport here, or connect to ${providerPath}/<name>`);
         return true;
     }
 
@@ -1229,9 +2112,16 @@ export class WsTunnel implements IBrokerContext {
 
         ws.on("close", () => {
             state.wsClients.delete(ws);
-            for (const [id, sink] of state.pending) {
-                if (sink.type === "ws" && sink.socket === ws) state.pending.delete(id);
+            for (const [brokerId, entry] of state.pending) {
+                if (entry.sink.type === "ws" && entry.sink.socket === ws) state.pending.delete(brokerId);
             }
+        });
+
+        // Same reason as on the provider sockets: an unhandled 'error' event is
+        // rethrown by Node, so a single client sending a malformed frame would
+        // otherwise kill the broker for everybody.
+        ws.on("error", (err: Error) => {
+            console.error(`[broker] client socket error on slot "${providerName}": ${err.message}. The socket is being closed; the client should reconnect.`);
         });
     }
 
@@ -1244,15 +2134,39 @@ export class WsTunnel implements IBrokerContext {
     private _onMultiplexProviderConnect(ws: WebSocket, req: IncomingMessage): void {
         const providerNames = new Set<string>();
         this._multiplexSockets.set(ws, providerNames);
+        this._watchProviderSocket(ws);
         const providerPrincipal = this._pendingProviderPrincipals.get(req);
         if (providerPrincipal) {
             this._pendingProviderPrincipals.delete(req);
             this._providerPrincipals.set(ws, providerPrincipal);
         }
 
+        // Undecodable frames used to be dropped without a word. The first one is
+        // where a DirectTransport on the wrong URL is caught; later ones warn
+        // once, because a peer that speaks the wrong dialect speaks it on every
+        // frame and must not be allowed to flood the log.
+        let firstFrame = true;
+        let undecodableWarned = false;
+
         ws.on("message", (data: Buffer) => {
-            const envelope = decodeEnvelope(data.toString());
-            if (!envelope) return; // malformed, drop
+            const text = data.toString();
+            const envelope = decodeEnvelope(text);
+            const wasFirstFrame = firstFrame;
+            firstFrame = false;
+
+            if (!envelope) {
+                if (wasFirstFrame && this._refusePlainFrameOnMultiplexPath(ws, text)) return;
+                if (!undecodableWarned) {
+                    undecodableWarned = true;
+                    const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
+                    console.warn(
+                        `[broker] multiplexed provider socket sent a frame that is not a tunnel envelope; it was dropped. ` +
+                            `This path expects {"provider":"<slot>","payload":{ ...JSON-RPC... }} on every frame. First 200 chars: ${JSON.stringify(preview)}. ` +
+                            `Further undecodable frames from this socket are not logged.`
+                    );
+                }
+                return;
+            }
 
             const name = envelope.provider;
 
@@ -1280,10 +2194,15 @@ export class WsTunnel implements IBrokerContext {
                     return;
                 }
 
-                const existing = this._providers.get(name);
-                if (existing?.ws?.readyState === WebSocket.OPEN) {
-                    // Provider already connected via another socket, reject this name.
-                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, `Provider "${name}" is already connected`));
+                const refusal = this._claimSlot(name, ws);
+                if (refusal) {
+                    // Provider already connected via another socket, reject this
+                    // name. The socket itself stays open on purpose: it may be
+                    // carrying other slots it is legitimately serving.
+                    console.warn(`[broker] WARNING: multiplexed WebSocket provider "${name}" rejected. ${refusal.detail}`);
+                    // An envelope has no length limit, so the peer gets the full
+                    // diagnosis here, not the close-frame abbreviation.
+                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.ProviderUnavailable, refusal.detail));
                     return;
                 }
                 providerNames.add(name);
@@ -1291,6 +2210,16 @@ export class WsTunnel implements IBrokerContext {
                 state.ws = ws;
                 if (providerPrincipal) {
                     this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
+                }
+
+                // The multiplexed path could not aggregate at all before this:
+                // it had no `addProvider` call anywhere, so the one transport the
+                // provider README demonstrates was the one that could never join
+                // `_all`. The opt-in rides on the `notifications/register`
+                // notification the transport already sends on every open, as
+                // `params.aggregate`.
+                if (registrationAsksForAggregate(envelope.payload)) {
+                    void this._aggregateServer?.addProvider(name);
                 }
             }
 
@@ -1307,6 +2236,17 @@ export class WsTunnel implements IBrokerContext {
                 }
             }
             this._multiplexSockets.delete(ws);
+        });
+
+        // An unhandled 'error' event is rethrown by Node. One multiplex socket
+        // carries every slot it announced, so losing the process over a single
+        // malformed frame is the worst of the three cases: name the slots this
+        // socket was serving, since they are all about to go with it.
+        ws.on("error", (err: Error) => {
+            const slots = providerNames.size > 0 ? [...providerNames].join(", ") : "(none announced yet)";
+            console.error(
+                `[broker] multiplex provider socket error: ${err.message}. Slots carried by this socket: ${slots}. The socket is being closed; the provider should reconnect.`
+            );
         });
     }
 
@@ -1352,15 +2292,8 @@ export class WsTunnel implements IBrokerContext {
     }
 
     private _routeFromStdioClient(state: IProviderState, data: string): void {
-        try {
-            const msg = JSON.parse(data) as { id?: string | number };
-            if (msg?.id != null) state.pending.set(msg.id, { type: "stdio" });
-        } catch {
-            /* forward as-is */
-        }
-
         if (this._isProviderConnected(this._stdioClientProvider!, state)) {
-            this._sendToProvider(state, this._stdioClientProvider!, data);
+            this._sendToProvider(state, this._stdioClientProvider!, this._trackRequest(state, data, { type: "stdio" }));
         } else {
             let errId: string | number | null = null;
             try {
@@ -1369,11 +2302,23 @@ export class WsTunnel implements IBrokerContext {
                 /* */
             }
             if (errId != null) {
+                // A stdio host (Claude Desktop) starts the broker and sends
+                // `initialize` immediately, long before a browser or engine
+                // provider has had a chance to connect, and it treats the failure
+                // as a dead server with no retry. So the error names the two slots
+                // that exist from the first millisecond instead of just reporting
+                // the miss.
                 this._stdioClientTransport?.send(
                     JSON.stringify({
                         jsonrpc: "2.0",
                         id: errId,
-                        error: { code: -32000, message: `Provider "${this._stdioClientProvider}" not connected` },
+                        error: {
+                            code: -32000,
+                            message:
+                                `Provider "${this._stdioClientProvider}" not connected. A stdio host cannot wait for a provider to appear: pin ` +
+                                `MCP_BROKER_STDIO_PROVIDER to "_all" (the aggregate slot, present at startup, and it announces tools as providers join) ` +
+                                `or to "_broker" (introspection only: broker_info, providers_list, provider_status).`,
+                        },
                     })
                 );
             }
@@ -1387,24 +2332,31 @@ export class WsTunnel implements IBrokerContext {
             return;
         }
 
-        try {
-            const msg = JSON.parse(data) as { id?: string | number };
-            if (msg?.id != null) state.pending.set(msg.id, { type: "ws", socket: client });
-        } catch {
-            /* forward as-is */
-        }
-
-        if (this._isProviderConnected(providerName, state)) {
-            this._sendToProvider(state, providerName, data, principal);
-        } else {
+        if (!this._isProviderConnected(providerName, state)) {
+            // Echo the request id and name the slot. With `id: null` a client that
+            // correlates by id (every SDK does) drops the frame and then waits for
+            // an answer that is never coming, so the symptom of an absent provider
+            // was an indefinite hang rather than an error. The pointer to
+            // `providers_list` is what turns it into something actionable: the
+            // usual cause is a slot name that does not match the one the provider
+            // registered.
             client.send(
                 JSON.stringify({
                     jsonrpc: "2.0",
-                    id: null,
-                    error: { code: -32000, message: "No provider connected" },
+                    id: requestIdOf(data) ?? null,
+                    error: {
+                        code: -32000,
+                        message: `Provider "${providerName}" is not connected. Call providers_list on the _broker slot to see which slots are live.`,
+                    },
                 })
             );
+            return;
         }
+
+        // Registered only once the frame is actually on its way out: an entry
+        // added before the connectivity check has nothing to answer it and would
+        // pin that id until the slot next disconnects.
+        this._sendToProvider(state, providerName, this._trackRequest(state, data, { type: "ws", socket: client }), principal);
     }
 
     private _routeFromProvider(state: IProviderState, providerName: string, data: string): void {
@@ -1412,30 +2364,65 @@ export class WsTunnel implements IBrokerContext {
             const msg = JSON.parse(data) as { id?: string | number };
 
             if (msg.id != null) {
-                // Response: route to the specific sink that made the request.
-                const sink = state.pending.get(msg.id);
-                if (sink?.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
-                    sink.socket.send(data);
-                } else if (sink?.type === "sse") {
-                    const sseRes = state.sseSessions.get(sink.sessionId);
-                    if (sseRes) this._sendSseEvent(sseRes, data);
-                } else if (sink?.type === "http-session") {
-                    // The session transport decides whether this answers a held-open
-                    // POST or travels on the GET stream: it correlates by id.
-                    state.httpSessions.get(sink.sessionId)?.transport.send(data);
-                } else if (sink?.type === "stdio") {
-                    this._stdioClientTransport?.send(data);
-                } else if (sink?.type === "internal") {
-                    sink.client.onMessage?.(data);
+                // Response: route to the specific sink that made the request, and
+                // put the client's own id back in place of the broker's before it
+                // is delivered (see `_trackRequest`).
+                const entry = state.pending.get(msg.id);
+                if (entry) {
+                    state.pending.delete(msg.id);
+                    (msg as { id: unknown }).id = entry.clientId;
+                    this._deliverToSink(state, entry.sink, JSON.stringify(msg));
+                } else {
+                    this._warnUnmatchedResponseId(providerName, msg.id);
                 }
-                state.pending.delete(msg.id);
             } else {
                 // Notification (no id): broadcast to all clients of this provider.
                 this._broadcast(state, providerName, data);
             }
         } catch {
+            // The frame could not be parsed and routed as JSON-RPC. It is still
+            // broadcast, because some providers legitimately put non-JSON-RPC text
+            // on this socket and silently dropping it would be a behavior change,
+            // but it no longer travels unannounced: the usual source is a reverse
+            // proxy answering with an HTML error page under a 200, which then
+            // surfaces in every client as an "unexpected token <" with nothing
+            // naming the provider it came from.
+            if (!this._nonJsonWarnedProviders.has(providerName)) {
+                this._nonJsonWarnedProviders.add(providerName);
+                const preview = data.length > 200 ? `${data.slice(0, 200)}...` : data;
+                console.warn(
+                    `[broker] provider "${providerName}" sent a frame the broker could not route as JSON-RPC; it is being broadcast to that slot's clients verbatim. ` +
+                        `First 200 chars: ${JSON.stringify(preview)}. If this is HTML, something between the broker and the provider (a proxy, a login page) is answering instead of the provider. ` +
+                        `Further such frames from this slot are not logged.`
+                );
+            }
             this._broadcast(state, providerName, data);
         }
+    }
+
+    /**
+     * Reports a frame carrying an id nothing is waiting for.
+     *
+     * Two very different causes, so the message names both. Either the provider
+     * did not echo the id it was given (the frame is then unroutable and the
+     * real client hangs until the request deadline), or the provider is opening
+     * a **server-to-client** request of its own (`sampling/createMessage`,
+     * `roots/list`, `elicitation/create`), which this broker does not relay: the
+     * frame is dropped and the provider waits for an answer that never comes.
+     * Both used to be silent, which is what made the second one impossible to
+     * diagnose from either end.
+     *
+     * Once per slot: a provider doing this does it on every frame.
+     */
+    private _warnUnmatchedResponseId(providerName: string, id: string | number): void {
+        if (this._unmatchedIdWarnedProviders.has(providerName)) return;
+        this._unmatchedIdWarnedProviders.add(providerName);
+        console.warn(
+            `[broker] provider "${providerName}" sent a frame with id ${JSON.stringify(id)}, which matches no request the broker is waiting on; it was dropped. ` +
+                `Either the provider answered with a different id than the one it received (JSON-RPC requires echoing it verbatim, including its type: 1 and "1" are not the same id), ` +
+                `or it is initiating a request of its own (sampling/createMessage, roots/list, elicitation/create), which the broker does not relay to clients. ` +
+                `Further unmatched ids from this slot are not logged.`
+        );
     }
 
     /** Sends a message to all clients connected to one provider. */
@@ -1475,27 +2462,17 @@ export class WsTunnel implements IBrokerContext {
      * close handlers (dedicated WS, multiplexed WS, loopback).
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
-        // Echoing the pending id rather than `null`: a Streamable HTTP session
-        // matches the answer to its held-open POST by id, so an unaddressed
-        // error would leave that request hanging until it times out.
-        for (const [id, sink] of state.pending) {
+        // Echoing the **client's** id rather than `null` or the broker's: a
+        // Streamable HTTP session matches the answer to its held-open POST by
+        // the id it chose, so an unaddressed error would leave that request
+        // hanging until it times out.
+        for (const entry of state.pending.values()) {
             const error = JSON.stringify({
                 jsonrpc: "2.0",
-                id,
+                id: entry.clientId,
                 error: { code: -32000, message: `Provider "${name}" disconnected` },
             });
-            if (sink.type === "ws" && sink.socket.readyState === WebSocket.OPEN) {
-                sink.socket.send(error);
-            } else if (sink.type === "sse") {
-                const sseRes = state.sseSessions.get(sink.sessionId);
-                if (sseRes) this._sendSseEvent(sseRes, error);
-            } else if (sink.type === "http-session") {
-                state.httpSessions.get(sink.sessionId)?.transport.send(error);
-            } else if (sink.type === "stdio") {
-                this._stdioClientTransport?.send(error);
-            } else if (sink.type === "internal") {
-                sink.client.onMessage?.(error);
-            }
+            this._deliverToSink(state, entry.sink, error);
         }
         state.pending.clear();
         for (const ic of state.internalClients) ic.onClose?.();

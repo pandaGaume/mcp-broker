@@ -40,16 +40,134 @@ export function normalizeProviderAuthentication(result: ProviderAuthenticatorRet
     return result;
 }
 
-export function providerMayPublish(principal: IProviderPrincipal, resource: ResourcePath): boolean {
-    const allowed = principal.allowedResources;
-    if (allowed === undefined) return true;
-    if (allowed.length === 0) return false;
+/** Wording shared by every "this pattern is not valid" diagnostic. */
+const PATTERN_SYNTAX_HINT = 'Resource patterns are absolute and segment-based: "/enterprise/**", "/enterprise/*/line-3", "/enterprise/site-a/asset", or "**" for everything.';
+
+/**
+ * Compiled `allowedResources` patterns, keyed by the exact pattern string, with
+ * the compile failure cached alongside the successes.
+ *
+ * {@link providerMayPublish} runs on every provider WebSocket upgrade, and the
+ * previous per-call `ResourcePathPattern.parse` inside a `try` meant a single
+ * typo re-threw on every registration and was mapped to a bare `false`. Caching
+ * the outcome makes the parse happen once per distinct pattern and gives the
+ * failure a stable identity we can report exactly once.
+ */
+const compiledPatterns = new Map<string, ResourcePathPattern | Error>();
+
+/** Malformed-pattern reports already emitted, so a wedged config logs once. */
+const reportedMalformedPatterns = new Set<string>();
+
+/** Parses one pattern, memoizing both the success and the failure. */
+function compilePattern(pattern: string): ResourcePathPattern | Error {
+    const cached = compiledPatterns.get(pattern);
+    if (cached !== undefined) return cached;
+    let compiled: ResourcePathPattern | Error;
     try {
-        const patterns = allowed.map((pattern) => ResourcePathPattern.parse(pattern));
-        return patterns.some((pattern) => pattern.matches(resource));
-    } catch {
-        return false;
+        compiled = ResourcePathPattern.parse(pattern);
+    } catch (error) {
+        compiled = error instanceof Error ? error : new Error(String(error));
     }
+    compiledPatterns.set(pattern, compiled);
+    return compiled;
+}
+
+/** Why a provider was refused a slot. `undefined` when it was allowed. */
+export type ProviderPublishDenialReason = "no-allowed-resources" | "out-of-namespace" | "malformed-pattern";
+
+/** The outcome of a provider namespace check, with the cause when it denies. */
+export interface IProviderPublishDecision {
+    readonly allowed: boolean;
+    /** Machine-readable cause, present only when `allowed` is `false`. */
+    readonly reason?: ProviderPublishDenialReason;
+    /** Operator-facing explanation that already names the fix. */
+    readonly detail?: string;
+}
+
+/**
+ * Compiles a principal's `allowedResources`, throwing on the first malformed
+ * pattern with the offending pattern quoted in the message.
+ *
+ * Call this wherever a provider principal is *built* (config load, a custom
+ * authenticator's constructor) so a typo fails the broker at startup instead of
+ * silently 403-ing every provider on that principal forever.
+ * {@link providerPublishDecision} deliberately does not throw: it runs inside the
+ * WebSocket upgrade, where the only safe answer to "is this pattern valid?" is
+ * to deny loudly.
+ */
+export function compileProviderAllowedResources(allowed: readonly string[], label = "provider allowedResources"): readonly ResourcePathPattern[] {
+    return allowed.map((pattern) => {
+        const compiled = compilePattern(pattern);
+        if (compiled instanceof Error) {
+            throw new Error(`${label}: "${pattern}" is not a valid resource pattern: ${compiled.message} ${PATTERN_SYNTAX_HINT}`);
+        }
+        return compiled;
+    });
+}
+
+/**
+ * Decides whether a provider principal may claim `resource`, and says why when
+ * it may not.
+ *
+ * Every denial here surfaces to the provider as a bare 403 at the WebSocket
+ * handshake, which a browser reports as a contentless error event. The reason is
+ * therefore the only thing an operator (or an agent wiring this up) has to work
+ * from, so it is returned to the caller for the registration log and, for the
+ * configuration-fault case, logged here as well.
+ */
+export function providerPublishDecision(principal: IProviderPrincipal, resource: ResourcePath): IProviderPublishDecision {
+    const allowed = principal.allowedResources;
+    if (allowed === undefined) return { allowed: true };
+    if (allowed.length === 0) {
+        return {
+            allowed: false,
+            reason: "no-allowed-resources",
+            detail:
+                `Provider principal "${principal.id}" has an empty allowedResources list, which forbids every slot. ` +
+                `Remove the key entirely to allow all slots, or list the namespaces this principal may publish, for example ["/enterprise/**"].`,
+        };
+    }
+
+    const patterns: ResourcePathPattern[] = [];
+    const malformed: string[] = [];
+    for (const pattern of allowed) {
+        const compiled = compilePattern(pattern);
+        if (compiled instanceof Error) malformed.push(`"${pattern}" (${compiled.message})`);
+        else patterns.push(compiled);
+    }
+
+    if (malformed.length > 0) {
+        const detail =
+            `Provider principal "${principal.id}" carries ${malformed.length} malformed allowedResources pattern(s): ${malformed.join("; ")} ` +
+            `Every provider registration on this principal is refused with 403 until they are fixed, whatever slot it asks for. ${PATTERN_SYNTAX_HINT}`;
+        // Loud, but once per (principal, bad pattern set): this is a
+        // startup-class configuration fault the broker can never honor, and its
+        // request-time symptom is a 403 that names nothing.
+        const key = `${principal.id}|${malformed.join("|")}`;
+        if (!reportedMalformedPatterns.has(key)) {
+            reportedMalformedPatterns.add(key);
+            console.error(`[broker] provider auth: ${detail}`);
+        }
+        return { allowed: false, reason: "malformed-pattern", detail };
+    }
+
+    if (patterns.some((pattern) => pattern.matches(resource))) return { allowed: true };
+    return {
+        allowed: false,
+        reason: "out-of-namespace",
+        detail:
+            `Provider principal "${principal.id}" may not publish resource "${resource.value}": it is outside allowedResources [${allowed.join(", ")}]. ` +
+            `Either connect the provider to a slot inside one of those namespaces, or widen allowedResources for this principal.`,
+    };
+}
+
+/**
+ * Boolean form of {@link providerPublishDecision}, kept for callers that only
+ * need the verdict. Prefer the decision form so the refusal can be logged with
+ * its cause.
+ */
+export function providerMayPublish(principal: IProviderPrincipal, resource: ResourcePath): boolean {
+    return providerPublishDecision(principal, resource).allowed;
 }
 
 /** Constant-time string comparison; `false` on any length mismatch. */

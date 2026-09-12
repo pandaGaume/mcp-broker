@@ -23,12 +23,14 @@ export { HttpAuthGuard } from "./http.auth";
 export { buildJwtAuth } from "./auth.config";
 export type { IJwtAuthOptions, JwtAuthOptions } from "./auth.config";
 export { SharedSecretProviderAuthenticator } from "./provider.auth";
-export { normalizeProviderAuthentication, providerMayPublish } from "./provider.auth";
+export { compileProviderAllowedResources, normalizeProviderAuthentication, providerMayPublish, providerPublishDecision } from "./provider.auth";
 export type {
     IProviderAuthenticator,
     IProviderPrincipal,
+    IProviderPublishDecision,
     ProviderAuthenticationResult,
     ProviderAuthenticator,
     ProviderAuthenticatorReturn,
     ProviderPrincipal,
+    ProviderPublishDenialReason,
 } from "./provider.auth";

@@ -251,7 +251,7 @@ body, not the status code alone.
 
 ## Configuration
 
-See the Node implementation's [config reference](../node/docs/config.md#auth-oauth-21-authorization)
+See the Node implementation's [config reference](../node/packages/broker/docs/config.md#auth-oauth-21-authorization)
 for the concrete `auth` block, environment variables, and the builder API
 (`withJwtAuth`, `withProviderSecret`, `withAuthorizationPolicy`,
 `withPolicyEngine`, `withSlotResourceResolver`).

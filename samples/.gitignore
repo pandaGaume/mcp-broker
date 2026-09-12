@@ -1,0 +1,8 @@
+node_modules/
+package-lock.json
+
+# Written by browser-provider/prepare.mjs and app-host/prepare.mjs: a copy of the
+# @cyanmycelium/mcp-broker-provider ESM build, so a browser can import it with no
+# bundler. Regenerated on every run, never edited by hand, never committed.
+browser-provider/public/vendor/
+app-host/public/app/vendor/

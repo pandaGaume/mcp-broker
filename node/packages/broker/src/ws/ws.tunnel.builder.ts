@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
-import type { AllowedOrigins, IStaticMount, IWsTunnelOptions } from "./ws.interfaces";
+import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMode } from "./ws.interfaces";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "../auth/index";
@@ -41,6 +41,9 @@ export class WsTunnelBuilder {
     private _mcpPath = "/mcp";
     private _samplesIndexPath = "/__samples_index__";
     private _allowedOrigins: AllowedOrigins | undefined = undefined;
+    private _providerHeartbeatIntervalMs: number | undefined = undefined;
+    private _providerTakeover: ProviderTakeoverMode | undefined = undefined;
+    private _providerRequestTimeoutMs: number | undefined = undefined;
     private _staticMounts: IStaticMount[] = [];
     private _stdioUpstreams: IStdioUpstreamConfig[] = [];
     private _remoteUpstreams: IRemoteUpstreamConfig[] = [];
@@ -150,6 +153,62 @@ export class WsTunnelBuilder {
      */
     withAllowedOrigins(allowed: AllowedOrigins): this {
         this._allowedOrigins = allowed;
+        return this;
+    }
+
+    /**
+     * Sets how often the broker pings each connected provider socket to check
+     * it is still there. Pass `0` to disable the heartbeat.
+     *
+     * A provider that misses a full interval is terminated and its slot freed,
+     * which is what stops a half-open socket (a killed tab, a slept laptop, a
+     * dropped VPN) from holding a slot for the ~2 hours it takes the OS to give
+     * up on the TCP connection, refusing every reconnect in the meantime.
+     *
+     * Honest about what it proves: a pong is answered by the peer's network
+     * stack, not by the page's JavaScript. It detects a dead process, machine or
+     * network path, not a provider that is connected and simply not serving.
+     * For that, see {@link withProviderRequestTimeout}.
+     *
+     * @default 30000
+     */
+    withProviderHeartbeat(intervalMs: number): this {
+        this._providerHeartbeatIntervalMs = intervalMs;
+        return this;
+    }
+
+    /**
+     * Sets what happens when a provider connects to a slot another socket
+     * already holds.
+     *
+     * - `"reject"`: the incumbent always keeps the slot.
+     * - `"liveness"` (default): the incumbent keeps it only while it answers the
+     *   heartbeat; a socket that missed its last ping is terminated.
+     * - `"always"`: the newcomer wins, but **only** when
+     *   {@link withProviderSecret} / {@link withProviderAuth} is configured and
+     *   it authenticated as the same principal as the incumbent. Without that,
+     *   the broker falls back to `"liveness"` and logs why: with provider auth
+     *   off, unconditional takeover would let anyone who can reach the URL evict
+     *   the real provider.
+     */
+    withProviderTakeover(mode: ProviderTakeoverMode): this {
+        this._providerTakeover = mode;
+        return this;
+    }
+
+    /**
+     * Sets how long the broker waits for a provider to answer one request before
+     * failing it with a JSON-RPC error naming the slot. Pass `0` to disable.
+     *
+     * Without a deadline, a provider that stays connected and never answers (a
+     * browser tab throttled in the background is the ordinary case) leaves the
+     * caller waiting forever with nothing to release it. Raise it if you host
+     * genuinely long-running tools.
+     *
+     * @default 60000
+     */
+    withProviderRequestTimeout(timeoutMs: number): this {
+        this._providerRequestTimeoutMs = timeoutMs;
         return this;
     }
 
@@ -311,6 +370,9 @@ export class WsTunnelBuilder {
             mcpPath: this._mcpPath,
             samplesIndexPath: this._samplesIndexPath,
             allowedOrigins: this._allowedOrigins,
+            providerHeartbeatIntervalMs: this._providerHeartbeatIntervalMs,
+            providerTakeover: this._providerTakeover,
+            providerRequestTimeoutMs: this._providerRequestTimeoutMs,
             staticMounts: this._staticMounts.length > 0 ? [...this._staticMounts] : undefined,
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
             remoteUpstreams: this._remoteUpstreams.length > 0 ? [...this._remoteUpstreams] : undefined,

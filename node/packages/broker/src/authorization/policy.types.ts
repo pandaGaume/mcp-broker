@@ -13,7 +13,31 @@ export interface IAuthorizationRequest {
     readonly tool?: string;
 }
 
-export type AuthorizationDecisionReason = "explicit-deny" | "role-grant" | "no-matching-grant" | "invalid-resource" | "unknown-resource";
+/**
+ * Why a decision came out the way it did, as written to the audit log.
+ *
+ * The distinction between a policy outcome and a fault is load-bearing: the
+ * audit log is what an operator actually reads, and reporting a fault as
+ * `"no-matching-grant"` sends them off writing grants that can never help.
+ *
+ * - `explicit-deny`      a deny policy matched.
+ * - `role-grant`         an assignment matched; the only allowing reason.
+ * - `no-matching-grant`  no policy matched. A genuine policy outcome.
+ * - `invalid-resource`   the request carried no resource at all.
+ * - `unknown-resource`   the slot maps to no configured resource path.
+ * - `invalid-capability` the requested capability string is malformed, so no
+ *                        grant could ever match it. A configuration fault.
+ * - `evaluation-error`   evaluation threw. Nothing was decided; the request is
+ *                        denied because that is the safe answer. A fault.
+ */
+export type AuthorizationDecisionReason =
+    | "explicit-deny"
+    | "role-grant"
+    | "no-matching-grant"
+    | "invalid-resource"
+    | "unknown-resource"
+    | "invalid-capability"
+    | "evaluation-error";
 
 export interface IAuthorizationDecision {
     readonly allowed: boolean;

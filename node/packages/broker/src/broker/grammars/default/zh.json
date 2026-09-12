@@ -11,6 +11,18 @@
             "properties": {
                 "name": "provider 的精确名称（区分大小写）。"
             }
+        },
+        "broker_guide": {
+            "description": "以 Markdown 返回 broker 自带的集成文档：如何把 MCP 服务器发布到槽位、如何以客户端身份连接槽位、如何配置 MCP 宿主、如何部署，以及一份从症状到修复的排错页面。请读这里，不要去找 README。不带参数时返回索引。",
+            "properties": {
+                "topic": "要返回的页面：index、publish-provider、connect-client、host-config、deploy 或 troubleshooting。省略则返回索引，索引会说明接下来该读哪一页。"
+            }
+        },
+        "broker_diagnose": {
+            "description": "返回 broker 的实时状态，以及它能在自身接线中检测到的问题，每一项都带有症状、证据和可直接执行的修复方法。出问题时先调用它：它会替你关联各项计数并指出原因。",
+            "properties": {
+                "slot": "把报告限定到某一个 provider 槽位（区分大小写）。省略则诊断整个 broker。"
+            }
         }
     },
     "resources": {
@@ -21,12 +33,40 @@
         "broker://providers": {
             "name": "Broker Providers",
             "description": "Broker 已知的所有 provider 槽位列表，包括未连接的。"
+        },
+        "broker://guide/index": {
+            "name": "指南索引",
+            "description": "broker 是什么、最容易搞错且代价最高的传输与路径配对规则，以及接下来该读哪一页指南。"
+        },
+        "broker://guide/publish-provider": {
+            "name": "指南：发布 provider",
+            "description": "把一个 MCP 服务器放进槽位：传输与路径的配对规则、帧格式、加入聚合槽位的方式、连接/注册/释放的生命周期，以及浏览器端的限制。"
+        },
+        "broker://guide/connect-client": {
+            "name": "指南：连接客户端",
+            "description": "以客户端身份连接槽位：四种客户端传输、保留槽位 _broker 与 _all、来源（Origin）校验、授权，以及可能收到的全部错误码。"
+        },
+        "broker://guide/host-config": {
+            "name": "指南：MCP 宿主配置",
+            "description": "配置 Claude Desktop 或其他 stdio MCP 宿主：为什么桥接必须指向 _all、配置范例、一个端口只能有一个 broker 的规则，以及匿名主体带来的隐患。"
+        },
+        "broker://guide/deploy": {
+            "name": "指南：部署 broker",
+            "description": "把 broker 作为库嵌入或作为进程运行：启动顺序、拓扑结构、配置文件、静态文件、TLS 和关闭流程。"
+        },
+        "broker://guide/troubleshooting": {
+            "name": "指南：排错",
+            "description": "症状、原因、修复，从那些不产生任何日志的静默故障开始：客户端挂起、槽位被占死、工具列表过期、来源被拒。"
         }
     },
     "templates": {
         "broker://providers/{name}": {
             "name": "Broker Provider",
             "description": "指定名称的 provider 槽位快照。"
+        },
+        "broker://guide/{topic}": {
+            "name": "Broker 指南页面",
+            "description": "broker 集成文档中的一页，按主题寻址：index、publish-provider、connect-client、host-config、deploy 或 troubleshooting。"
         }
     }
 }

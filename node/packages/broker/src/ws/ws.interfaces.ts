@@ -48,6 +48,72 @@ export type ResponseSink =
 export type McpEndpointKind = "mcp" | "sse-connect" | "sse-message";
 
 /**
+ * The role the WebSocket router assigned to one accepted upgrade.
+ *
+ * Named rather than inlined because it is what the connect log line reports,
+ * and that line is the only place anyone can see that a path such as
+ * `/providers/foo` was taken as a **client** slot rather than as a provider
+ * endpoint: the router's last branch accepts every unmatched path, so a
+ * mistyped provider URL connects successfully and then never exchanges a
+ * frame with anybody.
+ *
+ * - `multiplex-provider`: the shared `/providers` socket, envelope framing,
+ *   slots announced per frame.
+ * - `dedicated-provider`: `/provider/<name>`, plain JSON-RPC framing, one slot
+ *   fixed by the URL.
+ * - `client`: an MCP client asking to be relayed to `/<slot>`.
+ */
+export type WsConnectRole = "multiplex-provider" | "dedicated-provider" | "client";
+
+/**
+ * What the router decided about one WebSocket upgrade, before it is accepted.
+ *
+ * The same classification runs twice, in `verifyClient` (which can still refuse
+ * the HTTP upgrade with a status line a Node client can read) and in the
+ * connection handler (which knows the socket). Deriving both from one function
+ * is the point: they used to be two nearly-identical `startsWith` chains that
+ * could disagree, and a disagreement means a socket authenticated as one role
+ * and then served as another.
+ *
+ * `reject` names a path that cannot work by construction, never one that merely
+ * has no provider behind it: claiming a free slot by connecting to it is how a
+ * provider registers, so an unknown slot name is normal and must stay accepted.
+ */
+export type WsRouteClassification =
+    | { readonly role: "multiplex-provider" }
+    | { readonly role: "dedicated-provider"; readonly slot: string }
+    | { readonly role: "client"; readonly slot: string }
+    | {
+          readonly role: "reject";
+          /** Full diagnosis, sent as the HTTP body of the refused upgrade and logged. */
+          readonly detail: string;
+          /**
+           * The same refusal in at most 123 bytes, the hard limit RFC 6455 puts
+           * on a close reason. Anything longer makes `ws.close()` throw.
+           */
+          readonly closeReason: string;
+      };
+
+/**
+ * What the broker does when a provider connects to a slot another socket
+ * already holds.
+ *
+ * - `reject`: refuse the newcomer whenever the incumbent socket is OPEN. The
+ *   pre-1.3 behavior, and the only mode that never disconnects a live provider,
+ *   at the cost of a slot wedged by a half-open socket until the OS gives up on
+ *   it (roughly two hours).
+ * - `liveness` (default): refuse only while the incumbent still answers the
+ *   heartbeat. A socket that missed its last ping is terminated and the
+ *   newcomer takes the slot.
+ * - `always`: the newcomer always wins. Honored **only** when
+ *   {@link IWsTunnelOptions.providerAuth} is configured and the newcomer
+ *   authenticated as the same principal as the incumbent; otherwise the broker
+ *   falls back to `liveness` and says so, because with provider auth off anyone
+ *   who can reach the URL could evict the real provider at will.
+ */
+export type ProviderTakeoverMode = "reject" | "liveness" | "always";
+
+/**
  * How `/<slot>/mcp` decides whether a browser origin may reach it.
  *
  * - a list of origins, matched exactly against the whole `Origin` header
@@ -71,6 +137,30 @@ export interface IHttpSession {
     principal: IPrincipal | null;
 }
 
+/** One request the broker sent to a provider and is still waiting on. */
+export interface IPendingRequest {
+    /** Where the answer goes when it arrives. */
+    readonly sink: ResponseSink;
+
+    /**
+     * The id the **client** used, restored on the way back.
+     *
+     * The map is keyed by a broker-assigned id instead, because the client's id
+     * is not unique on a slot: two MCP clients that both number their requests
+     * from 1 (MCP Inspector and Claude on the same slot, the documented
+     * scenario) would otherwise overwrite each other's entry, and one of them
+     * receives the other's result while its own request hangs forever.
+     */
+    readonly clientId: string | number;
+
+    /**
+     * Epoch milliseconds after which the request is failed with a timeout, or
+     * `0` when {@link IWsTunnelOptions.providerRequestTimeoutMs} is disabled and
+     * the entry may wait indefinitely.
+     */
+    readonly expiresAt: number;
+}
+
 /**
  * All mutable state for one named provider slot.
  * Created lazily on first client connection; the WebSocket field is set when
@@ -79,8 +169,12 @@ export interface IHttpSession {
 export interface IProviderState {
     /** The active provider WebSocket, or `null` when the provider is not connected. */
     ws: WebSocket | null;
-    /** Pending JSON-RPC request ids → response sinks waiting for a reply. */
-    readonly pending: Map<string | number, ResponseSink>;
+    /**
+     * In-flight requests, keyed by the **broker-assigned** id that was written
+     * into the frame sent to the provider. See {@link IPendingRequest.clientId}
+     * for why the client's own id cannot be the key.
+     */
+    readonly pending: Map<string | number, IPendingRequest>;
     /** Active legacy SSE sessions (Claude), keyed by session id. */
     readonly sseSessions: Map<string, ServerResponse>;
     /** Active Streamable HTTP sessions, keyed by `Mcp-Session-Id`. */
@@ -197,7 +291,8 @@ export interface IWsTunnelOptions {
     samplesIndexPath?: string;
 
     /**
-     * Browser origins allowed to reach `/<slot>/mcp`.
+     * Browser origins allowed to reach a slot's client endpoints: `/<slot>/mcp`
+     * (Streamable HTTP) and the legacy SSE pair `/<slot>/sse` + `/<slot>/messages`.
      *
      * The MCP specification requires the `Origin` header to be validated,
      * because without it any web page the operator's browser happens to load
@@ -211,6 +306,56 @@ export interface IWsTunnelOptions {
      * @default undefined, no browser origin is allowed
      */
     allowedOrigins?: AllowedOrigins;
+
+    /**
+     * How often, in milliseconds, the broker pings every connected provider
+     * socket to check it is still there. `0` disables the heartbeat entirely.
+     *
+     * A provider that does not answer within one full interval is terminated,
+     * which frees its slot for the reconnect that is usually already being
+     * refused. Without this the only evidence of occupancy is the socket's
+     * `readyState`, and a half-open socket (a killed browser tab, a laptop that
+     * slept, a severed VPN) stays `OPEN` until the OS gives up on the TCP
+     * connection, roughly two hours, during which the broker cheerfully reports
+     * the zombie as connected, routes client frames into it, and refuses every
+     * reconnect attempt with a `1008`.
+     *
+     * **What a pong actually proves.** An RFC 6455 pong is answered by the
+     * peer's network stack, which in a browser is not the page's JavaScript
+     * thread. So this detects a dead process, a dead machine and a dead network
+     * path; it does **not** detect a page whose event loop is blocked or whose
+     * MCP server stopped serving. For that failure use
+     * {@link providerRequestTimeoutMs}, which measures the answer rather than
+     * the socket.
+     *
+     * @default 30000
+     */
+    providerHeartbeatIntervalMs?: number;
+
+    /**
+     * What happens when a provider connects to a slot another socket holds.
+     *
+     * @default "liveness", the incumbent keeps the slot only while it still
+     *          answers the heartbeat
+     */
+    providerTakeover?: ProviderTakeoverMode;
+
+    /**
+     * How long, in milliseconds, the broker waits for a provider to answer one
+     * request before failing it. `0` disables the timeout.
+     *
+     * On expiry the waiting client receives a JSON-RPC error naming the slot and
+     * the elapsed time, addressed to the id it used. Without it, a provider that
+     * simply never answers (a browser tab throttled in the background is the
+     * normal case, not the exotic one) leaves the client's request open forever
+     * with nothing to release it and no diagnostic anywhere.
+     *
+     * Raise it if you host genuinely long-running tools; a slow answer is worth
+     * waiting for, but a hang with no error is not.
+     *
+     * @default 60000
+     */
+    providerRequestTimeoutMs?: number;
 
     /**
      * Optional static-file mounts served over plain HTTP.

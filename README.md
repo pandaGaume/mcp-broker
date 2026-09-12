@@ -8,7 +8,9 @@
 
 # mcp-broker
 
-Routes MCP clients to multiple [Model Context Protocol](https://modelcontextprotocol.io/) providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides. The broker registers itself as an MCP server under the reserved slot `_broker`, so any client can discover what is routable through standard MCP tools.
+Routes MCP clients to multiple [Model Context Protocol](https://modelcontextprotocol.io/) providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides. The broker registers itself as an MCP server under the reserved slot `_broker`, so any client can discover what is routable through standard MCP tools, and read the integration guide the broker serves about itself.
+
+> **Working with an AI coding agent?** Point it at **[AGENTS.md](AGENTS.md)** first. It is the single self-contained file: topology table, the transport/path pairing rule, copy-pasteable configurations, the reserved slots, and a symptom-to-fix table. A *running* broker documents itself over MCP through `broker_guide` and `broker_diagnose` on the `_broker` slot, which is better still.
 
 ## Why a broker
 
@@ -32,6 +34,8 @@ mcp-broker/
 │       └── provider/           ← tunnel wire contract + publishing a server to a slot
 ├── dotnet/                     ← .NET implementation (planned)
 ├── docs/                       ← protocol, architecture, endpoints
+├── AGENTS.md                   ← start here if you are an AI coding agent
+├── CHANGELOG.md
 ├── .github/workflows/          ← CI + release pipelines per package
 └── mcp-broker.code-workspace
 ```
@@ -58,16 +62,22 @@ npx @cyanmycelium/mcp-broker
 
 The broker starts on `http://localhost:3000`. Connect your MCP provider to `ws://localhost:3000/provider/<name>`, then point any MCP client at `http://localhost:3000/<name>/mcp`.
 
+A provider's transport and its URL path are a **matched pair**: `DirectTransport` pairs with `ws://<host>/provider/<name>` (plain JSON-RPC frames), `MultiplexTransport` pairs with `ws://<host>/providers` (envelopes). `ws://<host>/providers/<name>` is neither, and is silently accepted as a *client* connection. See [AGENTS.md](AGENTS.md#3-the-pairing-rule).
+
 Full instructions, environment variables, and programmatic API in [node/packages/broker/README.md](node/packages/broker/README.md).
 
 ## Documentation
 
-- [docs/packages.md](docs/packages.md): the four packages, what belongs in each, and why `client` was split into `provider` and `consumer`
-- [docs/architecture.md](docs/architecture.md), overview, roles, request flow, the reserved `_broker` slot
-- [docs/protocol.md](docs/protocol.md), provider WebSocket framing, JSON-RPC envelopes
+Start with **[AGENTS.md](AGENTS.md)** if you want one file that covers the decisions, or **[samples/](samples/)** if you would rather run something first: five self-contained integrations that start what they need and prove themselves end to end, indexed for agents in [samples/index.json](samples/index.json). Then, by depth:
+
+- [docs/packages.md](docs/packages.md): the packages, what belongs in each, and why `client` was split into `provider` and `consumer`
+- [docs/architecture.md](docs/architecture.md), overview, roles, request flow, the reserved `_broker` and `_all` slots
+- [docs/protocol.md](docs/protocol.md), provider WebSocket framing, JSON-RPC envelopes, the aggregate opt-in frame
 - [docs/endpoints.md](docs/endpoints.md): every HTTP and WS endpoint exposed by the broker
 - [docs/authorization.md](docs/authorization.md): OAuth 2.1 resource server, provider auth, `_all` scope filtering (opt-in)
 - [docs/hierarchical-authorization.md](docs/hierarchical-authorization.md): roles, ISA-95-aligned resource paths, inherited permissions, explicit deny, and provider namespaces
+- [node/packages/broker/docs/config.md](node/packages/broker/docs/config.md): every config key, default, and env var
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 

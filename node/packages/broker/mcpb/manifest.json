@@ -37,7 +37,9 @@
     "tools": [
         { "name": "_broker-broker_info", "description": "Report the broker's identity, version and configuration." },
         { "name": "_broker-providers_list", "description": "List the provider slots currently registered with the broker." },
-        { "name": "_broker-provider_status", "description": "Report the connection status of a given provider slot." }
+        { "name": "_broker-provider_status", "description": "Report the connection status of a given provider slot." },
+        { "name": "_broker-broker_guide", "description": "Return an integration guide page: publishing a provider, connecting a client, host configuration, deployment, troubleshooting." },
+        { "name": "_broker-broker_diagnose", "description": "Report the broker's live state and the problems it can prove, each with the evidence and the fix." }
     ],
     "tools_generated": true,
     "user_config": {

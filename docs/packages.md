@@ -1,6 +1,6 @@
 # Packages
 
-The broker is not one artifact but four, split by **role in the tunnel** rather than by language or runtime.
+The broker is not one artifact but three, split by **role in the tunnel** rather than by language or runtime. Two are published; the third is designed but not created yet.
 
 ## Why the split
 
@@ -13,7 +13,7 @@ Two very different actors sit at the edges of the broker, and both could be call
 
 A package named `broker-client` would have to mean one or the other, and readers would guess wrong half the time. `provider` and `consumer` say which edge they serve, and they match the vocabulary already used throughout [architecture.md](architecture.md) and the broker source (`IProviderState`, `_onProviderConnect`).
 
-## The four packages
+## The three packages
 
 | Package | npm | Responsibility | Runs in |
 |---|---|---|---|
@@ -40,7 +40,7 @@ The reason is release ordering. The provider declares a peer range on `mcp-core`
 
 The published broker therefore installs `@cyanmycelium/mcp-core`, `jose`, `open` and `ws`, and nothing else of ours.
 
-All three packages additionally build against `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`.
+All three build against `@cyanmycelium/mcp-core` for `IMessageTransport`, `McpServer` and `McpClient`.
 
 ### server
 
@@ -79,7 +79,7 @@ The first line matters most. MCP defines stdio and Streamable HTTP; those transp
 | Package | Folder | Tag series | State |
 |---|---|---|---|
 | server | `node/packages/broker` | `node-v*` | Published, in production. Routes through the shared codec |
-| provider | `node/packages/provider` | `provider-v*` | `0.1.0` published: wire contract under `./protocol`, plus `DirectTransport` and `MultiplexTransport`. The transports still exist in `@cyanmycelium/mcp-core@0.4.x` too and leave it in `0.5.0` |
+| provider | `node/packages/provider` | `provider-v*` | Published: wire contract under `./protocol`, plus `DirectTransport` and `MultiplexTransport`. This package is now the **only** home of the tunnel transports; `@cyanmycelium/mcp-core` removed them and no longer exports them as of 0.7.0 |
 | consumer | not created yet | `consumer-v*` | Scope to be designed; nothing exists to move into it |
 
 `node-v*` predates the split, when `node/` held a single package. It stays as it is because the series is already published and a rename would orphan the existing tags; the newer packages use their own name instead.
@@ -94,4 +94,4 @@ Everything importing it goes through the `./protocol` subpath rather than the pa
 
 The broker compiles against the provider's published `dist`, and `npm run --workspaces` walks packages alphabetically rather than by dependency. The workspace `build` script therefore names its packages explicitly, downstream last. A new package added to `packages/` must be added there too, or a clean checkout will fail to build while an incremental one keeps working.
 
-Moving the transports out of `@cyanmycelium/mcp-core` is a breaking change for that package. The order is: publish `provider` with the transports, migrate applications, then remove them from `mcp-core`. Never the reverse.
+Moving the transports out of `@cyanmycelium/mcp-core` was a breaking change for that package. The order was: publish `provider` with the transports, migrate applications, then remove them from `mcp-core`. Never the reverse. That migration is complete: import `DirectTransport` and `MultiplexTransport` from `@cyanmycelium/mcp-broker-provider`.

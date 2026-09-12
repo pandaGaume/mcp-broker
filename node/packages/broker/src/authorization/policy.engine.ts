@@ -172,8 +172,17 @@ export class ConfigPolicyEngine implements IPolicyEngine {
         if (!request.resource) return { allowed: false, reason: "invalid-resource" };
         try {
             validateCapability(request.capability, "request capability");
-        } catch {
-            return { allowed: false, reason: "no-matching-grant" };
+        } catch (error) {
+            // Not a policy miss: the capability string itself is malformed, so no
+            // grant could ever match it. Reporting this as "no-matching-grant"
+            // pointed operators at their grants instead of at the mapping that
+            // produced the bad value.
+            const detail = error instanceof Error ? error.message : String(error);
+            console.error(
+                `[broker] authorization: capability "${String(request.capability)}" requested on resource "${request.resource.value}" is malformed, denying. ${detail} ` +
+                    `Capability names look like "mcp.tools.call" or "broker.providers.read": fix the authorization.toolCapabilities / providerToolCapabilities entry that produced this value, or the caller that passed it.`
+            );
+            return { allowed: false, reason: "invalid-capability" };
         }
 
         const matchingDenies = new Set<string>();

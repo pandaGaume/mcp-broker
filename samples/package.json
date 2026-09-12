@@ -1,0 +1,27 @@
+{
+    "name": "@cyanmycelium/mcp-broker-samples",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Runnable integration samples for @cyanmycelium/mcp-broker. Each sample starts, connects and proves itself end to end.",
+    "license": "Apache-2.0",
+    "engines": {
+        "node": ">=20.11.0"
+    },
+    "scripts": {
+        "//": "Every script is self-contained: it starts whatever it needs and prints what you should see.",
+        "browser-provider": "node browser-provider/run.mjs",
+        "browser-provider:client": "node browser-provider/client.mjs",
+        "host-config": "node host-config/check.mjs",
+        "provider-lifecycle": "node provider-lifecycle/run.mjs",
+        "app-host": "node app-host/run.mjs",
+        "app-host:client": "node app-host/client.mjs",
+        "embedded": "node embedded/server.mjs",
+        "verify": "node lib/verify.mjs"
+    },
+    "//dependencies": "file: links point at this repo's own packages so the samples exercise the code you are editing. In your own project replace both with a version range, e.g. \"^1.2.1\" and \"^0.1.1\": nothing else in these samples changes.",
+    "dependencies": {
+        "@cyanmycelium/mcp-broker": "file:../node/packages/broker",
+        "@cyanmycelium/mcp-broker-provider": "file:../node/packages/provider"
+    }
+}

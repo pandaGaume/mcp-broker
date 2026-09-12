@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>mcp-broker sample: app host, the application</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 40px;
+                background: #0f1115;
+                color: #e6e9ef;
+                font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+                color-scheme: dark;
+            }
+            main {
+                max-width: 820px;
+                margin: 0 auto;
+            }
+            h1 {
+                font-size: 22px;
+                margin: 0 0 4px;
+            }
+            .sub {
+                color: #9aa4b6;
+                margin: 0 0 20px;
+            }
+            #status {
+                padding: 12px 16px;
+                border-radius: 8px;
+                border: 1px solid #262b36;
+                background: #171a21;
+                font-weight: 600;
+            }
+            #status.ok {
+                border-color: #4ade80;
+                color: #4ade80;
+            }
+            #status.err {
+                border-color: #f87171;
+                color: #f87171;
+            }
+            #counter {
+                font-size: 40px;
+                margin: 20px 0 0;
+            }
+            button {
+                padding: 8px 14px;
+                border-radius: 6px;
+                border: 1px solid #262b36;
+                background: #1f2430;
+                color: #e6e9ef;
+                cursor: pointer;
+            }
+            #log {
+                margin-top: 24px;
+                max-height: 300px;
+                overflow: auto;
+                font-family: ui-monospace, Menlo, Consolas, monospace;
+                font-size: 12px;
+            }
+            #log div {
+                padding: 2px 0;
+                border-bottom: 1px solid #1c202a;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+            .ok {
+                color: #4ade80;
+            }
+            .err {
+                color: #f87171;
+            }
+            code {
+                background: #171a21;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-family: ui-monospace, Menlo, Consolas, monospace;
+                font-size: 13px;
+            }
+        </style>
+
+        <!-- See ../../browser-provider/README.md for why this three-line map exists
+             and why a bundler makes it unnecessary. -->
+        <script type="importmap">
+            {
+                "imports": {
+                    "@cyanmycelium/mcp-broker-provider": "./vendor/index.js"
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <main>
+            <h1>The application, mounted at <code>/app</code></h1>
+            <p class="sub">
+                It publishes itself as an MCP provider the moment it loads. No button, no ordering dependency: the
+                broker is already listening, because the broker is what served this page.
+            </p>
+
+            <div id="status">starting…</div>
+
+            <p id="counter">0</p>
+            <button id="bump">Increment (or call the <code>increment</code> tool from an MCP client)</button>
+
+            <div id="log"></div>
+        </main>
+
+        <script type="module" src="app.js"></script>
+    </body>
+</html>

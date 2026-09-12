@@ -1,0 +1,31 @@
+{
+    "_readme": [
+        "THE TWO-ENTRY PATTERN. Entry 1 (\"broker\") STARTS the broker process and bridges it to this host over stdio. Entry 2 (\"scene-editor\") ATTACHES to the listener entry 1 already opened. There is exactly one broker process.",
+        "",
+        "Replace /ABSOLUTE/PATH/TO with the real path. MCP hosts do not expand ~, $HOME or relative paths, and the working directory a host spawns a server in is not the one you are reading this from.",
+        "",
+        "ENTRY 1, why MCP_BROKER_STDIO_PROVIDER must be \"_all\": the stdio bridge gates every frame, initialize included, on the target slot being occupied. Pin it to a real slot and the handshake fails whenever the host starts before that provider connects, which for a browser-hosted provider is every single time; the host then marks the server failed and stops retrying. \"_all\" is occupied from broker startup, answers initialize itself, unions every opted-in provider, and pushes notifications/tools/list_changed as providers join, so a provider that appears an hour later still shows up live.",
+        "",
+        "ENTRY 2, why it must not spawn anything: a second `command` entry running @cyanmycelium/mcp-broker starts a SECOND broker. It either dies with EADDRINUSE on the port entry 1 holds, or, if you give it another port, comes up as a completely separate broker sharing no slots with the first, so its tools are permanently missing and nothing says why. Entry 2 is a URL.",
+        "",
+        "Entry 2 is optional. Add it only when you want one slot to have its own identity in the host: its own permission prompts, its own tool namespace, and unprefixed tool names. Through entry 1 the same tools are already reachable as \"<slot>-<tool>\".",
+        "",
+        "Verify before pasting: node samples/host-config/check.mjs"
+    ],
+
+    "mcpServers": {
+        "broker": {
+            "command": "npx",
+            "args": ["-y", "@cyanmycelium/mcp-broker"],
+            "env": {
+                "MCP_BROKER_CONFIG": "/ABSOLUTE/PATH/TO/mcp-broker/samples/host-config/.mcp-broker/config.json",
+                "MCP_BROKER_STDIO_PROVIDER": "_all"
+            }
+        },
+
+        "scene-editor": {
+            "type": "http",
+            "url": "http://127.0.0.1:3000/scene-editor/mcp"
+        }
+    }
+}

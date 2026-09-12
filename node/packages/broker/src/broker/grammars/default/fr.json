@@ -11,6 +11,18 @@
             "properties": {
                 "name": "Nom exact du provider (sensible à la casse)."
             }
+        },
+        "broker_guide": {
+            "description": "Retourne la documentation d'intégration du broker au format Markdown : comment publier un provider, comment atteindre un emplacement en tant que client, comment configurer un hôte MCP, comment déployer, et une page de dépannage symptôme vers correctif. À lire plutôt que de chercher un README. Sans argument, retourne l'index.",
+            "properties": {
+                "topic": "Page à retourner : index, publish-provider, connect-client, host-config, deploy ou troubleshooting. Omettre pour obtenir l'index, qui indique quelle page lire ensuite."
+            }
+        },
+        "broker_diagnose": {
+            "description": "Retourne l'état en direct du broker ainsi que les problèmes qu'il sait détecter dans son propre câblage, chacun avec le symptôme, les preuves et un correctif concret. À appeler en premier quand quelque chose ne fonctionne pas : il corrèle les compteurs à ta place et nomme la cause.",
+            "properties": {
+                "slot": "Restreint le rapport à un seul emplacement de provider (sensible à la casse). Omettre pour diagnostiquer tout le broker."
+            }
         }
     },
     "resources": {
@@ -21,12 +33,40 @@
         "broker://providers": {
             "name": "Providers du broker",
             "description": "Liste de tous les emplacements de providers connus du broker, y compris les déconnectés."
+        },
+        "broker://guide/index": {
+            "name": "Index du guide",
+            "description": "Ce qu'est le broker, la règle d'appariement transport/chemin qui coûte le plus cher quand on la rate, et quelle page du guide lire ensuite."
+        },
+        "broker://guide/publish-provider": {
+            "name": "Guide : publier un provider",
+            "description": "Placer un serveur MCP dans un emplacement : la règle d'appariement transport/chemin, les formats de trame, l'inscription à l'agrégat, le cycle de vie connexion/enregistrement/libération et les limites du navigateur."
+        },
+        "broker://guide/connect-client": {
+            "name": "Guide : connecter un client",
+            "description": "Atteindre un emplacement en tant que client : les quatre transports client, les emplacements réservés _broker et _all, le contrôle d'origine, l'autorisation et tous les codes d'erreur possibles."
+        },
+        "broker://guide/host-config": {
+            "name": "Guide : configuration d'un hôte MCP",
+            "description": "Câbler Claude Desktop ou un autre hôte MCP stdio : pourquoi le pont doit viser _all, la recette de configuration, la règle d'un seul broker par port et la question du principal anonyme."
+        },
+        "broker://guide/deploy": {
+            "name": "Guide : déployer le broker",
+            "description": "Intégrer le broker comme bibliothèque ou le lancer comme processus : ordre de démarrage, topologies, fichier de configuration, fichiers statiques, TLS et arrêt propre."
+        },
+        "broker://guide/troubleshooting": {
+            "name": "Guide : dépannage",
+            "description": "Symptôme, cause, correctif, en commençant par les pannes silencieuses qui ne produisent aucune ligne de log : clients bloqués, emplacements coincés, listes d'outils périmées, origines refusées."
         }
     },
     "templates": {
         "broker://providers/{name}": {
             "name": "Provider du broker",
             "description": "Snapshot d'un emplacement de provider spécifique, identifié par son nom."
+        },
+        "broker://guide/{topic}": {
+            "name": "Page du guide du broker",
+            "description": "Une page de la documentation d'intégration du broker, identifiée par son sujet : index, publish-provider, connect-client, host-config, deploy ou troubleshooting."
         }
     }
 }

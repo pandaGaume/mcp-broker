@@ -1,0 +1,210 @@
+/* Deliberately small: the sample is the JavaScript, not the design. */
+:root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --line: #262b36;
+    --text: #e6e9ef;
+    --muted: #9aa4b6;
+    --accent: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    color-scheme: dark;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header {
+    max-width: 1100px;
+    margin: 0 auto 20px;
+    position: relative;
+}
+
+h1 {
+    margin: 0 0 4px;
+    font-size: 22px;
+}
+
+.sub {
+    margin: 0;
+    color: var(--muted);
+    max-width: 70ch;
+}
+
+.badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--line);
+}
+
+.badge.off {
+    color: var(--muted);
+}
+
+.badge.ok {
+    color: #0b1a10;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+main {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.panel.wide {
+    grid-column: 1 / -1;
+}
+
+h2 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+label {
+    display: block;
+    margin: 10px 0 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+label.check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #0c0e13;
+    color: var(--text);
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+.row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+button {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #1f2430;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+}
+
+button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06170d;
+    font-weight: 600;
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 10px 0 0;
+}
+
+code {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: #0c0e13;
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.endpoint {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.endpoint code {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.tool {
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+    margin-top: 8px;
+}
+
+.tool p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+#log {
+    max-height: 320px;
+    overflow: auto;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+.line {
+    padding: 2px 0;
+    border-bottom: 1px solid #1c202a;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.line.ok {
+    color: var(--accent);
+}
+
+.line.warn {
+    color: var(--warn);
+}
+
+.line.err {
+    color: var(--err);
+}

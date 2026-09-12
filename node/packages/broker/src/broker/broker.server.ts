@@ -2,17 +2,22 @@ import { McpServerBuilder, LoopbackTransport } from "@cyanmycelium/mcp-core";
 import type { GrammarResolverOptions, IMcpServer, IMessageTransport } from "@cyanmycelium/mcp-core";
 import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info";
 import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers";
+import { BrokerGuideBehavior } from "./behaviors/broker.behavior.guide";
+import { BrokerDiagnoseBehavior } from "./behaviors/broker.behavior.diagnose";
 import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars";
+import { BROKER_PROVIDER_NAME } from "./broker.slots";
 import type { IBrokerContext } from "./broker.context";
 
 /**
  * Reserved provider slot name under which the broker exposes itself as an MCP
  * server. Clients reach it via `<host>/_broker/mcp` (or any other client transport).
  *
- * Prefixed with `_` to make it unambiguously a system slot, and to reduce the
- * chance of collision with user-supplied provider names.
+ * Defined in `broker.slots.ts`, which is where the reserved names live so the
+ * diagnostics engine can classify a slot without importing this module (which
+ * would close a cycle through the behaviors). Re-exported here so every
+ * existing importer of `broker.server` keeps working unchanged.
  */
-export const BROKER_PROVIDER_NAME = "_broker";
+export { BROKER_PROVIDER_NAME };
 
 /**
  * Optional knobs passed to {@link startBrokerServer}. Lets the embedder
@@ -53,9 +58,20 @@ export interface IStartBrokerServerOptions {
 }
 
 /**
- * Constructs the broker's own MCP server (the Tier-1 introspection behaviors)
- * and returns the running server plus the loopback transport that must be
- * registered against the {@link WsTunnel} as the `_broker` provider slot.
+ * Constructs the broker's own MCP server and returns the running server plus
+ * the loopback transport that must be registered against the {@link WsTunnel}
+ * as the `_broker` provider slot.
+ *
+ * Four behaviors are registered, in the order an agent meets them:
+ *
+ * - {@link BrokerInfoBehavior}: `broker_info`, `broker://info`.
+ * - {@link BrokerProvidersBehavior}: `providers_list`, `provider_status`,
+ *   `broker://providers`, `broker://providers/{name}`.
+ * - {@link BrokerGuideBehavior}: `broker_guide`, `broker://guide/*`. The
+ *   broker's own integration documentation, so an agent wiring something to
+ *   this broker never has to go find a README.
+ * - {@link BrokerDiagnoseBehavior}: `broker_diagnose`. Live state plus the
+ *   problems the broker can prove about its own wiring, each with a fix.
  *
  * Usage from {@link WsTunnel.start}:
  * ```ts
@@ -88,7 +104,7 @@ export async function startBrokerServer(
                 serverInfo: { name: BROKER_PROVIDER_NAME, version: context.version },
             }),
         })
-        .register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context));
+        .register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context), new BrokerGuideBehavior(context), new BrokerDiagnoseBehavior(context));
 
     // Register every `(userAgent, locale)` JSON found on disk as a raw
     // grammar layer. The candidate-chain resolution in
