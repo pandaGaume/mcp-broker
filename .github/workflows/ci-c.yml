@@ -1,0 +1,42 @@
+name: ci-c
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "c/**"
+            - ".github/workflows/ci-c.yml"
+    pull_request:
+        branches: [main]
+        paths:
+            - "c/**"
+            - ".github/workflows/ci-c.yml"
+
+defaults:
+    run:
+        working-directory: c
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                cc: [gcc, clang]
+        env:
+            CC: ${{ matrix.cc }}
+        steps:
+            - uses: actions/checkout@v4
+            # Warnings are errors here and nowhere else: the library is
+            # developed warning-free under -Wconversion, and a narrowing that
+            # slips in is how a frame length gets truncated.
+            - run: cmake -S . -B build -DCMAKE_C_FLAGS=-Werror
+            - run: cmake --build build
+            - run: ctest --test-dir build --output-on-failure
+
+    # The Makefile is the path for toolchains without CMake, so it has to
+    # keep working too.
+    make:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - run: make -C libmcpb test
