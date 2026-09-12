@@ -228,11 +228,19 @@ int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
         goto fail;
     }
 
+    /* The status is kept whatever it is: on a refusal it is the only
+     * diagnosis the caller gets, since the body is never read. */
+    if (strncmp(req, "HTTP/1.", 7) == 0 && req[8] == ' ')
+    {
+        int i;
+        for (i = 9; i < 12 && req[i] >= '0' && req[i] <= '9'; i++)
+            ws->http_status = ws->http_status * 10 + (req[i] - '0');
+    }
+
     /* 101 is the only success; anything else, redirects included, is a
      * refusal. Following one would silently dial a different host from the
      * one that was logged. */
-    if (strncmp(req, "HTTP/1.1 101", 12) != 0 &&
-        strncmp(req, "HTTP/1.0 101", 12) != 0)
+    if (ws->http_status != 101)
     {
         rc = MCPB_ERR_HANDSHAKE;
         goto fail;
@@ -447,6 +455,11 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
                 ws->close_code = (len >= 2u)
                     ? (uint16_t)(((uint16_t)ctrl[0] << 8) | ctrl[1])
                     : 1005u; /* no code supplied */
+                /* len <= CTRL_MAX was checked above, so the reason always
+                 * fits with its terminator. */
+                if (len > 2u)
+                    memcpy(ws->close_reason, ctrl + 2, (size_t)len - 2u);
+                ws->close_reason[(len > 2u) ? (size_t)len - 2u : 0u] = 0;
                 (void)_send_frame(ws, OP_CLOSE, ctrl, (len >= 2u) ? 2u : 0u);
                 ws->port->close(ws->port->ctx);
                 ws->state = MCPB_WS_CLOSED;

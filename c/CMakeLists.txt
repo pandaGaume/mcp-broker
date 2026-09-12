@@ -11,4 +11,12 @@ project(mcp-broker-c LANGUAGES C)
 set(MCPB_BUILD_TESTS ON CACHE BOOL "Build the libmcpb bench")
 enable_testing()
 
+# The warnings every C target here is built under. -Wconversion is not
+# decoration: this code shifts and masks its way through frame headers, and a
+# silent narrowing is exactly how a length field gets truncated.
+set(MCPB_WARNINGS
+    -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
+
 add_subdirectory(libmcpb)
+add_subdirectory(ports/host)
+add_subdirectory(samples/host-provider)

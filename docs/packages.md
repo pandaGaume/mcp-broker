@@ -81,7 +81,7 @@ The first line matters most. MCP defines stdio and Streamable HTTP; those transp
 | server | `node/packages/broker` | `node-v*` | Published, in production. Routes through the shared codec |
 | provider | `node/packages/provider` | `provider-v*` | Published: wire contract under `./protocol`, plus `DirectTransport` and `MultiplexTransport`. This package is now the **only** home of the tunnel transports; `@cyanmycelium/mcp-core` removed them and no longer exports them as of 0.7.0 |
 | consumer | not created yet | `consumer-v*` | Scope to be designed; nothing exists to move into it |
-| c | `c/` | `c-v*` | `libmcpb`, the device-side client in C99: WebSocket, registration, reconnection, link events. Transport only, by design: it carries opaque bytes and embeds no JSON, JSON-RPC or MCP layer, which stay in the firmware's own language. Ports (POSIX, ESP-IDF) to follow. See [`c/README.md`](../c/README.md) |
+| c | `c/` | `c-v*` | `libmcpb`, the device-side client in C99: WebSocket, registration, reconnection, link events. Transport only, by design: it carries opaque bytes and embeds no JSON, JSON-RPC or MCP layer, which stay in the firmware's own language. Host port (Linux, macOS, Windows), a transport-only sample provider and a roundtrip test against the Node broker are in place; the ESP-IDF component is next. See [`c/README.md`](../c/README.md) |
 
 `node-v*` predates the split, when `node/` held a single package. It stays as it is because the series is already published and a rename would orphan the existing tags; the newer packages use their own name instead.
 

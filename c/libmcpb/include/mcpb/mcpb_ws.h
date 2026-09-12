@@ -24,6 +24,10 @@ extern "C" {
 #define MCPB_WS_HOST_MAX 128
 #define MCPB_WS_PATH_MAX 192
 
+/* A Close frame carries at most 125 bytes: two of code, the rest of reason
+ * (RFC 6455 5.5.1). 123 bytes plus the terminator. */
+#define MCPB_WS_CLOSE_REASON_MAX 124
+
 typedef struct
 {
     const char *host;      /* resolved by the port */
@@ -60,7 +64,20 @@ typedef struct
     size_t   rx_len;         /* accumulated across continuation frames */
     int      rx_in_fragment;
 
-    uint16_t close_code;     /* set when the peer sent one */
+    uint16_t close_code;     /* set when the peer sent one; 1005 for none */
+
+    /* The peer's close reason, NUL-terminated, "" when it sent none. Kept
+     * because it is where the broker says why: a 1008 comes with a sentence
+     * naming the transport/path mismatch or the policy that refused the
+     * slot, and a client that discards it leaves its operator with a bare
+     * code. */
+    char     close_reason[MCPB_WS_CLOSE_REASON_MAX];
+
+    /* The HTTP status the server answered the handshake with, 0 until it
+     * answers. On a refusal it is the diagnosis: 401/403 is authentication,
+     * 400 is a path the broker rejects by construction, 404 a wrong prefix,
+     * 503 a broker not ready. Retained on MCPB_ERR_HANDSHAKE. */
+    int      http_status;
 } mcpb_ws_t;
 
 /* Connects and performs the handshake.
