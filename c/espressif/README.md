@@ -1,21 +1,22 @@
 # mcp-broker on ESP-IDF
 
-The ESP32 side of the tunnel: an IDF component that runs [`libmcpb`](../libmcpb/) on esp-tls and lwip inside one FreeRTOS task, and a sample project that publishes a device as a broker slot over Wi-Fi.
+The ESP32 side of the tunnel: an IDF component that runs [`libmcpb`](../libmcpb/) on its [Espressif port](../ports/espressif/) inside one FreeRTOS task, and a sample project that publishes a device as a broker slot over Wi-Fi.
 
 ```
-components/mcpb_esp/      the component
+../ports/espressif/       the port: libmcpb's six functions on esp-tls and lwip
+components/mcpb_esp/      the component: the task, Kconfig, events; compiles the port and libmcpb
 samples/provider/         Wi-Fi station + the transport-only echo provider
 ```
 
 Developed on ESP-IDF 6.0 for the ESP32-S3; the component uses nothing S3-specific and needs IDF 5.1 or later.
 
+## The port: `ports/espressif`
+
+[`mcpb_port_esp.h`](../ports/espressif/include/mcpb_port_esp.h) is the six-function port libmcpb asks for, the same shape as [`ports/host`](../ports/host/): `open` over `esp_tls_conn_new_sync` (TLS through the certificate bundle built into the image, or plain TCP with `is_plain_tcp`), `send` and `recv` over `esp_tls_conn_write` / `esp_tls_conn_read`, `now_ms` on `esp_timer`, `random` on `esp_fill_random`. The one subtlety is the read timeout: `esp_tls_conn_read` has none, so the socket is watched with `select`, but only after `esp_tls_get_bytes_avail` says mbedTLS holds nothing already decrypted, otherwise a wait on the socket waits for data that has already arrived. Usable alone by an application that runs the poll loop itself. It compiles only inside an IDF build, which is why the component below is what compiles it.
+
 ## The component: `mcpb_esp`
 
-Two headers.
-
-**[`mcpb_port_esp.h`](components/mcpb_esp/include/mcpb_port_esp.h)** is the six-function port libmcpb asks for: `open` over `esp_tls_conn_new_sync` (TLS through the certificate bundle built into the image, or plain TCP with `is_plain_tcp`), `send` and `recv` over `esp_tls_conn_write` / `esp_tls_conn_read`, `now_ms` on `esp_timer`, `random` on `esp_fill_random`. The one subtlety is the read timeout: `esp_tls_conn_read` has none, so the socket is watched with `select`, but only after `esp_tls_get_bytes_avail` says mbedTLS holds nothing already decrypted, otherwise a wait on the socket waits for data that has already arrived. Usable alone by an application that runs the poll loop itself.
-
-**[`mcpb_esp.h`](components/mcpb_esp/include/mcpb_esp.h)** is what an application uses: one task that dials, keeps the link alive, reconnects, and calls your handler for every incoming JSON-RPC message.
+[`mcpb_esp.h`](components/mcpb_esp/include/mcpb_esp.h) is what an application uses: one task that dials, keeps the link alive, reconnects, and calls your handler for every incoming JSON-RPC message.
 
 ```c
 static int handle(void *user, const char *json, size_t len, char *tx, size_t cap)
@@ -43,7 +44,7 @@ Sizes are Kconfig, under *mcp-broker provider (mcpb_esp)* in menuconfig: receive
 
 Footprint on the S3 with the defaults: 7.4 KB of flash code and 13 KB of RAM, of which 12 KB are the two buffers.
 
-The component compiles libmcpb straight from `../../../libmcpb`, the single copy in this repository. That is why it is not on the Espressif component registry yet: a registry package must be self-contained, so publishing is a vendoring step for the day it is wanted, not a layout change.
+The component compiles libmcpb and the port straight from `../../../libmcpb` and `../../../ports/espressif`, the single copies in this repository. That is why it is not on the Espressif component registry yet: a registry package must be self-contained, so publishing is a vendoring step for the day it is wanted, not a layout change.
 
 ## The sample: `samples/provider`
 

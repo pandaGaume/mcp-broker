@@ -18,6 +18,13 @@
  *
  * Usable on its own, without the task in mcpb_esp.h, by an application that
  * runs the poll loop itself.
+ *
+ * Needs the ESP-IDF headers (esp-tls, lwip, FreeRTOS, esp_timer), so the
+ * host CMake in c/ does not build it; the component in
+ * c/espressif/components/mcpb_esp compiles it from here, along with libmcpb.
+ * The arduino-esp32 core is built on ESP-IDF and exposes the same headers,
+ * so a sketch can compile this file too; what is IDF-only is the
+ * component's packaging (idf_component_register, Kconfig), not the port.
  */
 
 #include "mcpb/mcpb_port.h"
