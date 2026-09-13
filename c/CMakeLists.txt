@@ -19,4 +19,5 @@ set(MCPB_WARNINGS
 
 add_subdirectory(libmcpb)
 add_subdirectory(ports/host)
+add_subdirectory(samples/lib)
 add_subdirectory(samples/host-provider)

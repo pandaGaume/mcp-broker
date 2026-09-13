@@ -32,6 +32,19 @@ repository; the changes it needed for this release are listed under
   roundtrip test that drives the Node broker: own slot, `_all`, broker kill
   and restart. Not published anywhere; consumed from the repository. See
   [`c/README.md`](c/README.md).
+- **c** `c/espressif/`: the ESP-IDF component `mcpb_esp` (libmcpb on esp-tls
+  and lwip, TLS through the certificate bundle, one FreeRTOS task, link
+  events on the default `esp_event` loop, an outbox for messages from other
+  tasks, sizes in Kconfig) and a Wi-Fi sample project serving the same `echo`
+  tool as the host sample. Built for the ESP32-S3 in CI with the official
+  IDF 6.0 image; 7.4 KB of flash code and 13 KB of RAM with the defaults.
+  Validated on an Arduino Nano ESP32 against the 1.3.0 broker: own slot,
+  `_all`, broker kill and restart, slot takeover after a reboot.
+- **c** `mcpb_event_t.detail`: the library's own account when it is the one
+  that refused, with the frame rule that fired and the two header bytes it
+  read (`rsv bits set, header C1 02`), an imposed extension, a bad handshake
+  (`HTTP 401`). "protocol violation" alone named nothing; one was seen on the
+  board and could not be explained without the bytes.
 
 ## [1.3.0] - 2026-09-02
 

@@ -1,4 +1,11 @@
 {
-    "liveServer.settings.port": 5501,
-    "cmake.sourceDirectory": "${workspaceFolder}/c"
+  "liveServer.settings.port": 5501,
+  "cmake.sourceDirectory": "${workspaceFolder}/c",
+  "clangd.path": "C:\\Users\\GuillaumePelletier\\.espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\GuillaumePelletier\\Documents\\GitHub\\Gaume\\mcp-broker\\build"
+  ],
+  "idf.currentSetup": "C:\\esp\\v6.0\\esp-idf"
 }

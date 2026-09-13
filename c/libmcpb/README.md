@@ -76,7 +76,7 @@ for (;;) {
 
 `mcpb_provider_init` opens nothing: the connection happens on the first `poll`, so a device booting without a network does not stall its startup on an unreachable broker.
 
-`aggregate` sends `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}` as the first frame after every connection, which is how a provider asks into the `_all` slot (opt-in, because `_all` is a content-confidentiality boundary). The broker then sends `initialize` at once; `poll` delivers it like any other request. Without the flag the provider is reachable on its own slot only.
+`aggregate` sends `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}` as the first frame after every connection, which is how a provider asks into the `_all` slot (opt-in, because `_all` is a content-confidentiality boundary). The broker then sends `initialize` at once; `poll` delivers it like any other request. Without the flag the provider is reachable on its own slot only. Needs mcp-broker 1.3.0 or later: an older broker routes the frame as ordinary traffic and the provider silently stays on its own slot.
 
 ## What the broker expects of the device
 
@@ -85,7 +85,7 @@ Two obligations, both broker defaults and both configurable there:
 - **Poll at least every 30 s** (`providerHeartbeatIntervalMs`). The broker pings every provider socket and terminates one that misses a full interval. The Pong is answered from inside `poll`, so a device busy elsewhere for longer than that is dropped as dead; it gets its slot back on the next `poll`, but every client request in between failed.
 - **Answer within 60 s** (`providerRequestTimeoutMs`). Past that the broker fails the request for the client and drops the late reply as unmatched. A tool that runs longer answers first and reports later, through a notification.
 
-In return a device that reboots gets its slot back at once: the broker pings the previous socket and hands the slot over when it does not answer, instead of holding it until the OS gives up on the half-open TCP connection.
+In return a device that reboots gets its slot back within one or two heartbeat intervals (30 to 60 s by default): the broker pings every provider socket at each sweep and hands a slot to a newcomer once the incumbent has missed a ping, instead of holding it until the OS gives up on the half-open TCP connection, which takes hours. Until then the newcomer is refused with close `1008` and a reason naming the held slot (`Slot already held by a live provider...`), which the retry window absorbs on its own.
 
 ## Recovery: a doubling window, a wait drawn inside it
 
@@ -154,6 +154,8 @@ cfg.event_user = &my_context;
 
 `reason` is never NULL and is valid for the duration of the callback; copy it to keep it. Outside a refusal the three fields are 0, 0 and "".
 
+`e->detail` is the other side of the same coin: the library's **own** account when it is the one that refused. A frame that broke a rule comes with the rule and the two header bytes it read (`rsv bits set, header C1 02`), an imposed extension, a missing or wrong `Sec-WebSocket-Accept`, a non-101 status (`HTTP 401`). Set with `MCPB_ERR_PROTOCOL`, `MCPB_ERR_UNSUPPORTED` and `MCPB_ERR_HANDSHAKE`, "" otherwise, never NULL. "protocol violation" alone names nothing; the bytes are what separates a real violation from a stream that went out of sync.
+
 The sink is **called from the caller's own task**, inside `poll` or `send`, never from a thread the library created, since it creates none. In exchange, do not call any `mcpb_provider_*` function from the sink: the library is mid-transition. Set a flag and act in your own loop.
 
 ## Nothing is queued
@@ -167,7 +169,7 @@ gcc -std=c99 -Wall -Wextra -Iinclude -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-98 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+105 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
 

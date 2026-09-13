@@ -31,10 +31,13 @@
  *    dropped as unmatched. A tool that runs longer must answer first and
  *    report later, through a notification.
  *
- * In exchange, a device that reboots gets its slot back at once: the broker
- * pings the previous socket and hands the slot over when it does not answer
- * (providerTakeover "liveness"), instead of holding it until the OS gives up
- * on the half-open TCP connection.
+ * In exchange, a device that reboots gets its slot back within one or two
+ * heartbeat intervals (30 to 60 s by default): the broker pings the previous
+ * socket at each sweep and hands the slot to a newcomer once the incumbent
+ * has missed a ping (providerTakeover "liveness"), instead of holding it
+ * until the OS gives up on the half-open TCP connection, which takes hours.
+ * Until then the newcomer is refused with close 1008 and a reason naming
+ * the held slot; the retry window covers the wait on its own.
  */
 
 #include "mcpb.h"
@@ -121,6 +124,14 @@ typedef struct
     uint16_t    close_code;
     int         http_status;
     const char *reason;
+
+    /* The library's own account when it is the one that refused: the frame
+     * rule that fired with the two header bytes it read, an extension the
+     * server imposed, a bad handshake. Set with MCPB_ERR_PROTOCOL,
+     * MCPB_ERR_UNSUPPORTED and MCPB_ERR_HANDSHAKE; "" otherwise. Never
+     * NULL; valid for the duration of the callback. Log it with `error`:
+     * "protocol violation" alone names nothing. */
+    const char *detail;
 } mcpb_event_t;
 
 /* Called from the caller's own task, inside mcpb_provider_poll or
@@ -147,7 +158,11 @@ typedef struct
      *
      * The broker then sends `initialize` at once. Nothing to prepare here,
      * poll delivers it, but a device that does not answer it is removed from
-     * `_all` and logged on the broker, with no retry until it reconnects. */
+     * `_all` and logged on the broker, with no retry until it reconnects.
+     *
+     * Needs mcp-broker 1.3.0 or later: an older broker routes this frame as
+     * ordinary traffic, and the provider stays reachable on its own slot
+     * only, with nothing reported on either side. */
     int aggregate;
 
     const char *extra_headers; /* authorization, etc. */

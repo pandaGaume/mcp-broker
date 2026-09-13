@@ -28,6 +28,8 @@ extern "C" {
  * (RFC 6455 5.5.1). 123 bytes plus the terminator. */
 #define MCPB_WS_CLOSE_REASON_MAX 124
 
+#define MCPB_WS_DETAIL_MAX 48
+
 typedef struct
 {
     const char *host;      /* resolved by the port */
@@ -78,6 +80,16 @@ typedef struct
      * 400 is a path the broker rejects by construction, 404 a wrong prefix,
      * 503 a broker not ready. Retained on MCPB_ERR_HANDSHAKE. */
     int      http_status;
+
+    /* Why the LIBRARY refused, when the failure is its own decision rather
+     * than the peer's: the frame rule that fired and the two header bytes it
+     * read ("rsv bits set, header 41 83"), an imposed extension, a missing
+     * or wrong Sec-WebSocket-Accept, a non-101 status. Set with
+     * MCPB_ERR_PROTOCOL, MCPB_ERR_UNSUPPORTED and MCPB_ERR_HANDSHAKE, ""
+     * otherwise. A refused frame is otherwise invisible: the peer sees a
+     * close it did not ask for and the operator sees "protocol violation",
+     * which names nothing. */
+    char     detail[MCPB_WS_DETAIL_MAX];
 } mcpb_ws_t;
 
 /* Connects and performs the handshake.

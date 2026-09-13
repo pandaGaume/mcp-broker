@@ -112,6 +112,7 @@ static void _notify(mcpb_provider_t *p, mcpb_event_type_t type, int error,
     ev.close_code = closed ? p->ws.close_code : 0u;
     ev.http_status = (error == MCPB_ERR_HANDSHAKE) ? p->ws.http_status : 0;
     ev.reason = closed ? p->ws.close_reason : "";
+    ev.detail = p->ws.detail; /* "" unless the library itself refused */
     p->cfg.on_event(p->cfg.event_user, &ev);
 }
 
