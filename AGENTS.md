@@ -10,7 +10,7 @@ A **running** broker documents itself over MCP on the reserved `_broker` slot (a
 |---|---|
 | `broker_guide({ topic? })` | six Markdown pages: `index`, `publish-provider`, `connect-client`, `host-config`, `deploy`, `troubleshooting` |
 | resources `broker://guide/{topic}` | the same pages, as MCP resources |
-| `broker_diagnose({ slot? })` | live state **plus** proven problems, each with `symptom`, `evidence`, `fix` |
+| `broker_diagnose({ slot? })` | live state **plus** proven problems, each with `symptom`, `evidence`, `fix`; since 1.3.1 it also reads `_all` membership (`aggregate-empty`, `aggregate-missing-live-slots`) |
 | `broker_info` | identity, version, uptime, bind address, TLS, the effective URL paths |
 | `providers_list` / `provider_status({ name })` | every slot / one slot in detail |
 
@@ -42,6 +42,8 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | A signed `.mcpb` bundle the broker should run | nothing | config key `mcpbBundles[]` | broker verifies, unpacks, spawns |
 | An MCP server on an **ESP32** (or any C99 firmware) | [`c/libmcpb`](c/libmcpb/) + a port; on ESP-IDF the [`mcpb_esp`](c/espressif/) component | `mcpb_provider_t` / `mcpb_esp_start` | `ws://<host>/provider/<name>` |
 | Several MCP servers from **Unreal Engine 5** (or any native process) | the [`McpBroker`](c/unreal/) plugin, built on `c/libmcpb` | `UMcpBrokerSubsystem::Connect` | `ws://<host>/providers`, one socket for all slots |
+
+The `_all` opt-in rides on one frame, `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}`, sent first on the socket by provider 0.2.0 and by `libmcpb`. A broker older than 1.3.0 does not know that frame: the slot works, the provider stays out of `_all`. Pair provider 0.2.x and `c/` with broker 1.3.0 or later.
 
 ## 3. The pairing rule
 
@@ -96,6 +98,18 @@ Observable signatures, if you are debugging one:
 
 **The bridge is anonymous.** It reaches `_all` with no principal. Invisible until you enable authorization, at which point the host's tool list silently empties.
 
+**A host that speaks Streamable HTTP does not need the bridge.** Claude Code (`.mcp.json`), and any host with an `http` server type, can point straight at a slot of a broker you run once, on the side:
+
+```json
+{
+    "mcpServers": {
+        "mcp-broker": { "type": "http", "url": "http://127.0.0.1:3000/_all/mcp" }
+    }
+}
+```
+
+No second process and no start-order problem: the host talks to the slot when it needs it. `_all` for the tools, `_broker` for introspection only, `/<slot>/mcp` for one provider.
+
 ### 4b. Browser provider
 
 ```ts
@@ -107,7 +121,8 @@ const server = new McpServerBuilder().withName("my-slot").withTransport(transpor
 
 await server.start();
 
-// Release the slot, or a reload is refused with close code 1008.
+// Release the slot, or a reload is refused with close code 1008 until the
+// heartbeat notices the old socket is dead (up to one interval, 30 s).
 addEventListener("pagehide", () => transport.close());
 ```
 
@@ -165,7 +180,7 @@ await tunnel.stop();
 | Client hangs on `initialize`, provider shows `connected: true` | MultiplexTransport on `/provider/<name>` | move to `ws://<host>/providers`, or switch to `DirectTransport` |
 | Provider socket open, slot never appears in `providers_list` | DirectTransport on `/providers` | move to `ws://<host>/provider/<name>`, or switch to `MultiplexTransport` |
 | Provider on `/providers/<name>`, nothing works | that path is neither endpoint, it is a **client** slot | drop the name (multiplex) or add `/provider/` (dedicated) |
-| WebSocket closes `1008 already connected` after a reload | a stale socket still holds the slot | release on `pagehide`; the heartbeat frees a genuinely dead one within one interval (default 30 s) |
+| WebSocket closes `1008 Slot already held by a live provider` after a reload | a stale socket still holds the slot and answered the last heartbeat | release on `pagehide`; under the default `providerTakeover: "liveness"` the newcomer takes the slot as soon as the incumbent misses a ping (one interval, default 30 s). `"reject"` never hands over; `"always"` needs `providerAuth` and the same principal, else it falls back to `"liveness"` and says so |
 | MCP host: `Connection closed`, no cause | a second broker could not bind the port | one broker per port; read `mcp-server-<name>.log` for `EADDRINUSE` |
 | HTTP 403 `invalid_origin` from a page the broker itself serves | **a static mount does not exempt the origin it serves** | list that exact origin (scheme and port included) in `allowedOrigins` / `MCP_BROKER_ALLOWED_ORIGINS` |
 | `Provider "<slot>" not connected` at host start | ordering: the host starts before any provider exists | point `MCP_BROKER_STDIO_PROVIDER` at `_all` |
@@ -182,6 +197,7 @@ await tunnel.stop();
 - A `www` static mount does **not** exempt the origin it serves from the origin check. Conversely, the origin check covers the **HTTP** client endpoints only (`/<slot>/mcp`, `/<slot>/sse`, `/<slot>/messages`): a WebSocket upgrade carries no origin check at all.
 - `_all` is **not** automatic, **not** a proxy, and does **not** carry resources.
 - `_broker` routes to **nothing** else.
+- Grammar files (`.mcp-broker/grammars/<userAgent>/<locale>.json`, `MCP_BROKER_LOCALE`) reword the `_broker` tools, resources and templates **only**. Provider tools are relayed as published, on their slot and in `_all`; a provider localizes its own descriptions in its own server.
 - Slots are **not** declared. An unknown name is not an error; it is an empty slot that answers `not connected`.
 - Streamable HTTP and SSE sessions do **not** expire. A client that closes its tab without `DELETE /<slot>/mcp` leaves its session alive forever, and `sessionCount` growing monotonically is the only signal.
 - `brokerName` is **library-only**. It is a valid `config.json` key and `WsTunnel` honors it, but `WsTunnelBuilder` has no `withBrokerName()`, so the CLI never forwards it and setting it in the file changes nothing. `enableBrokerProvider` and `enableAggregateProvider` are `IWsTunnelOptions` fields only, not config-file keys at all. Confirm effective values with `broker_info` rather than assuming the file won.
