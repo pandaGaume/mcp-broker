@@ -20,6 +20,15 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+### Fixed
+
+- **broker** `broker_diagnose` on the CLI's own broker skipped the
+  `aggregate-empty` and `aggregate-missing-live-slots` checks with "this
+  broker context does not implement getAggregateInfo()", and sent the operator
+  to call `tools/list` on `_all` by hand. `WsTunnel` now implements the
+  accessor (`AggregateServer.providerNames` behind it), so the two rules run
+  everywhere the tunnel is the context, the CLI included.
+
 ### Added
 
 - **c** A new `c/` folder, the device side of the tunnel in C99. `libmcpb`
