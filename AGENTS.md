@@ -40,6 +40,8 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | A local stdio MCP server the broker should run | nothing | config key `stdioUpstreams[]` | broker spawns it |
 | A remote MCP server the broker should front | nothing | config key `mcpServers[]` | broker dials out |
 | A signed `.mcpb` bundle the broker should run | nothing | config key `mcpbBundles[]` | broker verifies, unpacks, spawns |
+| An MCP server on an **ESP32** (or any C99 firmware) | [`c/libmcpb`](c/libmcpb/) + a port; on ESP-IDF the [`mcpb_esp`](c/espressif/) component | `mcpb_provider_t` / `mcpb_esp_start` | `ws://<host>/provider/<name>` |
+| Several MCP servers from **Unreal Engine 5** (or any native process) | the [`McpBroker`](c/unreal/) plugin, built on `c/libmcpb` | `UMcpBrokerSubsystem::Connect` | `ws://<host>/providers`, one socket for all slots |
 
 ## 3. The pairing rule
 
@@ -199,5 +201,9 @@ Start with **[`samples/`](samples/)**. Every sample starts what it needs, proves
 | `node/packages/broker/web/demos/provider-tunnel/` | a browser page hosting an MCP server and tunnelling it to a slot |
 | `node/packages/broker/web/demos/broker-explorer/` | a browser MCP **client** driving `_broker`, `_all` or any slot |
 | `node/packages/broker/web/demos/oauth-lab/` | a full local OAuth 2.1 + policy environment, `npm run demo:oauth` from `node/packages/broker` |
+| [`c/samples/host-provider/`](c/samples/host-provider/) | the C client on a PC: dedicated or `--multiplex`, static `echo` tool, one line per link event |
+| [`c/espressif/samples/provider/`](c/espressif/samples/provider/) | the same provider on an ESP32 over Wi-Fi, `menuconfig` for the broker host and slot name |
+| [`c/unreal/Sample/`](c/unreal/Sample/) | the same provider from Unreal Engine 5, two slots on one socket, headless with `-game -nullrhi` |
+| [`c/tests/roundtrip/`](c/tests/roundtrip/) and [`c/tests/soak/`](c/tests/soak/) | the C client against the Node broker: slots, `_all`, broker kill and restart; and an overnight load with the numbers a leak would move |
 
-Reference docs, deepest last: [broker README](node/packages/broker/README.md) → [config reference](node/packages/broker/docs/config.md) → [endpoints](docs/endpoints.md) → [protocol](docs/protocol.md) → [architecture](docs/architecture.md) → [authorization](docs/authorization.md).
+Reference docs, deepest last: [broker README](node/packages/broker/README.md) → [config reference](node/packages/broker/docs/config.md) → [endpoints](docs/endpoints.md) → [protocol](docs/protocol.md) → [architecture](docs/architecture.md) → [authorization](docs/authorization.md). For the device side: [c/README.md](c/README.md) → [libmcpb](c/libmcpb/README.md) → [ESP-IDF](c/espressif/README.md) → [Unreal](c/unreal/README.md).

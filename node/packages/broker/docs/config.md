@@ -78,6 +78,11 @@ vars are deploy-time overrides injected by the surrounding environment.
 
 ### Grammar overrides
 
+Grammars describe the broker's own surface: the `_broker` tools, resources
+and resource templates. Provider tools are relayed as published, on their
+slot and in `_all`; a provider that wants per-client or per-locale wording
+resolves it in its own server (mcp-core ships the same resolver).
+
 When `.mcp-broker/grammars/` exists, every grammar JSON file in it is
 registered alongside the packaged grammar with the same key. The file
 naming convention encodes the resolver key directly:
@@ -87,10 +92,13 @@ naming convention encodes the resolver key directly:
 | `<userAgent>/<locale>.json` | `<userAgent>:<locale>` |
 | `<userAgent>/<locale>@<version>.json` | `<userAgent>:<locale>@<version>` |
 
-Both layers are composed by the candidate-chain resolver in
-`@cyanmycelium/mcp-core@0.3.0` at session time, so partial files only need
-to declare the entries they want to change: the rest cascades from the
-packaged values.
+Both layers are composed by the candidate-chain resolver of
+`@cyanmycelium/mcp-core` (since 0.3.0) at session time, so partial files only
+need to declare the entries they want to change: the rest cascades from the
+packaged values. The client family comes from `clientInfo.name` (`claude`,
+`gpt`, `mistral`, `copilot`, else `default`); the locale comes from
+`MCP_BROKER_LOCALE` or the `locale` config field, one per deployment, unless
+the host passes its own `localeSource` in `grammarResolverOptions`.
 
 Concrete example (per-agent locale override):
 
@@ -811,7 +819,7 @@ Clients now need a bearer token whose audience is `https://mcp.example.com/<slot
 providers need the shared secret. Full details in the
 [authorization guide](https://github.com/pandaGaume/mcp-broker/blob/main/docs/authorization.md).
 
-### Customize tool descriptions for your org
+### Customize the broker's tool descriptions for your org
 
 Drop a JSON file at `.mcp-broker/grammars/claude/en.json`:
 
