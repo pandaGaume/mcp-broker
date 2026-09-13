@@ -431,9 +431,9 @@
 <section id="grammar">
   <div class="shell">
     <div class="section-num">06 - Grammar layer</div>
-    <h2>Tool descriptions tuned per client, per locale</h2>
+    <h2>The broker's own tools, described per client family and per locale</h2>
 
-    <p class="intro">Tool, property, resource, and resource-template descriptions live in JSON files - not in the code. The broker ships a matrix of grammars indexed by <code class="inline">(userAgent, locale)</code>, and the session resolver picks the right combination when a client connects.</p>
+    <p class="intro">The descriptions of the broker's own surface, the <code class="inline">_broker</code> tools, resources and resource templates, live in JSON files, not in the code. The broker ships a matrix of grammars indexed by <code class="inline">(userAgent, locale)</code> and resolves one combination per session: the client family from <code class="inline">clientInfo.name</code> at <code class="inline">initialize</code>, the locale from the deployment (<code class="inline">MCP_BROKER_LOCALE</code>, or <code class="inline">locale</code> in <code class="inline">config.json</code>). Provider tools are not touched: what a provider publishes in <code class="inline">tools/list</code> is what the client sees, on its own slot and in <code class="inline">_all</code>.</p>
 
     <div class="table-wrap">
       <table>
@@ -468,7 +468,7 @@
       </table>
     </div>
 
-    <p>Each filled cell is one JSON file at <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code>. Missing cells cascade: <code class="inline">claude:zh</code> → <code class="inline">default:zh</code> → <code class="inline">claude:en</code> → <code class="inline">default:en</code>. Add a new locale or a new user-agent family by dropping a file. No code change.</p>
+    <p>Each filled cell is one JSON file at <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code>. Missing cells cascade: <code class="inline">claude:zh</code> → <code class="inline">default:zh</code> → <code class="inline">claude:en</code> → <code class="inline">default:en</code>. A new locale is a file: drop <code class="inline">default/de.json</code> and set <code class="inline">MCP_BROKER_LOCALE=de</code>. A new client family is a file plus one entry in the resolver's <code class="inline">agents</code> table, which maps substrings of <code class="inline">clientInfo.name</code> to a family (<code class="inline">claude</code>, <code class="inline">gpt</code>, <code class="inline">mistral</code>, <code class="inline">copilot</code> out of the box; anything else resolves to <code class="inline">default</code>). That table, and a per-client <code class="inline">localeSource</code> if one deployment must serve several languages, are set through <code class="inline">grammarResolverOptions</code> when the broker is embedded.</p>
 
     <h3><span class="h3-num">6.1</span>Shape of a grammar file</h3>
 
@@ -525,6 +525,8 @@
     </div>
 
     <p>The broker merges this <strong>on top of</strong> the packaged <code class="inline">claude:fr</code> grammar. Entries you don't override fall through to the packaged values. Translators edit JSON; developers edit code; the two never collide.</p>
+
+    <p>Your own tools get the same treatment in your own server, not in the broker. A provider built on <code class="inline">@cyanmycelium/mcp-core</code> carries the same resolver and the same four grammar layers (behavior, adapter, static, store), and it is the provider that answers <code class="inline">tools/list</code>. On a device, the wording is whatever the firmware sends. A per-slot overlay on the broker side, rewriting a provider's descriptions per client, is a possible evolution; it is not a feature today.</p>
   </div>
 </section>
 
