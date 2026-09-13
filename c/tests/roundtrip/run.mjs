@@ -5,7 +5,10 @@
  * proves the codec and the recovery logic against a fake port; this proves
  * that a real broker accepts what the library sends, routes a client's call to
  * the C process and back, admits it into `_all`, and that the provider comes
- * back on its own after the broker is killed and restarted.
+ * back on its own after the broker is killed and restarted. Then the same
+ * over wss://, against the broker on HTTPS with the test certificate in
+ * c/tests/tls: the TLS port must verify it through the CA it is given, and
+ * refuse it, in words, when it is not.
  *
  * Nothing is installed for it: the broker is `node/packages/broker/dist/bin.js`
  * (build it first), the MCP client is the fetch-only helper the samples use,
@@ -17,7 +20,7 @@
  * Exit code 0 when every step passed, 1 otherwise. Every line the provider
  * prints is echoed with a `provider |` prefix so a failure is readable.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -31,7 +34,25 @@ const brokerBin = path.join(repo, "node", "packages", "broker", "dist", "bin.js"
 
 const SLOT = "c-roundtrip";
 const MUX = "c-mux"; // the multiplexed provider publishes MUX (in _all) and MUX-b (not in _all) on one socket
+const TLS_SLOT = "c-tls";
 const STEP_TIMEOUT_MS = 8_000;
+
+// Test material only: self-signed, a century of validity, private key in the
+// repository. The broker serves it; the C provider is given it as its CA.
+const TLS_DIR = path.join(repo, "c", "tests", "tls");
+const TLS_CERT = path.join(TLS_DIR, "test-cert.pem");
+const TLS_KEY = path.join(TLS_DIR, "test-key.pem");
+
+// Node's fetch reads its trust store at start-up and only from the
+// environment, so for the https phase this script re-runs itself with the
+// test certificate added to that store. Harmless for the http phases.
+if (!(process.env.NODE_EXTRA_CA_CERTS ?? "").includes(TLS_CERT)) {
+    const r = spawnSync(process.execPath, [url.fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+        stdio: "inherit",
+        env: { ...process.env, NODE_EXTRA_CA_CERTS: TLS_CERT },
+    });
+    process.exit(r.status ?? 1);
+}
 
 // ---------------------------------------------------------------------------
 
@@ -82,14 +103,15 @@ function providerBinary() {
 // ---------------------------------------------------------------------------
 // Broker process
 
-function startBroker(port) {
+function startBroker(port, { tls = false } = {}) {
     const child = spawn(process.execPath, [brokerBin], {
         stdio: ["ignore", "pipe", "pipe"],
         env: {
             ...process.env,
             MCP_BROKER_PORT: String(port),
             MCP_BROKER_HOST: "127.0.0.1",
-            MCP_BROKER_PROTOCOL: "http",
+            MCP_BROKER_PROTOCOL: tls ? "https" : "http",
+            ...(tls ? { MCP_BROKER_TLS_CERT: TLS_CERT, MCP_BROKER_TLS_KEY: TLS_KEY } : {}),
             // Short, so the liveness sweep is exercised within the test; the
             // production default is 30000.
             MCP_BROKER_PROVIDER_HEARTBEAT_MS: "2000",
@@ -114,7 +136,7 @@ function startProvider(binary, port, name = SLOT, extra = []) {
         ["--host", "127.0.0.1", "--port", String(port), "--name", name, "--aggregate", "--retry-initial", "200", "--retry-max", "1000", ...extra],
         { stdio: ["ignore", "pipe", "pipe"] }
     );
-    const tag = extra.includes("--multiplex") ? "mux     " : "provider";
+    const tag = extra.includes("--multiplex") ? "mux     " : extra.includes("--tls") ? "tls     " : "provider";
 
     const lines = [];
     const waiters = [];
@@ -168,10 +190,12 @@ async function main() {
     let broker = null;
     let provider = null;
     let mux = null;
+    let noCa = null;
 
     const cleanup = () => {
         if (provider && !provider.child.killed) provider.child.kill();
         if (mux && !mux.child.killed) mux.child.kill();
+        if (noCa && !noCa.child.killed) noCa.child.kill();
         if (broker && !broker.killed) broker.kill("SIGKILL");
     };
     process.on("exit", cleanup);
@@ -299,10 +323,54 @@ async function main() {
             await client.close();
         }
 
-        step("Stop everything");
+        step("Stop the plaintext phase");
         provider.child.kill();
         mux.child.kill();
         broker.kill("SIGKILL");
+        provider = null;
+        mux = null;
+        await sleep(200);
+
+        // ------------------------------------------------------------------
+        // wss://. The binary says so on stderr and exits 2 when it was built
+        // without the TLS port; the phase is then skipped, unless the run is
+        // told the port must be there (the CI is).
+        const probe = spawnSync(binary, ["--tls", "--port", "1"], { encoding: "utf8", timeout: 5000 });
+        if (/built without the TLS port/.test(probe.stderr ?? "")) {
+            if (process.env.MCPB_ROUNDTRIP_REQUIRE_TLS) fail("host-provider was built without the TLS port, and MCPB_ROUNDTRIP_REQUIRE_TLS is set");
+            console.log("\n== wss:// phase skipped: host-provider was built without the TLS port (MCPB_TLS=OFF)");
+        } else {
+            const tlsPort = await freePort();
+            const https = `https://127.0.0.1:${tlsPort}`;
+
+            step(`Start the broker on ${https}, with the test certificate`);
+            broker = startBroker(tlsPort, { tls: true });
+            await waitForBroker(https);
+            ok("broker answers over HTTPS");
+
+            step("Start the C provider over wss:// with the test CA, and wait for CONNECTED");
+            provider = startProvider(binary, tlsPort, TLS_SLOT, ["--tls", "--ca", TLS_CERT]);
+            await provider.waitFor(/^event CONNECTED /, "event CONNECTED over wss");
+            await sleep(300);
+            ok("provider connected through the TLS port");
+
+            const client = await connectMcp(https, TLS_SLOT);
+            const text = toolText(await client.callTool("echo", { text: "over tls" }));
+            if (text !== `${TLS_SLOT}: over tls`) fail(`tools/call over wss returned ${JSON.stringify(text)}`);
+            await client.close();
+            ok(`tools/call through /${TLS_SLOT}/mcp on HTTPS -> ${JSON.stringify(text)}`);
+
+            step("The same provider without the CA: refused in words, never in the clear");
+            noCa = startProvider(binary, tlsPort, `${TLS_SLOT}-noca`, ["--tls"]);
+            const refused = await noCa.waitFor(/^event RETRY_FAILED /, "event RETRY_FAILED from the provider without a CA");
+            if (!/TLS handshake or certificate refused/.test(refused)) fail(`expected the TLS refusal in ${JSON.stringify(refused)}`);
+            ok(`refused: ${refused}`);
+            noCa.child.kill();
+
+            step("Stop the TLS phase");
+            provider.child.kill();
+            broker.kill("SIGKILL");
+        }
         console.log("\nroundtrip: all steps passed");
         process.exitCode = 0;
     } catch (err) {

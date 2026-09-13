@@ -32,10 +32,13 @@ jobs:
                 working-directory: c
         steps:
             - uses: actions/checkout@v4
+            # The TLS port is required here, not auto-detected: a runner
+            # without OpenSSL must fail the configure, not skip the port.
+            - run: sudo apt-get install -y --no-install-recommends libssl-dev
             # Warnings are errors here and nowhere else: the library is
             # developed warning-free under -Wconversion, and a narrowing that
             # slips in is how a frame length gets truncated.
-            - run: cmake -S . -B build -DCMAKE_C_FLAGS=-Werror
+            - run: cmake -S . -B build -DCMAKE_C_FLAGS=-Werror -DMCPB_TLS=ON
             - run: cmake --build build
             - run: ctest --test-dir build --output-on-failure
 
@@ -51,7 +54,7 @@ jobs:
 
     # The only test that crosses a real network: the C provider against the
     # Node broker of this repository, through its own slot and through _all,
-    # then a broker kill and restart.
+    # then a broker kill and restart, then the same over wss://.
     roundtrip:
         runs-on: ubuntu-latest
         steps:
@@ -65,9 +68,14 @@ jobs:
               working-directory: node
             - run: npm run build
               working-directory: node
-            - run: cmake -S c -B c/build -DCMAKE_C_FLAGS=-Werror
+            - run: sudo apt-get install -y --no-install-recommends libssl-dev
+            - run: cmake -S c -B c/build -DCMAKE_C_FLAGS=-Werror -DMCPB_TLS=ON
             - run: cmake --build c/build
+            # The wss:// phase must run, not be skipped for a binary without
+            # the TLS port.
             - run: node c/tests/roundtrip/run.mjs
+              env:
+                  MCPB_ROUNDTRIP_REQUIRE_TLS: "1"
 
     # The ESP-IDF component and its sample, built for the S3 in the official
     # IDF image. No hardware: this proves the component compiles against the

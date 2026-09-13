@@ -3,11 +3,12 @@
 
 /* libmcpb port for a host: Linux, macOS, Windows.
  *
- * Plain TCP over the platform's sockets, no TLS. `open` refuses `tls != 0`
- * with MCPB_ERR_UNSUPPORTED rather than fall back to the clear, which is what
- * mcpb_port.h asks of a port without TLS. The broker of this repository runs
- * on ws:// for tests; a deployment that needs wss:// from a host puts a TLS
- * backend behind this port, or terminates TLS in front of the device.
+ * Plain TCP over the platform's sockets, no TLS of its own. `open` refuses
+ * `tls != 0` with MCPB_ERR_UNSUPPORTED rather than fall back to the clear,
+ * which is what mcpb_port.h asks of a port without TLS. For wss://, stack
+ * the TLS port (../../tls-openssl) on this one: it asks this port for plain
+ * TCP and does the encryption itself. Or terminate TLS in front of the
+ * device.
  *
  * What it is for: the roundtrip test against the Node broker, the CI, and a
  * provider on a Linux-class device (a gateway, a Raspberry Pi). It is not the

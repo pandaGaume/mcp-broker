@@ -50,6 +50,20 @@ repository; the changes it needed for this release are listed under
   on UE 5.7 against the broker: both slots served, `_all` per slot. libmcpb
   gains `MCPB_API` (`MCPB_BUILD_DLL` / `MCPB_USE_DLL`) for a build that calls
   it across shared-library boundaries; empty everywhere else.
+- **c** libmcpb 0.4.0: TLS for the ports that only move bytes.
+  `c/ports/tls-openssl` is a port over another port: OpenSSL driven through
+  memory BIOs, so it never sees a socket and stacks on the host port today
+  and on the Unreal port next. It verifies the chain against a CA PEM given
+  to it (the private CA of a broker on a LAN, the usual case) or the
+  platform's store, and the name (DNS or IP literal, SNI for names); there
+  is no option to skip either. `MCPB_ERR_TLS` is the new code a port returns
+  when the handshake or the certificate is what failed, so a wrong
+  certificate no longer reads as `transport failure`. `host-provider --tls
+  [--ca FILE]`, a wss:// phase in the roundtrip against the broker on HTTPS
+  (accepted through the CA, refused in words without it), 42 checks against
+  an in-process OpenSSL server, OpenSSL required in CI. On ESP-IDF, `ca_pem`
+  on the port and the component config trusts a private CA instead of the
+  bundle, and the sample embeds `main/certs/ca.pem` when told to.
 - **c** libmcpb 0.3.0: the multiplexed `/providers` endpoint (`mcpb_mux.h`),
   several slots on one socket with the tunnel envelope, one registration per
   slot at every connection, `aggregate` per slot, and a `SLOT_REFUSED` event

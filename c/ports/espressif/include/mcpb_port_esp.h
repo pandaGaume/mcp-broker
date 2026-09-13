@@ -5,9 +5,12 @@
  *
  * esp-tls does the connection, the TLS handshake and the encryption, and
  * carries the certificate bundle built into the image, so wss:// to a
- * public broker needs no certificate in the firmware. Plain ws:// goes
- * through the same object with is_plain_tcp, so both paths share one
- * read/write/close.
+ * public broker needs no certificate in the firmware. A broker on the LAN
+ * or an edge box has a private certificate instead: give its CA as a PEM in
+ * `ca_pem` and the bundle is not consulted. There is no option to skip the
+ * check; a wrong CA is a refused connection with the mbedTLS code in the
+ * log, not a connection in the clear. Plain ws:// goes through the same
+ * object with is_plain_tcp, so both paths share one read/write/close.
  *
  * The one point that needs care is the read timeout. esp_tls_conn_read
  * takes none: the underlying socket has to be watched with select. But the
@@ -38,6 +41,12 @@ typedef struct
     void *tls;        /* esp_tls_t *, NULL when closed */
     int   fd;         /* the socket under it, -1 when closed */
     int   last_err;   /* last esp-tls / mbedTLS error code, for the log */
+
+    /* Set after init, before the first open. NULL: the certificate bundle.
+     * Otherwise one or more PEM certificates, NUL-terminated, that the
+     * broker's chain must lead to; typically a constant in flash, embedded
+     * with EMBED_TXTFILES. Not copied. */
+    const char *ca_pem;
 } mcpb_port_esp_t;
 
 int mcpb_port_esp_init(mcpb_port_t *port, mcpb_port_esp_t *ctx);

@@ -49,10 +49,16 @@ static int e_open(void *ctx, const char *host, uint16_t port, int tls,
 
     esp_tls_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    if (tls)
+    if (tls && c->ca_pem != NULL)
+    {
+        /* A private CA. esp-tls wants the terminator counted for PEM. */
+        cfg.cacert_buf = (const unsigned char *)c->ca_pem;
+        cfg.cacert_bytes = (unsigned int)strlen(c->ca_pem) + 1u;
+    }
+    else if (tls)
     {
         /* The bundle built into the image. Without it, and without a
-         * pinned certificate, esp-tls would have nothing to validate against
+         * CA of its own, esp-tls would have nothing to validate against
          * and accept any peer: encryption without authentication protects
          * from nothing. */
         cfg.crt_bundle_attach = esp_crt_bundle_attach;

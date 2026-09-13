@@ -79,7 +79,14 @@ typedef struct
 {
     const char *host;           /* copied; at most MCPB_WS_HOST_MAX - 1 bytes */
     uint16_t    port;           /* 0: 80, or 443 with tls */
-    bool        tls;            /* wss:// through the certificate bundle */
+    bool        tls;            /* wss:// */
+
+    /* With tls: NULL validates the broker against the certificate bundle
+     * built into the image (a public certificate); otherwise the PEM of the
+     * CA the broker's certificate chains to (a private one, the usual case
+     * on a LAN). NOT copied: point it at a constant, an EMBED_TXTFILES
+     * symbol for instance. */
+    const char *ca_pem;
 
     /* Slot name, copied. NULL: "esp32-" plus the last three bytes of the
      * station MAC, so a fleet of identical firmwares gets distinct slots

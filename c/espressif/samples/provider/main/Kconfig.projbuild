@@ -25,8 +25,20 @@ menu "Provider sample"
         default n
         help
             Validates the broker's certificate against the bundle built into
-            the image. A broker on the LAN with a self-signed certificate
-            needs that certificate pinned instead; see mcpb_port_esp.c.
+            the image, or against the CA below when it is embedded. There is
+            no option to skip the check.
+
+    config SAMPLE_BROKER_CA_EMBEDDED
+        bool "Trust the CA in main/certs/ca.pem instead of the bundle"
+        depends on SAMPLE_BROKER_TLS
+        default n
+        help
+            Put the PEM of the CA your broker's certificate chains to in
+            main/certs/ca.pem (for a self-signed broker certificate, the
+            certificate itself) and the build embeds it. The broker of this
+            repository generates one with "npm run gen-cert" in
+            node/packages/broker; c/tests/tls/test-cert.pem is the one the
+            C roundtrip uses, and it is test material only.
 
     config SAMPLE_BROKER_SLOT
         string "Slot name (empty: esp32-<MAC>)"
