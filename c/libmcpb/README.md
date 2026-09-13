@@ -71,6 +71,8 @@ Three conventions the library's correctness depends on:
 
 **`open` refuses rather than falling back to plaintext.** A port without TLS returns `MCPB_ERR_UNSUPPORTED` for `tls != 0`. A silent fallback is the worst outcome, because nothing reports it.
 
+TLS does not have to be written into every port. [`ports/tls-openssl`](../ports/tls-openssl/) is a port that takes another port's six functions and returns six of its own, encrypted; the library is handed the outer one. A port that only moves bytes gets wss:// by stacking, and `MCPB_ERR_TLS` is the code a port returns when the handshake or the certificate is what failed, so that a wrong certificate does not read as a bad cable.
+
 ## In and out
 
 **In:** RFC 6455 handshake with `Sec-WebSocket-Accept` verification, frame codec, client masking, fragmentation, ping/pong, close, reconnection with a growing window and a randomised wait, SHA-1 and base64.

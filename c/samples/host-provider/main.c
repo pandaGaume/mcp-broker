@@ -16,6 +16,15 @@
  * Usage:
  *   host-provider [--host H] [--port P] [--name N] [--aggregate] [--token T]
  *                 [--retry-initial MS] [--retry-max MS] [--multiplex]
+ *                 [--tls [--ca FILE]]
+ *
+ * --tls dials wss:// through the TLS port stacked over the host port, when
+ * the binary was built with it (MCPB_TLS). --ca gives the PEM of the CA the
+ * broker's certificate must chain to; without it the platform's default
+ * store is used, which is right for a public certificate and wrong for a
+ * private one. There is no way to skip verification: a broker whose
+ * certificate is not trusted is reported as "TLS handshake or certificate
+ * refused" and retried, never spoken to in the clear.
  */
 
 #include "mcpb/mcpb_provider.h"
@@ -23,6 +32,9 @@
 #include "mcpb/mcpb_mux.h"
 #endif
 #include "mcpb_port_host.h"
+#if defined(MCPB_HAVE_TLS) && MCPB_HAVE_TLS
+#include "mcpb_port_tls.h"
+#endif
 #include "static_provider.h"
 
 #include <signal.h>
@@ -40,11 +52,28 @@ static void on_sigint(int sig)
     g_stop = 1;
 }
 
+#if defined(MCPB_HAVE_TLS) && MCPB_HAVE_TLS
+/* The TLS port in use, or NULL. The library cannot say why a certificate
+ * was refused (it never sees TLS); the port can, so the event line carries
+ * its word when the error is MCPB_ERR_TLS. */
+static const mcpb_port_tls_t *g_tls = NULL;
+#endif
+
 static void on_event(void *user, const mcpb_event_t *e)
 {
     const mcpb_provider_t *p = (const mcpb_provider_t *)user; /* the link, in both modes */
     char line[256];
     static_provider_event_line(e, (unsigned long)p->connects, line, sizeof(line));
+#if defined(MCPB_HAVE_TLS) && MCPB_HAVE_TLS
+    if (e->error == MCPB_ERR_TLS && g_tls != NULL)
+    {
+        char why[96];
+        mcpb_port_tls_last_error(g_tls, why, sizeof(why));
+        printf("%s tls=\"%s\"\n", line, why);
+        fflush(stdout);
+        return;
+    }
+#endif
     puts(line);
     fflush(stdout);
 }
@@ -116,17 +145,61 @@ int main(int argc, char **argv)
 #endif
 
     mcpb_port_host_t host_ctx;
-    mcpb_port_t port;
-    if (mcpb_port_host_init(&port, &host_ctx) != MCPB_OK)
+    mcpb_port_t host_port;
+    if (mcpb_port_host_init(&host_port, &host_ctx) != MCPB_OK)
     {
         fprintf(stderr, "host port: initialisation failed\n");
         return 2;
     }
 
+    /* The port the library gets: the host port, or the TLS port over it. */
+    mcpb_port_t port = host_port;
+    const int use_tls = has(argc, argv, "--tls");
+#if defined(MCPB_HAVE_TLS) && MCPB_HAVE_TLS
+    static mcpb_port_tls_t tls_ctx;
+    static char ca_pem[16384];
+    if (use_tls)
+    {
+        mcpb_port_tls_config_t tls_cfg;
+        memset(&tls_cfg, 0, sizeof(tls_cfg));
+        const char *ca_path = arg(argc, argv, "--ca", NULL);
+        if (ca_path != NULL)
+        {
+            FILE *f = fopen(ca_path, "rb");
+            if (f == NULL)
+            {
+                fprintf(stderr, "--ca %s: cannot open\n", ca_path);
+                return 2;
+            }
+            const size_t n = fread(ca_pem, 1, sizeof(ca_pem) - 1u, f);
+            fclose(f);
+            ca_pem[n] = '\0';
+            tls_cfg.ca_pem = ca_pem;
+            tls_cfg.ca_pem_len = n;
+        }
+        const int trc = mcpb_port_tls_init(&port, &tls_ctx, &host_port, &tls_cfg);
+        if (trc != MCPB_OK)
+        {
+            fprintf(stderr, "tls port: %s (%s)\n", mcpb_strerror(trc),
+                    ca_path != NULL ? "no certificate in --ca" : "no OpenSSL context");
+            return 2;
+        }
+        g_tls = &tls_ctx;
+    }
+#else
+    if (use_tls)
+    {
+        fputs("--tls: this binary was built without the TLS port (MCPB_TLS=OFF)", stderr);
+        fputc(10, stderr);
+        return 2;
+    }
+#endif
+
     mcpb_provider_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.host = arg(argc, argv, "--host", "127.0.0.1");
     cfg.port = (uint16_t)atoi(arg(argc, argv, "--port", "3000"));
+    cfg.tls = use_tls;
     cfg.name = arg(argc, argv, "--name", "host-provider");
     cfg.aggregate = has(argc, argv, "--aggregate");
     cfg.retry_initial_ms = (uint32_t)atoi(arg(argc, argv, "--retry-initial", "1000"));
@@ -158,8 +231,8 @@ int main(int argc, char **argv)
             return 2;
         }
 
-        printf("host-provider %s: dialing ws://%s:%u%s%s\n", MCPB_VERSION_STRING,
-               cfg.host, (unsigned)cfg.port, provider.path,
+        printf("host-provider %s: dialing %s://%s:%u%s%s\n", MCPB_VERSION_STRING,
+               use_tls ? "wss" : "ws", cfg.host, (unsigned)cfg.port, provider.path,
                cfg.aggregate ? " (joining _all)" : "");
         fflush(stdout);
 
@@ -206,8 +279,8 @@ int main(int argc, char **argv)
     targets[0].mux = &mux; targets[0].slot = 0;
     targets[1].mux = &mux; targets[1].slot = 1;
 
-    printf("host-provider %s: dialing ws://%s:%u/providers, slots %s%s and %s\n",
-           MCPB_VERSION_STRING, cfg.host, (unsigned)cfg.port,
+    printf("host-provider %s: dialing %s://%s:%u/providers, slots %s%s and %s\n",
+           MCPB_VERSION_STRING, use_tls ? "wss" : "ws", cfg.host, (unsigned)cfg.port,
            cfg.name, cfg.aggregate ? " (joining _all)" : "", name_b);
     fflush(stdout);
 

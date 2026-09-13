@@ -232,6 +232,7 @@ esp_err_t mcpb_esp_start(const mcpb_esp_config_t *cfg)
 
     if (mcpb_port_esp_init(&s.port, &s.port_ctx) != MCPB_OK)
         return ESP_FAIL;
+    s.port_ctx.ca_pem = cfg->ca_pem;
 
     mcpb_provider_config_t pc;
     memset(&pc, 0, sizeof(pc));

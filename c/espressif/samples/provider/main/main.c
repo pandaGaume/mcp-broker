@@ -42,6 +42,15 @@ static const char *TAG = "sample";
 #  define SAMPLE_AGGREGATE false
 #endif
 
+/* The CA embedded from main/certs/ca.pem (EMBED_TXTFILES adds the NUL), or
+ * NULL for the bundle. */
+#ifdef CONFIG_SAMPLE_BROKER_CA_EMBEDDED
+extern const char sample_ca_pem_start[] asm("_binary_ca_pem_start");
+#  define SAMPLE_CA_PEM sample_ca_pem_start
+#else
+#  define SAMPLE_CA_PEM NULL
+#endif
+
 /* Runs on the provider task. The slot name is read back from the component
  * because it may have been derived from the MAC. */
 static int handle(void *user, const char *json, size_t len, char *tx, size_t cap)
@@ -98,6 +107,7 @@ void app_main(void)
         .host = CONFIG_SAMPLE_BROKER_HOST,
         .port = CONFIG_SAMPLE_BROKER_PORT,
         .tls = SAMPLE_TLS,
+        .ca_pem = SAMPLE_CA_PEM,
         .name = (CONFIG_SAMPLE_BROKER_SLOT[0] != 0) ? CONFIG_SAMPLE_BROKER_SLOT : NULL,
         .token = (CONFIG_SAMPLE_BROKER_TOKEN[0] != 0) ? CONFIG_SAMPLE_BROKER_TOKEN : NULL,
         .aggregate = SAMPLE_AGGREGATE,

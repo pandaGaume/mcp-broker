@@ -17,7 +17,25 @@ enable_testing()
 set(MCPB_WARNINGS
     -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
 
+# The TLS port needs OpenSSL. AUTO builds it when OpenSSL is found and says
+# so either way; ON fails the configure when it is missing, which is what the
+# CI asks for so a runner without OpenSSL cannot pass by skipping it.
+set(MCPB_TLS "AUTO" CACHE STRING "Build the TLS port on OpenSSL: ON, OFF or AUTO")
+if(MCPB_TLS STREQUAL "AUTO")
+    find_package(OpenSSL QUIET)
+    set(MCPB_TLS_ENABLED ${OpenSSL_FOUND})
+elseif(MCPB_TLS)
+    set(MCPB_TLS_ENABLED ON)
+else()
+    set(MCPB_TLS_ENABLED OFF)
+endif()
+
 add_subdirectory(libmcpb)
 add_subdirectory(ports/host)
+if(MCPB_TLS_ENABLED)
+    add_subdirectory(ports/tls-openssl)
+else()
+    message(STATUS "mcpb: TLS port skipped (OpenSSL not found or MCPB_TLS=OFF); wss:// is refused by host-provider")
+endif()
 add_subdirectory(samples/lib)
 add_subdirectory(samples/host-provider)

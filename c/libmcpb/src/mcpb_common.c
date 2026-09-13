@@ -67,6 +67,7 @@ const char *mcpb_strerror(int err)
     case MCPB_ERR_HANDSHAKE:   return "handshake refused";
     case MCPB_ERR_STATE:       return "call not valid in this state";
     case MCPB_ERR_UNSUPPORTED: return "unsupported";
+    case MCPB_ERR_TLS:         return "TLS handshake or certificate refused";
     default:                   return "unknown error";
     }
 }

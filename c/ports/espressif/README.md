@@ -1,6 +1,6 @@
 # libmcpb port for ESP-IDF
 
-The six functions libmcpb asks for, on esp-tls and lwip: `open` through `esp_tls_conn_new_sync` (TLS via the certificate bundle built into the image, or plain TCP with `is_plain_tcp`), `send` and `recv` through `esp_tls_conn_write` / `esp_tls_conn_read`, `now_ms` on `esp_timer`, `random` on `esp_fill_random`.
+The six functions libmcpb asks for, on esp-tls and lwip: `open` through `esp_tls_conn_new_sync` (TLS via the certificate bundle built into the image, or via the private CA set in `ca_pem` for a broker with its own certificate; plain TCP with `is_plain_tcp`), `send` and `recv` through `esp_tls_conn_write` / `esp_tls_conn_read`, `now_ms` on `esp_timer`, `random` on `esp_fill_random`.
 
 The one subtlety is the read timeout: `esp_tls_conn_read` has none, so the socket is watched with `select`, but only after `esp_tls_get_bytes_avail` says mbedTLS holds nothing already decrypted; otherwise a wait on the socket waits for data that has already arrived.
 

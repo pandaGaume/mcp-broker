@@ -61,16 +61,20 @@ typedef enum
     MCPB_ERR_TOO_LARGE   = -6,  /* larger than the caller's buffer */
     MCPB_ERR_HANDSHAKE   = -7,
     MCPB_ERR_STATE       = -8,  /* not valid in the current state */
-    MCPB_ERR_UNSUPPORTED = -9
+    MCPB_ERR_UNSUPPORTED = -9,
+    /* The TLS handshake failed or the peer's certificate was refused. A
+     * port's code, not the library's: the library never sees TLS. Distinct
+     * from MCPB_ERR_IO so a wrong certificate does not read as a bad cable. */
+    MCPB_ERR_TLS         = -10
 } mcpb_err_t;
 
 /* Never NULL. */
 MCPB_API const char *mcpb_strerror(int err);
 
 #define MCPB_VERSION_MAJOR 0
-#define MCPB_VERSION_MINOR 3
+#define MCPB_VERSION_MINOR 4
 #define MCPB_VERSION_PATCH 0
-#define MCPB_VERSION_STRING "0.3.0"
+#define MCPB_VERSION_STRING "0.4.0"
 
 #ifdef __cplusplus
 } /* extern "C" */
