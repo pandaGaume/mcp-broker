@@ -80,7 +80,7 @@ static void on_link_event(void *user, const mcpb_event_t *e)
     case MCPB_EVENT_CONNECTED:
         ESP_LOGI(TAG, "connected to %s:%u as \"%s\"%s (down %lu ms, connection #%lu)",
                  s.host, (unsigned)s.provider.cfg.port, s.name,
-                 s.cfg.aggregate ? ", in _all" : "",
+                 s.cfg.aggregate ? ", _all requested" : "",
                  (unsigned long)e->down_ms, (unsigned long)ev.connects);
         break;
     case MCPB_EVENT_DISCONNECTED:
@@ -149,7 +149,7 @@ static void provider_task(void *arg)
     }
     ESP_LOGI(TAG, "dialing %s://%s:%u%s%s", s.cfg.tls ? "wss" : "ws", s.host,
              (unsigned)s.provider.cfg.port, s.provider.path,
-             s.cfg.aggregate ? " (joining _all)" : "");
+             s.cfg.aggregate ? " (_all requested)" : "");
 
     while (!s.stop_requested)
     {

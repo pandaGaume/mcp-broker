@@ -76,7 +76,7 @@ for (;;) {
 
 `mcpb_provider_init` opens nothing: the connection happens on the first `poll`, so a device booting without a network does not stall its startup on an unreachable broker.
 
-`aggregate` sends `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}` as the first frame after every connection, which is how a provider asks into the `_all` slot (opt-in, because `_all` is a content-confidentiality boundary). The broker then sends `initialize` at once; `poll` delivers it like any other request. Without the flag the provider is reachable on its own slot only.
+`aggregate` sends `{"jsonrpc":"2.0","method":"notifications/register","params":{"aggregate":true}}` as the first frame after every connection, which is how a provider asks into the `_all` slot (opt-in, because `_all` is a content-confidentiality boundary). The broker then sends `initialize` at once; `poll` delivers it like any other request. Without the flag the provider is reachable on its own slot only. Needs mcp-broker 1.3.0 or later: an older broker routes the frame as ordinary traffic and the provider silently stays on its own slot.
 
 ## What the broker expects of the device
 

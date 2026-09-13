@@ -67,6 +67,8 @@ I (61045) sample: event DISCONNECTED error="transport failure" code=0 reason="" 
 
 Kill the broker, watch `DISCONNECTED` then `RETRY_FAILED` with the window doubling, restart it, and see `CONNECTED ... connects=2`. Switch the access point off for the same on the Wi-Fi side. On a broker with provider authentication, set the token in menuconfig; without it the monitor shows `RETRY_FAILED ... http_status=401`.
 
+Two things seen on a first board run worth knowing. A broker on a Windows PC must listen beyond the loopback (`MCP_BROKER_HOST=0.0.0.0`, or `host` in its config): the default `127.0.0.1` is unreachable from the device, and the monitor shows attempts timing out. And when that PC's firewall drops SYNs to a port with no listener instead of answering them (its stealth mode does), an attempt made while the broker is down lasts the whole connect timeout rather than failing at once, so a short broker restart can show a single long attempt that succeeds instead of a `RETRY_FAILED` line. `_all` membership needs a broker of 1.3.0 or later.
+
 `sdkconfig`, `build/` and `.vscode/` are ignored: the ESP-IDF VS Code extension writes machine-specific paths into the latter, add yours locally.
 
 ## CI

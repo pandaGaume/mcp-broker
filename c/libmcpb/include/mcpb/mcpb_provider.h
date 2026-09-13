@@ -147,7 +147,11 @@ typedef struct
      *
      * The broker then sends `initialize` at once. Nothing to prepare here,
      * poll delivers it, but a device that does not answer it is removed from
-     * `_all` and logged on the broker, with no retry until it reconnects. */
+     * `_all` and logged on the broker, with no retry until it reconnects.
+     *
+     * Needs mcp-broker 1.3.0 or later: an older broker routes this frame as
+     * ordinary traffic, and the provider stays reachable on its own slot
+     * only, with nothing reported on either side. */
     int aggregate;
 
     const char *extra_headers; /* authorization, etc. */
