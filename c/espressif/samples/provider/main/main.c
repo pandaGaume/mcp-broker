@@ -22,6 +22,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -106,10 +107,19 @@ void app_main(void)
     ESP_ERROR_CHECK(mcpb_esp_start(&cfg));
     ESP_LOGI(TAG, "provider task started, slot \"%s\"", mcpb_esp_slot_name());
 
+    /* Two heap figures, because they answer two different questions. The
+     * free size is a snapshot and moves with every TCP segment in flight, so
+     * it wobbles by a few KB and proves nothing either way. The minimum ever
+     * free is the low-water mark since boot: it settles after the first
+     * minutes and a leak is the only thing that keeps pushing it down. That
+     * is the number to watch overnight. */
     for (;;)
     {
         vTaskDelay(pdMS_TO_TICKS(30000));
-        ESP_LOGI(TAG, "%s, free heap %u", mcpb_esp_is_connected() ? "connected" : "offline",
-                 (unsigned)esp_get_free_heap_size());
+        ESP_LOGI(TAG, "%s, free heap %u, min ever %u, uptime %lu s",
+                 mcpb_esp_is_connected() ? "connected" : "offline",
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)esp_get_minimum_free_heap_size(),
+                 (unsigned long)(esp_timer_get_time() / 1000000));
     }
 }
