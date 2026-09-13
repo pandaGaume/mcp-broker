@@ -169,9 +169,13 @@ gcc -std=c99 -Wall -Wextra -Iinclude -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-105 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+116 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
+
+## A frame does not care about your poll timeout
+
+`mcpb_provider_poll` takes a timeout, and on a slow link a single frame arrives across several of them. The receive path is therefore **resumable**: the frame in progress (header, length, bytes received so far) lives in `mcpb_ws_t`, a timeout leaves it where it is, and the next call continues from there. Before 0.2.1 a timeout in the middle of a frame forgot the bytes already consumed, and the next call parsed a "header" out of the middle of the JSON: `{"`, refused as `rsv bits set, header 7B 22`. It was seen on an ESP32 over a weak Wi-Fi link with power save on, every few minutes under load, and never on a LAN, where a message is never split across 200 ms. The bench now pauses the fake link inside the header, inside the extended length, inside the payload and inside a ping, and checks that the message still comes out whole.
 
 ## Known limits
 

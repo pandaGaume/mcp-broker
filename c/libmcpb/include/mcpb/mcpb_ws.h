@@ -28,7 +28,7 @@ extern "C" {
  * (RFC 6455 5.5.1). 123 bytes plus the terminator. */
 #define MCPB_WS_CLOSE_REASON_MAX 124
 
-#define MCPB_WS_DETAIL_MAX 48
+#define MCPB_WS_DETAIL_MAX 64
 
 typedef struct
 {
@@ -65,6 +65,25 @@ typedef struct
 
     size_t   rx_len;         /* accumulated across continuation frames */
     int      rx_in_fragment;
+
+    /* The frame in progress, kept across calls.
+     *
+     * mcpb_ws_recv_text is called with a deadline, and a frame does not care
+     * about deadlines: on a slow link its bytes arrive across several of
+     * them. Before 0.2.1 a deadline that fell in the middle of a frame
+     * returned MCPB_ERR_TIMEOUT and forgot the bytes already consumed, so
+     * the next call read a "header" out of the middle of a payload and
+     * refused it as a protocol violation ("rsv bits set, header 7B 22": the
+     * bytes are `{"`). Seen on an ESP32 over a weak Wi-Fi link with power
+     * save on, never on a LAN. Now a timeout leaves this state where it is
+     * and the next call resumes from it. */
+    uint8_t  in_hdr[10];     /* 2 header bytes, then up to 8 of extended length */
+    size_t   in_hdr_len;     /* bytes of in_hdr received so far */
+    size_t   in_hdr_need;    /* 2 until the first two are in, then 4 or 10 */
+    int      in_payload;     /* 0: still reading the header, 1: the payload */
+    uint64_t in_len;         /* payload length, valid once in_payload is set */
+    size_t   in_got;         /* payload bytes received so far */
+    uint8_t  in_ctrl[125];   /* where a control frame's payload accumulates */
 
     uint16_t close_code;     /* set when the peer sent one; 1005 for none */
 
@@ -109,6 +128,10 @@ int mcpb_ws_send_text(mcpb_ws_t *ws, const char *data, size_t len);
  * Answers control frames itself: a Ping produces a Pong and the wait
  * continues, a Close closes and returns MCPB_ERR_CLOSED. The caller only ever
  * sees application messages.
+ *
+ * A timeout is never destructive: whatever part of a frame had arrived is
+ * kept, and the next call resumes from it. So a caller may poll with a short
+ * timeout on a link that delivers one message over several of them.
  *
  * @param out  points into the receive buffer, valid until the next call.
  * @return MCPB_OK, MCPB_ERR_TIMEOUT, MCPB_ERR_CLOSED, or an error. */

@@ -6,7 +6,7 @@ The device side of the tunnel. Where [`node/packages/provider`](../node/packages
 
 | Folder | Role | State |
 |---|---|---|
-| [`libmcpb/`](libmcpb/) | The client: RFC 6455 WebSocket (client role), provider registration with the `_all` opt-in, reconnection with a jittered window, immediate link events carrying the peer's refusal. C99, no allocation, no platform header. Everything system-dependent goes through a six-function port | 0.2.0, 105 checks without a network |
+| [`libmcpb/`](libmcpb/) | The client: RFC 6455 WebSocket (client role), provider registration with the `_all` opt-in, reconnection with a jittered window, immediate link events carrying the peer's refusal. C99, no allocation, no platform header. Everything system-dependent goes through a six-function port | 0.2.1, 116 checks without a network |
 | [`ports/host/`](ports/host/) | The port for Linux, macOS and Windows: plain TCP over the platform's sockets, no TLS (`tls != 0` is refused, never downgraded). For the roundtrip, the CI, and a provider on a Linux-class device | Done |
 | [`ports/espressif/`](ports/espressif/) | The port for ESP-IDF: esp-tls and lwip, TLS through the certificate bundle. Compiles only inside an IDF build, through the component below | Done |
 | [`samples/lib/`](samples/lib/) | The MCP surface both samples serve, from static strings: `initialize`, `ping`, `tools/list`, one `echo` tool, the request id echoed verbatim. Deliberately without a JSON parser, so it shows exactly what the layer above the transport must supply | Done |

@@ -76,6 +76,26 @@ static int _send_all(mcpb_ws_t *ws, const uint8_t *buf, size_t len)
     return ((size_t)n == len) ? MCPB_OK : MCPB_ERR_IO;
 }
 
+/* Reads into buf until *got reaches want, or the deadline passes. On a
+ * timeout *got keeps the progress so the caller can come back for the rest:
+ * that is the whole difference with _recv_exact, and the reason a frame can
+ * straddle several polls without the stream losing its framing. */
+static int _recv_more(mcpb_ws_t *ws, uint8_t *buf, size_t want, size_t *got,
+                      const deadline_t *d)
+{
+    while (*got < want)
+    {
+        const int left = _remaining(ws, d);
+        if (left == 0 && !d->infinite)
+            return MCPB_ERR_TIMEOUT;
+        const int n = ws->port->recv(ws->port->ctx, buf + *got, want - *got, left);
+        if (n < 0)
+            return n;
+        *got += (size_t)n;
+    }
+    return MCPB_OK;
+}
+
 static int _recv_exact(mcpb_ws_t *ws, uint8_t *buf, size_t len,
                        const deadline_t *d)
 {
@@ -398,6 +418,18 @@ void mcpb_ws_close(mcpb_ws_t *ws, uint16_t code)
 
 /* --- Receiving ------------------------------------------------------------ */
 
+/* Forgets the frame in progress. Called once a frame is fully consumed, and
+ * on every error: after an error the connection is dropped by the caller,
+ * and a half-read frame must not survive into the next connection. */
+static void _frame_reset(mcpb_ws_t *ws)
+{
+    ws->in_hdr_len = 0;
+    ws->in_hdr_need = 2;
+    ws->in_payload = 0;
+    ws->in_len = 0;
+    ws->in_got = 0;
+}
+
 int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
                       int timeout_ms)
 {
@@ -407,81 +439,172 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
         return MCPB_ERR_STATE;
 
     const deadline_t d = _deadline(ws, timeout_ms);
+    if (ws->in_hdr_need == 0)
+        _frame_reset(ws); /* first call on this connection */
 
     for (;;)
     {
-        uint8_t h2[2];
-        int rc = _recv_exact(ws, h2, 2u, &d);
-        if (rc < 0)
-            return rc;
+        int rc;
 
-        const int      fin    = (h2[0] & 0x80u) != 0;
-        const uint8_t  opcode = (uint8_t)(h2[0] & 0x0Fu);
-        const int      masked = (h2[1] & 0x80u) != 0;
-        uint64_t       len    = (uint64_t)(h2[1] & 0x7Fu);
-
-        /* Reserved bits must be zero: no extension was negotiated, so a set
-         * bit means we are not reading what we think. */
-        if ((h2[0] & 0x70u) != 0)
-            return _refuse(ws, MCPB_ERR_PROTOCOL, "rsv bits set", h2);
-        /* A server never masks (RFC 6455 5.1). */
-        if (masked)
-            return _refuse(ws, MCPB_ERR_PROTOCOL, "server frame masked", h2);
-
-        if (len == 126u)
+        /* --- Header, possibly across several calls ------------------------ */
+        if (!ws->in_payload)
         {
-            uint8_t e[2];
-            rc = _recv_exact(ws, e, 2u, &d);
-            if (rc < 0) return rc;
-            len = ((uint64_t)e[0] << 8) | e[1];
-        }
-        else if (len == 127u)
-        {
-            uint8_t e[8];
-            rc = _recv_exact(ws, e, 8u, &d);
-            if (rc < 0) return rc;
-            len = 0;
-            int i;
-            for (i = 0; i < 8; i++)
-                len = (len << 8) | e[i];
-            /* Top bit must be zero (RFC 6455 5.2). Without this check a
-             * forged length would overflow the size comparisons below. */
-            if (len & 0x8000000000000000ull)
-                return _refuse(ws, MCPB_ERR_PROTOCOL, "64-bit length top bit set", h2);
+            rc = _recv_more(ws, ws->in_hdr, ws->in_hdr_need, &ws->in_hdr_len, &d);
+            if (rc == MCPB_ERR_TIMEOUT)
+                return rc; /* progress kept in in_hdr_len */
+            if (rc < 0)
+            {
+                _frame_reset(ws);
+                return rc;
+            }
+
+            const uint8_t *h2 = ws->in_hdr;
+            if (ws->in_hdr_need == 2)
+            {
+                /* The first two bytes decide whether more header follows.
+                 * Validate them now, before asking for more: a wrong header
+                 * must be refused as soon as it is seen. */
+                if ((h2[0] & 0x70u) != 0)
+                {
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, "rsv bits set", h2);
+                }
+                /* A server never masks (RFC 6455 5.1). */
+                if ((h2[1] & 0x80u) != 0)
+                {
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, "server frame masked", h2);
+                }
+                const uint8_t l7 = (uint8_t)(h2[1] & 0x7Fu);
+                if (l7 == 126u)
+                {
+                    ws->in_hdr_need = 4;
+                    continue; /* two more bytes of length */
+                }
+                if (l7 == 127u)
+                {
+                    ws->in_hdr_need = 10;
+                    continue; /* eight more */
+                }
+                ws->in_len = l7;
+            }
+            else if (ws->in_hdr_need == 4)
+            {
+                ws->in_len = ((uint64_t)h2[2] << 8) | h2[3];
+            }
+            else
+            {
+                uint64_t len = 0;
+                int i;
+                for (i = 0; i < 8; i++)
+                    len = (len << 8) | h2[2 + i];
+                /* Top bit must be zero (RFC 6455 5.2). Without this check a
+                 * forged length would overflow the size comparisons below. */
+                if (len & 0x8000000000000000ull)
+                {
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, "64-bit length top bit set", h2);
+                }
+                ws->in_len = len;
+            }
+
+            /* Header complete: the checks that need the length. */
+            const int     fin    = (h2[0] & 0x80u) != 0;
+            const uint8_t opcode = (uint8_t)(h2[0] & 0x0Fu);
+
+            if (opcode == OP_PING || opcode == OP_PONG || opcode == OP_CLOSE)
+            {
+                if (ws->in_len > CTRL_MAX || !fin)
+                {
+                    const char *why = (ws->in_len > CTRL_MAX) ? "control frame over 125 bytes"
+                                                              : "control frame fragmented";
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, why, h2); /* RFC 6455 5.5 */
+                }
+            }
+            else if (opcode == OP_BIN)
+            {
+                _frame_reset(ws);
+                return _refuse(ws, MCPB_ERR_UNSUPPORTED, "binary frame", h2); /* the broker only sends text */
+            }
+            else if (opcode == OP_TEXT)
+            {
+                if (ws->rx_in_fragment)
+                {
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, "text frame inside a fragmented message", h2);
+                }
+                ws->rx_len = 0;
+            }
+            else if (opcode == OP_CONT)
+            {
+                if (!ws->rx_in_fragment)
+                {
+                    _frame_reset(ws);
+                    return _refuse(ws, MCPB_ERR_PROTOCOL, "continuation with no start", h2);
+                }
+            }
+            else
+            {
+                _frame_reset(ws);
+                return _refuse(ws, MCPB_ERR_PROTOCOL, "reserved opcode", h2);
+            }
+
+            if (opcode == OP_TEXT || opcode == OP_CONT)
+            {
+                /* Refuse outright and drop the connection. Truncating would
+                 * yield invalid JSON, and the parser above would report a
+                 * syntax error where the real problem is an undersized
+                 * buffer. */
+                if (ws->rx_len + (size_t)ws->in_len > ws->rx_cap)
+                {
+                    _frame_reset(ws);
+                    mcpb_ws_close(ws, 1009u); /* Message Too Big */
+                    return MCPB_ERR_TOO_LARGE;
+                }
+            }
+
+            ws->in_payload = 1;
+            ws->in_got = 0;
         }
 
-        /* Control frames are handled here and never surfaced: they carry
-         * nothing for the application, and making every caller answer Pings
-         * would drop the link in every project that forgets. */
+        /* --- Payload, possibly across several calls ----------------------- */
+        const int     fin    = (ws->in_hdr[0] & 0x80u) != 0;
+        const uint8_t opcode = (uint8_t)(ws->in_hdr[0] & 0x0Fu);
+        const size_t  len    = (size_t)ws->in_len;
+
         if (opcode == OP_PING || opcode == OP_PONG || opcode == OP_CLOSE)
         {
-            if (len > CTRL_MAX || !fin)
-                return _refuse(ws, MCPB_ERR_PROTOCOL,
-                               (len > CTRL_MAX) ? "control frame over 125 bytes"
-                                                : "control frame fragmented",
-                               h2); /* RFC 6455 5.5 */
-            uint8_t ctrl[CTRL_MAX];
-            if (len > 0)
+            /* Control frames are handled here and never surfaced: they carry
+             * nothing for the application, and making every caller answer
+             * Pings would drop the link in every project that forgets. */
+            rc = _recv_more(ws, ws->in_ctrl, len, &ws->in_got, &d);
+            if (rc == MCPB_ERR_TIMEOUT)
+                return rc;
+            if (rc < 0)
             {
-                rc = _recv_exact(ws, ctrl, (size_t)len, &d);
-                if (rc < 0) return rc;
+                _frame_reset(ws);
+                return rc;
             }
+            _frame_reset(ws); /* consumed, whatever happens next */
+
             if (opcode == OP_PING)
             {
-                rc = _send_frame(ws, OP_PONG, ctrl, (size_t)len);
-                if (rc != MCPB_OK) return rc;
+                rc = _send_frame(ws, OP_PONG, ws->in_ctrl, len);
+                if (rc != MCPB_OK)
+                    return rc;
             }
             else if (opcode == OP_CLOSE)
             {
                 ws->close_code = (len >= 2u)
-                    ? (uint16_t)(((uint16_t)ctrl[0] << 8) | ctrl[1])
+                    ? (uint16_t)(((uint16_t)ws->in_ctrl[0] << 8) | ws->in_ctrl[1])
                     : 1005u; /* no code supplied */
                 /* len <= CTRL_MAX was checked above, so the reason always
                  * fits with its terminator. */
                 if (len > 2u)
-                    memcpy(ws->close_reason, ctrl + 2, (size_t)len - 2u);
-                ws->close_reason[(len > 2u) ? (size_t)len - 2u : 0u] = 0;
-                (void)_send_frame(ws, OP_CLOSE, ctrl, (len >= 2u) ? 2u : 0u);
+                    memcpy(ws->close_reason, ws->in_ctrl + 2, len - 2u);
+                ws->close_reason[(len > 2u) ? len - 2u : 0u] = 0;
+                (void)_send_frame(ws, OP_CLOSE, ws->in_ctrl, (len >= 2u) ? 2u : 0u);
                 ws->port->close(ws->port->ctx);
                 ws->state = MCPB_WS_CLOSED;
                 return MCPB_ERR_CLOSED;
@@ -489,40 +612,18 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
             continue; /* Pong: nothing to do, keep waiting */
         }
 
-        if (opcode == OP_BIN)
-            return _refuse(ws, MCPB_ERR_UNSUPPORTED, "binary frame", h2); /* the broker only sends text */
-
-        if (opcode == OP_TEXT)
+        /* Text or continuation: straight into the receive buffer, after
+         * what earlier fragments left there. */
+        rc = _recv_more(ws, ws->rx + ws->rx_len, len, &ws->in_got, &d);
+        if (rc == MCPB_ERR_TIMEOUT)
+            return rc;
+        if (rc < 0)
         {
-            if (ws->rx_in_fragment)
-                return _refuse(ws, MCPB_ERR_PROTOCOL, "text frame inside a fragmented message", h2);
-            ws->rx_len = 0;
+            _frame_reset(ws);
+            return rc;
         }
-        else if (opcode == OP_CONT)
-        {
-            if (!ws->rx_in_fragment)
-                return _refuse(ws, MCPB_ERR_PROTOCOL, "continuation with no start", h2);
-        }
-        else
-        {
-            return _refuse(ws, MCPB_ERR_PROTOCOL, "reserved opcode", h2);
-        }
-
-        /* Refuse outright and drop the connection. Truncating would yield
-         * invalid JSON, and the parser above would report a syntax error
-         * where the real problem is an undersized buffer. */
-        if (ws->rx_len + (size_t)len > ws->rx_cap)
-        {
-            mcpb_ws_close(ws, 1009u); /* Message Too Big */
-            return MCPB_ERR_TOO_LARGE;
-        }
-
-        if (len > 0)
-        {
-            rc = _recv_exact(ws, ws->rx + ws->rx_len, (size_t)len, &d);
-            if (rc < 0) return rc;
-        }
-        ws->rx_len += (size_t)len;
+        ws->rx_len += len;
+        _frame_reset(ws);
 
         if (!fin)
         {

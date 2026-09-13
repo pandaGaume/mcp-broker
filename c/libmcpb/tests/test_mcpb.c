@@ -41,6 +41,11 @@ typedef struct
      * key reproducible. Non-zero: a congruential generator seeded with it, to
      * simulate distinct devices. */
     uint32_t seed;
+    /* Non-zero: when the reader reaches this inbox offset, one recv returns
+     * MCPB_ERR_TIMEOUT before the bytes continue. That is a slow link seen
+     * from the library: a frame whose bytes arrive across two polls. */
+    size_t pause_at;
+    int    paused;
 } fake_t;
 
 static void fake_push(fake_t *f, const void *data, size_t n)
@@ -72,8 +77,16 @@ static int f_recv(void *ctx, uint8_t *b, size_t n, int t)
 {
     (void)t;
     fake_t *f = (fake_t *)ctx;
-    const size_t left = f->inbox_len - f->inbox_pos;
+    if (f->pause_at != 0 && !f->paused && f->inbox_pos >= f->pause_at)
+    {
+        f->paused = 1;
+        return MCPB_ERR_TIMEOUT;
+    }
+    size_t left = f->inbox_len - f->inbox_pos;
     if (left == 0) return MCPB_ERR_TIMEOUT;
+    /* Never read past the pause point in one go, so the pause is exact. */
+    if (f->pause_at != 0 && !f->paused && f->inbox_pos + left > f->pause_at)
+        left = f->pause_at - f->inbox_pos;
     const size_t take = (n < left) ? n : left;
     memcpy(b, f->inbox + f->inbox_pos, take);
     f->inbox_pos += take;
@@ -1002,6 +1015,113 @@ int main(void)
               "the refusal drops the link");
         check(strcmp(log.ev[1].detail, "server frame masked, header 81 82") == 0,
               "and DISCONNECTED carries the library's account");
+    }
+
+    printf("== a frame across two polls keeps its framing ==\n");
+    {
+        /* The bug seen on an ESP32 over a weak Wi-Fi link: a poll deadline
+         * fell inside a frame, the library returned TIMEOUT and forgot the
+         * bytes it had read, and the next poll parsed a "header" out of the
+         * middle of the JSON: `{"`, refused as "rsv bits set". */
+        static const struct { const char *what; size_t pause; } cases[] = {
+            { "pause after one byte of the header",        1 },
+            { "pause between the header and the payload",  2 },
+            { "pause in the middle of the payload",        5 },
+        };
+        size_t k;
+        for (k = 0; k < sizeof(cases) / sizeof(cases[0]); k++)
+        {
+            fake_t f; mcpb_port_t p; mcpb_ws_t ws; uint8_t rx[2048];
+            mcpb_ws_config_t c; unsigned char fr[64];
+            const char *out; size_t olen;
+            const char *msg = "{\"jsonrpc\":\"2.0\",\"id\":1}";
+            fake_init(&f, &p);
+            push_handshake_ok(&f);
+            memset(&c, 0, sizeof(c));
+            c.host = "h"; c.path = "/p"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+            mcpb_ws_open(&ws, &p, &c);
+            /* The pause offset is relative to the frame, which starts where
+             * the handshake response ended. */
+            const size_t frame_at = f.inbox_len;
+            fake_push(&f, fr, make_frame(fr, 1, 0x1, msg, strlen(msg)));
+            f.pause_at = frame_at + cases[k].pause;
+
+            const int first = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+            const int second = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+            char label[96];
+            snprintf(label, sizeof(label), "%s: first poll times out, second delivers the message", cases[k].what);
+            check(first == MCPB_ERR_TIMEOUT && second == MCPB_OK &&
+                  olen == strlen(msg) && memcmp(out, msg, olen) == 0, label);
+            check(ws.detail[0] == 0, "and nothing was refused");
+        }
+    }
+    {
+        /* Extended length: the pause falls inside the two length bytes. */
+        fake_t f; mcpb_port_t p; mcpb_ws_t ws; uint8_t rx[2048];
+        mcpb_ws_config_t c; unsigned char fr[400];
+        const char *out; size_t olen;
+        static char big[200];
+        memset(big, 'x', sizeof(big) - 1); big[0] = '{'; big[sizeof(big) - 2] = '}'; big[sizeof(big) - 1] = 0;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.path = "/p"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_ws_open(&ws, &p, &c);
+        const size_t frame_at = f.inbox_len;
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, big, strlen(big)));
+        f.pause_at = frame_at + 3; /* 2 header bytes + 1 of the 2 length bytes */
+        const int first = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+        const int second = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+        check(first == MCPB_ERR_TIMEOUT && second == MCPB_OK && olen == strlen(big),
+              "a pause inside the extended length is survived too");
+    }
+    {
+        /* A pause inside a Ping's payload: the pong still goes out, then the
+         * message behind it is delivered intact. */
+        fake_t f; mcpb_port_t p; mcpb_ws_t ws; uint8_t rx[2048];
+        mcpb_ws_config_t c; unsigned char fr[64];
+        const char *out; size_t olen;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.path = "/p"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_ws_open(&ws, &p, &c);
+        const size_t frame_at = f.inbox_len;
+        fake_push(&f, fr, make_frame(fr, 1, 0x9, "hb", 2));   /* ping "hb" */
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, "{}", 2));
+        f.pause_at = frame_at + 3; /* inside the ping payload */
+        const size_t before = f.outbox_len;
+        const int first = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+        const int second = mcpb_ws_recv_text(&ws, &out, &olen, 100);
+        check(first == MCPB_ERR_TIMEOUT && second == MCPB_OK && olen == 2 && memcmp(out, "{}", 2) == 0,
+              "a pause inside a ping: the message behind it arrives intact");
+        check(f.outbox_len > before && (f.outbox[before] & 0x0Fu) == 0xA,
+              "and the pong was sent with the complete payload");
+    }
+    {
+        /* Through the provider: two polls, one message, the link never
+         * announced a loss. This is the exact sequence the board ran. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[64]; const char *out; size_t olen;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0); /* connects */
+        const size_t frame_at = f.inbox_len;
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, "{\"a\":1}", 7));
+        f.pause_at = frame_at + 4;
+        const int first = mcpb_provider_poll(&pr, &out, &olen, 100);
+        const int second = mcpb_provider_poll(&pr, &out, &olen, 100);
+        check(first == MCPB_ERR_TIMEOUT && second == MCPB_OK && olen == 7,
+              "provider: the message arrives on the second poll");
+        check(log.n == 1 && mcpb_provider_is_connected(&pr),
+              "and the link was never dropped");
     }
 
     printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all pass");

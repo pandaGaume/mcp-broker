@@ -40,6 +40,14 @@ repository; the changes it needed for this release are listed under
   IDF 6.0 image; 7.4 KB of flash code and 13 KB of RAM with the defaults.
   Validated on an Arduino Nano ESP32 against the 1.3.0 broker: own slot,
   `_all`, broker kill and restart, slot takeover after a reboot.
+- **c** libmcpb 0.2.1: the receive path is resumable. A poll timeout that
+  fell inside a frame used to forget the bytes already consumed, and the next
+  poll parsed a "header" out of the middle of the JSON (`rsv bits set, header
+  7B 22`), dropping a healthy link every few minutes on an ESP32 over a weak
+  Wi-Fi link with power save on. Found by the `detail` field below, on the
+  first evening of soak. The frame in progress now lives in `mcpb_ws_t`; 11
+  new checks pause the fake link inside the header, the extended length, the
+  payload and a ping.
 - **c** `mcpb_event_t.detail`: the library's own account when it is the one
   that refused, with the frame rule that fired and the two header bytes it
   read (`rsv bits set, header C1 02`), an imposed extension, a bad handshake
