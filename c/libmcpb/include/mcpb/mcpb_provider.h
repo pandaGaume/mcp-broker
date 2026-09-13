@@ -31,10 +31,13 @@
  *    dropped as unmatched. A tool that runs longer must answer first and
  *    report later, through a notification.
  *
- * In exchange, a device that reboots gets its slot back at once: the broker
- * pings the previous socket and hands the slot over when it does not answer
- * (providerTakeover "liveness"), instead of holding it until the OS gives up
- * on the half-open TCP connection.
+ * In exchange, a device that reboots gets its slot back within one or two
+ * heartbeat intervals (30 to 60 s by default): the broker pings the previous
+ * socket at each sweep and hands the slot to a newcomer once the incumbent
+ * has missed a ping (providerTakeover "liveness"), instead of holding it
+ * until the OS gives up on the half-open TCP connection, which takes hours.
+ * Until then the newcomer is refused with close 1008 and a reason naming
+ * the held slot; the retry window covers the wait on its own.
  */
 
 #include "mcpb.h"

@@ -85,7 +85,7 @@ Two obligations, both broker defaults and both configurable there:
 - **Poll at least every 30 s** (`providerHeartbeatIntervalMs`). The broker pings every provider socket and terminates one that misses a full interval. The Pong is answered from inside `poll`, so a device busy elsewhere for longer than that is dropped as dead; it gets its slot back on the next `poll`, but every client request in between failed.
 - **Answer within 60 s** (`providerRequestTimeoutMs`). Past that the broker fails the request for the client and drops the late reply as unmatched. A tool that runs longer answers first and reports later, through a notification.
 
-In return a device that reboots gets its slot back at once: the broker pings the previous socket and hands the slot over when it does not answer, instead of holding it until the OS gives up on the half-open TCP connection.
+In return a device that reboots gets its slot back within one or two heartbeat intervals (30 to 60 s by default): the broker pings every provider socket at each sweep and hands a slot to a newcomer once the incumbent has missed a ping, instead of holding it until the OS gives up on the half-open TCP connection, which takes hours. Until then the newcomer is refused with close `1008` and a reason naming the held slot (`Slot already held by a live provider...`), which the retry window absorbs on its own.
 
 ## Recovery: a doubling window, a wait drawn inside it
 
