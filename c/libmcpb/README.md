@@ -46,6 +46,10 @@ Underneath, the multiplexed link is the same `mcpb_provider_t` on a fixed path: 
 
 `libmcpb/` lifts out whole. It includes nothing from CyanMycelium, no platform header, and no third-party library. Everything system-dependent goes through `mcpb_port.h`. It declares its own error codes rather than borrowing the host's, because a library that borrows its first host's types stops being extractable.
 
+## Linkage
+
+`MCPB_API` prefixes the public functions and is empty by default: a static library, or sources compiled into the program, which is every embedded build. A host that packages libmcpb inside one shared library and calls it from another (an Unreal editor build is one DLL per module) defines `MCPB_BUILD_DLL` while compiling the library and `MCPB_USE_DLL` in the consumers; `mcpb.h` turns them into the platform's export and import attributes without depending on any host header.
+
 ## Porting: six functions
 
 Fill in an `mcpb_port_t`:

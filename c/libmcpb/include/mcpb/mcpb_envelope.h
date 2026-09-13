@@ -33,14 +33,14 @@ extern "C" {
  * escaped per RFC 8259. The payload is copied verbatim; it must be one JSON
  * value already. Writes a trailing NUL.
  * @return length written excluding the NUL, or MCPB_ERR_TOO_LARGE. */
-int mcpb_envelope_encode(const char *provider, const char *payload,
+MCPB_API int mcpb_envelope_encode(const char *provider, const char *payload,
                          size_t payload_len, char *out, size_t cap);
 
 /* The registration notification for one slot, wrapped:
  *   {"provider":"<name>","payload":{"jsonrpc":"2.0","method":"notifications/register"}}
  * with `,"params":{"aggregate":true}` inside the payload when `aggregate`.
  * Byte-identical to what the TypeScript transport sends. */
-int mcpb_envelope_register(const char *provider, int aggregate,
+MCPB_API int mcpb_envelope_register(const char *provider, int aggregate,
                            char *out, size_t cap);
 
 /* Locates the two members of an envelope, in whatever order they appear.
@@ -53,7 +53,7 @@ int mcpb_envelope_register(const char *provider, int aggregate,
  * @return MCPB_OK, or MCPB_ERR_PROTOCOL when `frame` is not an object with a
  *         non-empty string "provider" and a "payload". The peer's garbage is
  *         reported, not trusted. */
-int mcpb_envelope_decode(const char *frame, size_t len,
+MCPB_API int mcpb_envelope_decode(const char *frame, size_t len,
                          const char **provider, size_t *provider_len,
                          const char **payload, size_t *payload_len);
 
@@ -65,13 +65,13 @@ int mcpb_envelope_decode(const char *frame, size_t len,
  *
  * @return 1 and fills code/message when the payload carries an error with
  *         id null; 0 otherwise. `message` is not NUL-terminated. */
-int mcpb_envelope_tunnel_error(const char *payload, size_t len, int *code,
+MCPB_API int mcpb_envelope_tunnel_error(const char *payload, size_t len, int *code,
                                const char **message, size_t *message_len);
 
 /* Compares a raw (still escaped) name from a frame with a plain C string,
  * decoding the JSON escapes on the fly. Slot names are usually ASCII with
  * nothing to escape, but a name is a name. @return 1 when equal. */
-int mcpb_envelope_name_equals(const char *raw, size_t raw_len, const char *name);
+MCPB_API int mcpb_envelope_name_equals(const char *raw, size_t raw_len, const char *name);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -255,7 +255,7 @@ typedef struct mcpb_provider
 /* Opens nothing: the connection happens on the first poll, so a device
  * booting without a network does not stall its startup on an unreachable
  * broker. */
-int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
+MCPB_API int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
                        const mcpb_provider_config_t *cfg);
 
 /* Connects, reconnects, keeps the ping going, and returns one message when
@@ -266,7 +266,7 @@ int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
  *          MCPB_ERR_TIMEOUT  nothing to read; the normal return of an idle
  *                            loop, not an error
  *          negative          failure; the client will reconnect by itself */
-int mcpb_provider_poll(mcpb_provider_t *p, const char **out, size_t *out_len,
+MCPB_API int mcpb_provider_poll(mcpb_provider_t *p, const char **out, size_t *out_len,
                        int timeout_ms);
 
 /* Sends an already-serialised JSON-RPC message. Fails if the link is down;
@@ -276,10 +276,10 @@ int mcpb_provider_poll(mcpb_provider_t *p, const char **out, size_t *out_len,
  * once that link drops, the client on the other side has already had its
  * error from the broker, and delivering the reply after reconnecting would
  * hand it to an id nobody is waiting for. */
-int mcpb_provider_send(mcpb_provider_t *p, const char *json, size_t len);
+MCPB_API int mcpb_provider_send(mcpb_provider_t *p, const char *json, size_t len);
 
 /* Closes and returns to IDLE. No further reconnection until a new init. */
-void mcpb_provider_stop(mcpb_provider_t *p);
+MCPB_API void mcpb_provider_stop(mcpb_provider_t *p);
 
 static inline int mcpb_provider_is_connected(const mcpb_provider_t *p)
 {
@@ -289,7 +289,7 @@ static inline int mcpb_provider_is_connected(const mcpb_provider_t *p)
 /* URL-encodes a slot name (RFC 3986). Exposed because callers usually want to
  * log the exact URL they will dial.
  * @return bytes written, or MCPB_ERR_TOO_LARGE. */
-int mcpb_url_encode(const char *in, char *out, size_t cap);
+MCPB_API int mcpb_url_encode(const char *in, char *out, size_t cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

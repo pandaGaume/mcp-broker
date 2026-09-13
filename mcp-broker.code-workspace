@@ -10,7 +10,8 @@
         // workspace folder that IS an IDF project root (a CMakeLists.txt with
         // project.cmake). c/espressif is not one; the sample is. Pick it with
         // "ESP-IDF: Pick a Workspace Folder".
-        { "name": "⚡ espressif / provider", "path": "c/espressif/samples/provider" }
+        { "name": "⚡ espressif / provider", "path": "c/espressif/samples/provider" },
+        { "name": "🎮 unreal", "path": "c/unreal" }
     ],
     "settings": {
         // The ESP-IDF extension reads these per workspace folder; the

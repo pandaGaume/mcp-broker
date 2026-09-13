@@ -1,0 +1,25 @@
+{
+    "FileVersion": 3,
+    "EngineAssociation": "5.7",
+    "Category": "",
+    "Description": "Host project for the McpBroker plugin: publishes two echo slots on one socket to a broker. No content, no map of its own; it runs on the engine's Entry map with its own game mode.",
+    "Modules": [
+        {
+            "Name": "McpBrokerSample",
+            "Type": "Runtime",
+            "LoadingPhase": "Default",
+            "AdditionalDependencies": [
+                "Engine"
+            ]
+        }
+    ],
+    "Plugins": [
+        {
+            "Name": "McpBroker",
+            "Enabled": true
+        }
+    ],
+    "AdditionalPluginDirectories": [
+        ".."
+    ]
+}

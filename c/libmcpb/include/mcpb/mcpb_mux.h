@@ -76,7 +76,7 @@ typedef struct
 
 /* Opens nothing, like mcpb_provider_init: the first poll connects and
  * registers every slot. */
-int mcpb_mux_init(mcpb_mux_t *m, const mcpb_port_t *port,
+MCPB_API int mcpb_mux_init(mcpb_mux_t *m, const mcpb_port_t *port,
                   const mcpb_mux_config_t *cfg,
                   const mcpb_mux_slot_t *slots, size_t slot_count);
 
@@ -98,15 +98,15 @@ int mcpb_mux_init(mcpb_mux_t *m, const mcpb_port_t *port,
  *          MCPB_ERR_PROTOCOL a frame that is not an envelope; the link is
  *                            kept, the frame is dropped, detail names it
  *          negative          link failure; it reconnects by itself */
-int mcpb_mux_poll(mcpb_mux_t *m, size_t *slot, const char **out,
+MCPB_API int mcpb_mux_poll(mcpb_mux_t *m, size_t *slot, const char **out,
                   size_t *out_len, int timeout_ms);
 
 /* Sends an already-serialised JSON-RPC message on one slot. Fails if the
  * link is down; nothing is queued (see mcpb_provider_send). */
-int mcpb_mux_send(mcpb_mux_t *m, size_t slot, const char *json, size_t len);
+MCPB_API int mcpb_mux_send(mcpb_mux_t *m, size_t slot, const char *json, size_t len);
 
 /* Closes the socket, which frees every slot on the broker. */
-void mcpb_mux_stop(mcpb_mux_t *m);
+MCPB_API void mcpb_mux_stop(mcpb_mux_t *m);
 
 static inline int mcpb_mux_is_connected(const mcpb_mux_t *m)
 {

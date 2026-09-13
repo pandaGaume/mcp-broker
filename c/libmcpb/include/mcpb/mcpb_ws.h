@@ -117,11 +117,11 @@ typedef struct
  * no adversary (the constant is public) but catches the common real case: a
  * proxy or captive portal answering 101 without being a WebSocket endpoint.
  * Without it the failure surfaces much later, as unreadable frames. */
-int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
+MCPB_API int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
                  const mcpb_ws_config_t *cfg);
 
 /* One unfragmented, masked text frame. */
-int mcpb_ws_send_text(mcpb_ws_t *ws, const char *data, size_t len);
+MCPB_API int mcpb_ws_send_text(mcpb_ws_t *ws, const char *data, size_t len);
 
 /* Receives one complete text message.
  *
@@ -135,15 +135,15 @@ int mcpb_ws_send_text(mcpb_ws_t *ws, const char *data, size_t len);
  *
  * @param out  points into the receive buffer, valid until the next call.
  * @return MCPB_OK, MCPB_ERR_TIMEOUT, MCPB_ERR_CLOSED, or an error. */
-int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
+MCPB_API int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
                       int timeout_ms);
 
 /* The matching Pong is consumed by mcpb_ws_recv_text. */
-int mcpb_ws_ping(mcpb_ws_t *ws);
+MCPB_API int mcpb_ws_ping(mcpb_ws_t *ws);
 
 /* Sends a Close frame, then closes the stream. 1000 is the normal code.
  * Tolerates an already-closed websocket. */
-void mcpb_ws_close(mcpb_ws_t *ws, uint16_t code);
+MCPB_API void mcpb_ws_close(mcpb_ws_t *ws, uint16_t code);
 
 static inline int mcpb_ws_is_open(const mcpb_ws_t *ws)
 {

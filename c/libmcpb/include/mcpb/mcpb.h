@@ -16,6 +16,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Linkage of the public functions. Empty by default: a static library, or
+ * sources compiled straight into the program, which is every embedded
+ * build. A host that packages libmcpb inside a shared library and calls it
+ * from another one (an Unreal module in an editor build is one DLL per
+ * module) defines MCPB_BUILD_DLL while compiling the library and
+ * MCPB_USE_DLL in the consumers. Nothing here depends on the host's own
+ * headers: these files are compiled as plain C. */
+#ifndef MCPB_API
+#  if defined(MCPB_BUILD_DLL)
+#    if defined(_WIN32)
+#      define MCPB_API __declspec(dllexport)
+#    else
+#      define MCPB_API __attribute__((visibility("default")))
+#    endif
+#  elif defined(MCPB_USE_DLL)
+#    if defined(_WIN32)
+#      define MCPB_API __declspec(dllimport)
+#    else
+#      define MCPB_API
+#    endif
+#  else
+#    define MCPB_API
+#  endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,7 +65,7 @@ typedef enum
 } mcpb_err_t;
 
 /* Never NULL. */
-const char *mcpb_strerror(int err);
+MCPB_API const char *mcpb_strerror(int err);
 
 #define MCPB_VERSION_MAJOR 0
 #define MCPB_VERSION_MINOR 3
