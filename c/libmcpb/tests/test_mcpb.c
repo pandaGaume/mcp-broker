@@ -954,6 +954,54 @@ int main(void)
         check(log.ev[0].http_status == 401, "and the event carries the HTTP status");
         check(log.ev[0].close_code == 0 && log.ev[0].reason[0] == 0,
               "with no websocket close, since none happened");
+        check(strcmp(log.ev[0].detail, "HTTP 401") == 0,
+              "and detail names the status the library refused");
+    }
+
+    printf("== the library's own refusals are named ==\n");
+    {
+        /* "protocol violation" alone names nothing. The rule that fired and
+         * the header bytes are what tells a real violation from a
+         * desynchronised stream. */
+        fake_t f; mcpb_port_t p; mcpb_ws_t ws; uint8_t rx[2048];
+        mcpb_ws_config_t c; unsigned char fr[4];
+        const char *out; size_t olen;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        fr[0] = 0xC1; fr[1] = 0x02; fr[2] = '{'; fr[3] = '}'; /* RSV1 set */
+        fake_push(&f, fr, 4);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.path = "/p"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_ws_open(&ws, &p, &c);
+        check(ws.detail[0] == 0, "no detail while nothing was refused");
+        check(mcpb_ws_recv_text(&ws, &out, &olen, 100) == MCPB_ERR_PROTOCOL,
+              "a frame with a reserved bit is refused");
+        check(strcmp(ws.detail, "rsv bits set, header C1 02") == 0,
+              "and detail names the rule and the header bytes");
+    }
+    {
+        /* Through the provider: the event carries it. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[4]; const char *out; size_t olen;
+        ev_log_t log;
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        fr[0] = 0x81; fr[1] = 0x82; fr[2] = 0; fr[3] = 0; /* masked by the server */
+        fake_push(&f, fr, 4);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.on_event = ev_sink; c.event_user = &log;
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0);
+        check(log.ev[0].detail != NULL && log.ev[0].detail[0] == 0,
+              "CONNECTED carries an empty detail");
+        mcpb_provider_poll(&pr, &out, &olen, 100);
+        check(log.n == 2 && log.ev[1].error == MCPB_ERR_PROTOCOL,
+              "the refusal drops the link");
+        check(strcmp(log.ev[1].detail, "server frame masked, header 81 82") == 0,
+              "and DISCONNECTED carries the library's account");
     }
 
     printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all pass");

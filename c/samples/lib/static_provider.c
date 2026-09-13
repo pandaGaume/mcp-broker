@@ -212,14 +212,14 @@ int static_provider_event_line(const mcpb_event_t *e, unsigned long connects,
         break;
     case MCPB_EVENT_DISCONNECTED:
         n = snprintf(out, cap,
-                     "event DISCONNECTED error=\"%s\" code=%u reason=\"%s\" next_retry_ms=%lu",
+                     "event DISCONNECTED error=\"%s\" code=%u reason=\"%s\" detail=\"%s\" next_retry_ms=%lu",
                      mcpb_strerror(e->error), (unsigned)e->close_code, e->reason,
-                     (unsigned long)e->next_retry_ms);
+                     e->detail, (unsigned long)e->next_retry_ms);
         break;
     case MCPB_EVENT_RETRY_FAILED:
         n = snprintf(out, cap,
-                     "event RETRY_FAILED error=\"%s\" http_status=%d attempts=%lu next_retry_ms=%lu",
-                     mcpb_strerror(e->error), e->http_status,
+                     "event RETRY_FAILED error=\"%s\" http_status=%d detail=\"%s\" attempts=%lu next_retry_ms=%lu",
+                     mcpb_strerror(e->error), e->http_status, e->detail,
                      (unsigned long)e->attempts, (unsigned long)e->next_retry_ms);
         break;
     }

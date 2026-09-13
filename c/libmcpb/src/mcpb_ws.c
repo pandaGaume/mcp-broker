@@ -48,6 +48,22 @@ static int _remaining(const mcpb_ws_t *ws, const deadline_t *d)
     return (left > 0) ? (int)left : 0;
 }
 
+/* --- Refusals -------------------------------------------------------------- */
+
+/* Records why the library refused, then returns the code. The header bytes
+ * are what an operator needs to tell a real violation from a desynchronised
+ * stream: garbage in both looks the same from "protocol violation". */
+static int _refuse(mcpb_ws_t *ws, int code, const char *why,
+                   const uint8_t *header)
+{
+    if (header != NULL)
+        snprintf(ws->detail, sizeof(ws->detail), "%s, header %02X %02X",
+                 why, header[0], header[1]);
+    else
+        snprintf(ws->detail, sizeof(ws->detail), "%s", why);
+    return code;
+}
+
 /* --- Transport ------------------------------------------------------------ */
 
 static int _send_all(mcpb_ws_t *ws, const uint8_t *buf, size_t len)
@@ -242,7 +258,9 @@ int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
      * one that was logged. */
     if (ws->http_status != 101)
     {
-        rc = MCPB_ERR_HANDSHAKE;
+        char why[24];
+        snprintf(why, sizeof(why), "HTTP %d", ws->http_status);
+        rc = _refuse(ws, MCPB_ERR_HANDSHAKE, why, NULL);
         goto fail;
     }
 
@@ -251,14 +269,14 @@ int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
     size_t vlen = 0;
     if (_header(req, "sec-websocket-extensions", &vlen) != NULL && vlen > 0)
     {
-        rc = MCPB_ERR_UNSUPPORTED;
+        rc = _refuse(ws, MCPB_ERR_UNSUPPORTED, "extension imposed by the server", NULL);
         goto fail;
     }
 
     const char *acc = _header(req, "sec-websocket-accept", &vlen);
     if (acc == NULL)
     {
-        rc = MCPB_ERR_HANDSHAKE;
+        rc = _refuse(ws, MCPB_ERR_HANDSHAKE, "no Sec-WebSocket-Accept", NULL);
         goto fail;
     }
 
@@ -269,7 +287,7 @@ int mcpb_ws_open(mcpb_ws_t *ws, const mcpb_port_t *port,
         /* What this catches is not an adversary but a proxy or captive portal
          * answering 101 without being a WebSocket endpoint. Without it the
          * failure surfaces much later, as unreadable frames. */
-        rc = MCPB_ERR_HANDSHAKE;
+        rc = _refuse(ws, MCPB_ERR_HANDSHAKE, "Sec-WebSocket-Accept mismatch", NULL);
         goto fail;
     }
 
@@ -405,10 +423,10 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
         /* Reserved bits must be zero: no extension was negotiated, so a set
          * bit means we are not reading what we think. */
         if ((h2[0] & 0x70u) != 0)
-            return MCPB_ERR_PROTOCOL;
+            return _refuse(ws, MCPB_ERR_PROTOCOL, "rsv bits set", h2);
         /* A server never masks (RFC 6455 5.1). */
         if (masked)
-            return MCPB_ERR_PROTOCOL;
+            return _refuse(ws, MCPB_ERR_PROTOCOL, "server frame masked", h2);
 
         if (len == 126u)
         {
@@ -429,7 +447,7 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
             /* Top bit must be zero (RFC 6455 5.2). Without this check a
              * forged length would overflow the size comparisons below. */
             if (len & 0x8000000000000000ull)
-                return MCPB_ERR_PROTOCOL;
+                return _refuse(ws, MCPB_ERR_PROTOCOL, "64-bit length top bit set", h2);
         }
 
         /* Control frames are handled here and never surfaced: they carry
@@ -438,7 +456,10 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
         if (opcode == OP_PING || opcode == OP_PONG || opcode == OP_CLOSE)
         {
             if (len > CTRL_MAX || !fin)
-                return MCPB_ERR_PROTOCOL; /* RFC 6455 5.5 */
+                return _refuse(ws, MCPB_ERR_PROTOCOL,
+                               (len > CTRL_MAX) ? "control frame over 125 bytes"
+                                                : "control frame fragmented",
+                               h2); /* RFC 6455 5.5 */
             uint8_t ctrl[CTRL_MAX];
             if (len > 0)
             {
@@ -469,22 +490,22 @@ int mcpb_ws_recv_text(mcpb_ws_t *ws, const char **out, size_t *out_len,
         }
 
         if (opcode == OP_BIN)
-            return MCPB_ERR_UNSUPPORTED; /* the broker only sends text */
+            return _refuse(ws, MCPB_ERR_UNSUPPORTED, "binary frame", h2); /* the broker only sends text */
 
         if (opcode == OP_TEXT)
         {
             if (ws->rx_in_fragment)
-                return MCPB_ERR_PROTOCOL; /* text inside a fragmented message */
+                return _refuse(ws, MCPB_ERR_PROTOCOL, "text frame inside a fragmented message", h2);
             ws->rx_len = 0;
         }
         else if (opcode == OP_CONT)
         {
             if (!ws->rx_in_fragment)
-                return MCPB_ERR_PROTOCOL; /* continuation with no start */
+                return _refuse(ws, MCPB_ERR_PROTOCOL, "continuation with no start", h2);
         }
         else
         {
-            return MCPB_ERR_PROTOCOL; /* reserved opcode */
+            return _refuse(ws, MCPB_ERR_PROTOCOL, "reserved opcode", h2);
         }
 
         /* Refuse outright and drop the connection. Truncating would yield

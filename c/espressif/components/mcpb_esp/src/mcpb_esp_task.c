@@ -72,6 +72,7 @@ static void on_link_event(void *user, const mcpb_event_t *e)
     ev.close_code = e->close_code;
     ev.http_status = e->http_status;
     strlcpy(ev.reason, e->reason, sizeof(ev.reason));
+    strlcpy(ev.detail, e->detail, sizeof(ev.detail));
 
     s.connected = (e->type == MCPB_EVENT_CONNECTED);
 
@@ -86,14 +87,15 @@ static void on_link_event(void *user, const mcpb_event_t *e)
     case MCPB_EVENT_DISCONNECTED:
         /* The incident. Everything the peer said is in the line, because a
          * bare code leaves the operator guessing. */
-        ESP_LOGW(TAG, "link lost: %s (close %u \"%s\"), retry in %lu ms",
-                 mcpb_strerror(e->error), (unsigned)e->close_code, e->reason,
+        ESP_LOGW(TAG, "link lost: %s%s%s (close %u \"%s\"), retry in %lu ms",
+                 mcpb_strerror(e->error), e->detail[0] ? ": " : "", e->detail,
+                 (unsigned)e->close_code, e->reason,
                  (unsigned long)e->next_retry_ms);
         break;
     case MCPB_EVENT_RETRY_FAILED:
-        ESP_LOGW(TAG, "attempt %lu failed: %s%s%d, retry in %lu ms (window %lu ms)",
+        ESP_LOGW(TAG, "attempt %lu failed: %s%s%s, retry in %lu ms (window %lu ms)",
                  (unsigned long)e->attempts, mcpb_strerror(e->error),
-                 e->http_status ? ", HTTP " : "", e->http_status,
+                 e->detail[0] ? ": " : "", e->detail,
                  (unsigned long)e->next_retry_ms, (unsigned long)e->window_ms);
         break;
     }

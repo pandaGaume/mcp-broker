@@ -67,7 +67,9 @@ I (61045) sample: event DISCONNECTED error="transport failure" code=0 reason="" 
 
 Kill the broker, watch `DISCONNECTED` then `RETRY_FAILED` with the window doubling, restart it, and see `CONNECTED ... connects=2`. Switch the access point off for the same on the Wi-Fi side. On a broker with provider authentication, set the token in menuconfig; without it the monitor shows `RETRY_FAILED ... http_status=401`.
 
-Two things seen on a first board run worth knowing. A broker on a Windows PC must listen beyond the loopback (`MCP_BROKER_HOST=0.0.0.0`, or `host` in its config): the default `127.0.0.1` is unreachable from the device, and the monitor shows attempts timing out. And when that PC's firewall drops SYNs to a port with no listener instead of answering them (its stealth mode does), an attempt made while the broker is down lasts the whole connect timeout rather than failing at once, so a short broker restart can show a single long attempt that succeeds instead of a `RETRY_FAILED` line. `_all` membership needs a broker of 1.3.0 or later.
+Two things seen on a first board run worth knowing. A broker on a Windows PC must listen beyond the loopback (`MCP_BROKER_HOST=0.0.0.0`, or `host` in its config): the default `127.0.0.1` is unreachable from the device, and the monitor shows attempts failing. And an attempt made right after a broker kill was once seen to last the whole connect timeout and then succeed, with no `RETRY_FAILED` in between, while attempts against a port that stays closed fail at once; a short broker restart can therefore show one long attempt instead of a failure line. `_all` membership needs a broker of 1.3.0 or later.
+
+A `link lost: protocol violation` line means the device itself refused a frame. Since 0.2.0 the line carries the rule and the two header bytes it read (`rsv bits set, header C1 02`), which is what separates a real violation from a stream that went out of sync: report it with the bytes.
 
 `sdkconfig`, `build/` and `.vscode/` are ignored: the ESP-IDF VS Code extension writes machine-specific paths into the latter, add yours locally.
 

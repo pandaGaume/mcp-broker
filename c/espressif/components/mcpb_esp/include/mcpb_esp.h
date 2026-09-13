@@ -65,6 +65,7 @@ typedef struct
     uint16_t close_code;     /* with error == MCPB_ERR_CLOSED */
     int      http_status;    /* with error == MCPB_ERR_HANDSHAKE */
     char     reason[MCPB_WS_CLOSE_REASON_MAX]; /* "" when the peer sent none */
+    char     detail[MCPB_WS_DETAIL_MAX];       /* the library's own refusal, or "" */
 } mcpb_esp_event_t;
 
 /* Called on the provider task for every incoming JSON-RPC message. Write

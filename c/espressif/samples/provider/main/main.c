@@ -70,6 +70,7 @@ static void on_link(void *arg, esp_event_base_t base, int32_t id, void *data)
     ev.close_code = e->close_code;
     ev.http_status = e->http_status;
     ev.reason = e->reason;
+    ev.detail = e->detail;
 
     char line[256];
     static_provider_event_line(&ev, (unsigned long)e->connects, line, sizeof(line));

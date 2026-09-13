@@ -121,6 +121,14 @@ typedef struct
     uint16_t    close_code;
     int         http_status;
     const char *reason;
+
+    /* The library's own account when it is the one that refused: the frame
+     * rule that fired with the two header bytes it read, an extension the
+     * server imposed, a bad handshake. Set with MCPB_ERR_PROTOCOL,
+     * MCPB_ERR_UNSUPPORTED and MCPB_ERR_HANDSHAKE; "" otherwise. Never
+     * NULL; valid for the duration of the callback. Log it with `error`:
+     * "protocol violation" alone names nothing. */
+    const char *detail;
 } mcpb_event_t;
 
 /* Called from the caller's own task, inside mcpb_provider_poll or
