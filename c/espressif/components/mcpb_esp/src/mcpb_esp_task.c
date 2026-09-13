@@ -98,6 +98,11 @@ static void on_link_event(void *user, const mcpb_event_t *e)
                  e->detail[0] ? ": " : "", e->detail,
                  (unsigned long)e->next_retry_ms, (unsigned long)e->window_ms);
         break;
+    case MCPB_EVENT_SLOT_REFUSED:
+        /* Multiplexed endpoint only; this task uses the dedicated one. */
+        ESP_LOGW(TAG, "slot %lu refused by the broker (%d): %s",
+                 (unsigned long)e->slot, e->rpc_code, e->reason);
+        break;
     }
 
     /* No wait: this runs on the provider task, inside libmcpb, and a full

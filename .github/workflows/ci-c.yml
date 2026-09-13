@@ -40,12 +40,14 @@ jobs:
             - run: ctest --test-dir build --output-on-failure
 
     # The Makefile is the path for toolchains without CMake, so it has to
-    # keep working too.
+    # keep working too, in both configurations: without the multiplexed
+    # endpoint (a one-provider firmware) and with it.
     make:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
             - run: make -C c/libmcpb test
+            - run: make -C c/libmcpb clean && make -C c/libmcpb MUX=1 test
 
     # The only test that crosses a real network: the C provider against the
     # Node broker of this repository, through its own slot and through _all,

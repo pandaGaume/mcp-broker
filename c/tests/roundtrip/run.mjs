@@ -30,6 +30,7 @@ const repo = path.resolve(here, "..", "..", "..");
 const brokerBin = path.join(repo, "node", "packages", "broker", "dist", "bin.js");
 
 const SLOT = "c-roundtrip";
+const MUX = "c-mux"; // the multiplexed provider publishes MUX (in _all) and MUX-b (not in _all) on one socket
 const STEP_TIMEOUT_MS = 8_000;
 
 // ---------------------------------------------------------------------------
@@ -107,12 +108,13 @@ function startBroker(port) {
 // ---------------------------------------------------------------------------
 // Provider process, with a line-oriented log we can wait on
 
-function startProvider(binary, port) {
+function startProvider(binary, port, name = SLOT, extra = []) {
     const child = spawn(
         binary,
-        ["--host", "127.0.0.1", "--port", String(port), "--name", SLOT, "--aggregate", "--retry-initial", "200", "--retry-max", "1000"],
+        ["--host", "127.0.0.1", "--port", String(port), "--name", name, "--aggregate", "--retry-initial", "200", "--retry-max", "1000", ...extra],
         { stdio: ["ignore", "pipe", "pipe"] }
     );
+    const tag = extra.includes("--multiplex") ? "mux     " : "provider";
 
     const lines = [];
     const waiters = [];
@@ -123,7 +125,7 @@ function startProvider(binary, port) {
         pending = parts.pop() ?? "";
         for (const line of parts) {
             if (line.length === 0) continue;
-            console.log(`provider | ${line}`);
+            console.log(`${tag} | ${line}`);
             lines.push(line);
             for (const w of waiters.splice(0)) w.check(line) || waiters.push(w);
         }
@@ -165,9 +167,11 @@ async function main() {
     const base = `http://127.0.0.1:${port}`;
     let broker = null;
     let provider = null;
+    let mux = null;
 
     const cleanup = () => {
         if (provider && !provider.child.killed) provider.child.kill();
+        if (mux && !mux.child.killed) mux.child.kill();
         if (broker && !broker.killed) broker.kill("SIGKILL");
     };
     process.on("exit", cleanup);
@@ -227,6 +231,35 @@ async function main() {
             await all.close();
         }
 
+        step("Start the multiplexed provider: one socket, two slots");
+        {
+            mux = startProvider(binary, port, MUX, ["--multiplex"]);
+            await mux.waitFor(/^event CONNECTED /, "the multiplexed provider's CONNECTED");
+            await sleep(300);
+            ok("connected on /providers");
+
+            const a = await connectMcp(base, MUX);
+            const ta = toolText(await a.callTool("echo", { text: "slot a" }));
+            if (ta !== `${MUX}: slot a`) fail(`slot ${MUX} answered ${JSON.stringify(ta)}`);
+            await a.close();
+            ok(`/${MUX}/mcp served by the first slot`);
+
+            const b = await connectMcp(base, `${MUX}-b`);
+            const tb = toolText(await b.callTool("echo", { text: "slot b" }));
+            if (tb !== `${MUX}-b: slot b`) fail(`slot ${MUX}-b answered ${JSON.stringify(tb)}`);
+            await b.close();
+            ok(`/${MUX}-b/mcp served by the second slot, same socket`);
+
+            const all = await connectMcp(base, "_all");
+            const names = (await all.listTools()).tools.map((t) => t.name);
+            if (!names.includes(`${MUX}-echo`)) fail(`_all does not list ${MUX}-echo: ${names.join(",")}`);
+            if (names.includes(`${MUX}-b-echo`)) fail(`_all lists ${MUX}-b-echo, which registered without aggregate`);
+            const via = toolText(await all.callTool(`${MUX}-echo`, { text: "via _all" }));
+            if (via !== `${MUX}: via _all`) fail(`_all call on the multiplexed slot answered ${JSON.stringify(via)}`);
+            await all.close();
+            ok(`_all has ${MUX}-echo and not ${MUX}-b-echo: aggregate is per slot`);
+        }
+
         step("Kill the broker: the provider must announce the loss at once");
         {
             const lost = provider.waitFor(/^event DISCONNECTED /, "event DISCONNECTED");
@@ -239,15 +272,25 @@ async function main() {
             ok(`then: ${retry}`);
         }
 
-        step("Restart the broker on the same port: the provider must come back by itself");
+        step("Restart the broker on the same port: both providers must come back by themselves");
         {
             const back = provider.waitFor(/^event CONNECTED /, "a second event CONNECTED");
+            const muxBack = mux.waitFor(/^event CONNECTED /, "the multiplexed provider's second CONNECTED");
             broker = startBroker(port);
             await waitForBroker(base);
             const line = await back;
             if (!/connects=2/.test(line)) fail(`expected connects=2 in ${JSON.stringify(line)}`);
             ok(`recovered: ${line}`);
+            const muxLine = await muxBack;
+            if (!/connects=2/.test(muxLine)) fail(`expected connects=2 for the multiplexed provider in ${JSON.stringify(muxLine)}`);
+            ok(`multiplexed provider recovered: ${muxLine}`);
             await sleep(300);
+
+            const b = await connectMcp(base, `${MUX}-b`);
+            const tb = toolText(await b.callTool("echo", { text: "after restart" }));
+            if (tb !== `${MUX}-b: after restart`) fail(`after restart, ${MUX}-b answered ${JSON.stringify(tb)}`);
+            await b.close();
+            ok(`both slots re-registered on the new socket: /${MUX}-b/mcp serves again`);
 
             const client = await connectMcp(base, SLOT);
             const text = toolText(await client.callTool("echo", { text: "after restart" }));
@@ -258,6 +301,7 @@ async function main() {
 
         step("Stop everything");
         provider.child.kill();
+        mux.child.kill();
         broker.kill("SIGKILL");
         console.log("\nroundtrip: all steps passed");
         process.exitCode = 0;

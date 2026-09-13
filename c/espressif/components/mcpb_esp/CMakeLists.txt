@@ -17,6 +17,14 @@ set(MCPB_LIB_SRCS
     "${MCPB_LIB}/src/mcpb_ws.c"
     "${MCPB_LIB}/src/mcpb_provider.c")
 
+# The multiplexed endpoint is two more files, compiled only when asked:
+# a one-provider device carries none of it (see Kconfig MCPB_ESP_MULTIPLEX).
+if(CONFIG_MCPB_ESP_MULTIPLEX)
+    list(APPEND MCPB_LIB_SRCS
+        "${MCPB_LIB}/src/mcpb_envelope.c"
+        "${MCPB_LIB}/src/mcpb_mux.c")
+endif()
+
 idf_component_register(
     SRCS
         ${MCPB_LIB_SRCS}
@@ -42,3 +50,7 @@ idf_component_register(
 # on IDF's defaults.
 set_source_files_properties(${MCPB_LIB_SRCS}
     PROPERTIES COMPILE_OPTIONS "-Wconversion;-Wshadow;-Wstrict-prototypes")
+
+if(CONFIG_MCPB_ESP_MULTIPLEX)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC MCPB_ENABLE_MUX=1)
+endif()

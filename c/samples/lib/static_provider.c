@@ -222,6 +222,11 @@ int static_provider_event_line(const mcpb_event_t *e, unsigned long connects,
                      mcpb_strerror(e->error), e->http_status, e->detail,
                      (unsigned long)e->attempts, (unsigned long)e->next_retry_ms);
         break;
+    case MCPB_EVENT_SLOT_REFUSED:
+        n = snprintf(out, cap,
+                     "event SLOT_REFUSED slot=%lu code=%d reason=\"%s\"",
+                     (unsigned long)e->slot, e->rpc_code, e->reason);
+        break;
     }
     if (n < 0) { out[0] = 0; return 0; }
     if ((size_t)n >= cap) n = (int)cap - 1;

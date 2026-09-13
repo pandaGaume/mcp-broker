@@ -40,6 +40,16 @@ repository; the changes it needed for this release are listed under
   IDF 6.0 image; 7.4 KB of flash code and 13 KB of RAM with the defaults.
   Validated on an Arduino Nano ESP32 against the 1.3.0 broker: own slot,
   `_all`, broker kill and restart, slot takeover after a reboot.
+- **c** libmcpb 0.3.0: the multiplexed `/providers` endpoint (`mcpb_mux.h`),
+  several slots on one socket with the tunnel envelope, one registration per
+  slot at every connection, `aggregate` per slot, and a `SLOT_REFUSED` event
+  when the broker refuses one (code and message carried). Opt-in at build
+  time (`MCPB_ENABLE_MUX`, CMake `MCPB_MUX`, `make MUX=1`, Kconfig
+  `MCPB_ESP_MULTIPLEX`): off, its two files are not compiled and a
+  one-provider firmware carries none of it; on Xtensa they weigh 3.4 KB.
+  The dedicated path now goes through the same open hook. `host-provider
+  --multiplex` and a roundtrip phase cover it against the Node broker; 37
+  new checks cover the envelope codec and the slot table.
 - **c** libmcpb 0.2.1: the receive path is resumable. A poll timeout that
   fell inside a frame used to forget the bytes already consumed, and the next
   poll parsed a "header" out of the middle of the JSON (`rsv bits set, header

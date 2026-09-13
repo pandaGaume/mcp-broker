@@ -11,6 +11,10 @@
 #include "mcpb/mcpb_provider.h"
 #include "mcpb/mcpb_ws.h"
 #include "../src/mcpb_internal.h"
+#if defined(MCPB_ENABLE_MUX) && MCPB_ENABLE_MUX
+#include "mcpb/mcpb_envelope.h"
+#include "mcpb/mcpb_mux.h"
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -169,11 +173,11 @@ static void push_handshake_ok(fake_t *f)
     fake_push_str(f, resp);
 }
 
-/* Locates the first frame the client sent after its handshake request, and
- * unmasks its payload into `out`. Returns the payload length, or -1 when
- * nothing follows the handshake. */
-static int first_frame_after_handshake(const fake_t *f, uint8_t *opcode,
-                                       char *out, size_t cap)
+/* Locates the n-th frame (0-based) the client sent after its handshake
+ * request, and unmasks its payload into `out`. Returns the payload length,
+ * or -1 when there is no such frame. */
+static int nth_frame_after_handshake(const fake_t *f, size_t n, uint8_t *opcode,
+                                     char *out, size_t cap)
 {
     size_t i = 0;
     while (i + 4u <= f->outbox_len && memcmp(f->outbox + i, "\r\n\r\n", 4) != 0)
@@ -181,19 +185,34 @@ static int first_frame_after_handshake(const fake_t *f, uint8_t *opcode,
     if (i + 4u > f->outbox_len)
         return -1;
     i += 4u;
-    if (i >= f->outbox_len)
-        return -1;
-    const unsigned char *fr = f->outbox + i;
-    *opcode = (uint8_t)(fr[0] & 0x0Fu);
-    size_t len = fr[1] & 0x7Fu, h = 2;
-    if (len == 126u) { len = ((size_t)fr[2] << 8) | fr[3]; h = 4; }
-    const unsigned char *mask = fr + h;
-    if (len >= cap) return -1;
-    size_t k;
-    for (k = 0; k < len; k++)
-        out[k] = (char)(fr[h + 4u + k] ^ mask[k & 3u]);
-    out[len] = 0;
-    return (int)len;
+    for (;;)
+    {
+        if (i + 2u > f->outbox_len)
+            return -1;
+        const unsigned char *fr = f->outbox + i;
+        size_t len = fr[1] & 0x7Fu, h = 2;
+        if (len == 126u) { len = ((size_t)fr[2] << 8) | fr[3]; h = 4; }
+        const size_t total = h + 4u + len; /* client frames are masked */
+        if (n == 0)
+        {
+            *opcode = (uint8_t)(fr[0] & 0x0Fu);
+            const unsigned char *mask = fr + h;
+            if (len >= cap) return -1;
+            size_t k;
+            for (k = 0; k < len; k++)
+                out[k] = (char)(fr[h + 4u + k] ^ mask[k & 3u]);
+            out[len] = 0;
+            return (int)len;
+        }
+        i += total;
+        n--;
+    }
+}
+
+static int first_frame_after_handshake(const fake_t *f, uint8_t *opcode,
+                                       char *out, size_t cap)
+{
+    return nth_frame_after_handshake(f, 0, opcode, out, cap);
 }
 
 /* Builds a SERVER frame (unmasked). */
@@ -1123,6 +1142,174 @@ int main(void)
         check(log.n == 1 && mcpb_provider_is_connected(&pr),
               "and the link was never dropped");
     }
+
+#if defined(MCPB_ENABLE_MUX) && MCPB_ENABLE_MUX
+    printf("== envelope codec ==\n");
+    {
+        char out[256];
+        int n = mcpb_envelope_encode("scene-1", "{\"a\":1}", 7, out, sizeof(out));
+        check(n > 0 && strcmp(out, "{\"provider\":\"scene-1\",\"payload\":{\"a\":1}}") == 0,
+              "encode wraps the payload verbatim under the slot name");
+        n = mcpb_envelope_encode("a\"b\\c", "1", 1, out, sizeof(out));
+        check(n > 0 && strcmp(out, "{\"provider\":\"a\\\"b\\\\c\",\"payload\":1}") == 0,
+              "a name with a quote and a backslash is escaped");
+        n = mcpb_envelope_register("x", 1, out, sizeof(out));
+        check(n > 0 && strcmp(out, "{\"provider\":\"x\",\"payload\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/register\",\"params\":{\"aggregate\":true}}}") == 0,
+              "the registration with aggregate is byte-identical to the TypeScript one");
+        n = mcpb_envelope_register("x", 0, out, sizeof(out));
+        check(n > 0 && strcmp(out, "{\"provider\":\"x\",\"payload\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/register\"}}") == 0,
+              "without aggregate, no params at all");
+        check(mcpb_envelope_encode("x", "{}", 2, out, 20) == MCPB_ERR_TOO_LARGE,
+              "an envelope that does not fit is refused, not truncated");
+    }
+    {
+        const char *prov; size_t plen; const char *pay; size_t paylen;
+        const char *f1 = " { \"payload\" : {\"jsonrpc\":\"2.0\",\"id\":\"brk-1\",\"method\":\"tools/list\"} , \"provider\" : \"x\" } ";
+        int rc = mcpb_envelope_decode(f1, strlen(f1), &prov, &plen, &pay, &paylen);
+        check(rc == MCPB_OK && plen == 1 && prov[0] == 'x' &&
+              paylen == 52 && memcmp(pay, "{\"jsonrpc\":\"2.0\",\"id\":\"brk-1\",\"method\":\"tools/list\"}", 52) == 0,
+              "members in any order, whitespace everywhere: both located exactly");
+        const char *f2 = "{\"provider\":\"x\",\"payload\":{\"s\":\"}{\\\"}\"}}";
+        rc = mcpb_envelope_decode(f2, strlen(f2), &prov, &plen, &pay, &paylen);
+        check(rc == MCPB_OK && paylen == 13 && memcmp(pay, "{\"s\":\"}{\\\"}\"}", 13) == 0,
+              "braces and escaped quotes inside strings do not end the payload early");
+        const char *f3 = "{\"provider\":\"x\",\"extra\":[1,{\"z\":\"}\"}],\"payload\":7}";
+        rc = mcpb_envelope_decode(f3, strlen(f3), &prov, &plen, &pay, &paylen);
+        check(rc == MCPB_OK && paylen == 1 && pay[0] == '7', "an unknown member is skipped, a scalar payload is fine");
+        const char *bad[] = {
+            "[1,2]",
+            "{\"provider\":\"x\"}",
+            "{\"provider\":\"\",\"payload\":{}}",
+            "{\"payload\":{}}",
+            "{\"provider\":\"x\",\"payload\":{}} trailing",
+            "{\"provider\":\"x\",\"payload\":{\"unterminated\":\"",
+        };
+        int all_refused = 1;
+        size_t i;
+        for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+            if (mcpb_envelope_decode(bad[i], strlen(bad[i]), &prov, &plen, &pay, &paylen) != MCPB_ERR_PROTOCOL)
+                all_refused = 0;
+        check(all_refused, "not an object, no payload, empty provider, trailing bytes, unterminated: all refused");
+    }
+    {
+        int code; const char *msg; size_t mlen;
+        const char *e1 = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Slot held\"}}";
+        check(mcpb_envelope_tunnel_error(e1, strlen(e1), &code, &msg, &mlen) == 1 &&
+              code == -32000 && mlen == 9 && memcmp(msg, "Slot held", 9) == 0,
+              "a tunnel error (id null) is recognised with its code and message");
+        const char *e2 = "{\"jsonrpc\":\"2.0\",\"id\":\"brk-1\",\"result\":{}}";
+        check(mcpb_envelope_tunnel_error(e2, strlen(e2), &code, &msg, &mlen) == 0,
+              "a result is not one");
+        const char *e3 = "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32601,\"message\":\"nope\"}}";
+        check(mcpb_envelope_tunnel_error(e3, strlen(e3), &code, &msg, &mlen) == 0,
+              "an error answering a real request (id 5) is the server's business, not the tunnel's");
+    }
+    {
+        check(mcpb_envelope_name_equals("scene-1", 7, "scene-1"), "plain names compare");
+        check(mcpb_envelope_name_equals("a\\\"b", 4, "a\"b"), "an escaped quote decodes");
+        check(mcpb_envelope_name_equals("\\u0041", 6, "A"), "a \\u escape in the ASCII range decodes");
+        check(!mcpb_envelope_name_equals("x", 1, "y"), "different names differ");
+        check(!mcpb_envelope_name_equals("xy", 2, "x"), "a prefix is not equal");
+    }
+
+    printf("== multiplex: one socket, several slots ==\n");
+    {
+        fake_t f; mcpb_port_t p; mcpb_mux_t m;
+        mcpb_mux_config_t c; uint8_t rx[4096]; static char tx[1024];
+        unsigned char fr[512]; const char *out; size_t olen; size_t slot;
+        char payload[512]; uint8_t op;
+        ev_log_t log;
+        static const mcpb_mux_slot_t slots[] = { { "scene", 1 }, { "input", 0 } };
+        memset(&log, 0, sizeof(log));
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        memset(&c, 0, sizeof(c));
+        c.link.host = "h"; c.link.rx_buffer = rx; c.link.rx_capacity = sizeof(rx);
+        c.link.on_event = ev_sink; c.link.event_user = &log;
+        c.tx_buffer = tx; c.tx_capacity = sizeof(tx);
+        check(mcpb_mux_init(&m, &p, &c, slots, 2) == MCPB_OK, "init with two slots");
+        check(strcmp(m.link.path, "/providers") == 0, "the link dials the multiplexed path");
+
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 0) == MCPB_ERR_TIMEOUT && mcpb_mux_is_connected(&m),
+              "the first poll connects");
+        const int n0 = nth_frame_after_handshake(&f, 0, &op, payload, sizeof(payload));
+        check(n0 > 0 && strcmp(payload, "{\"provider\":\"scene\",\"payload\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/register\",\"params\":{\"aggregate\":true}}}") == 0,
+              "first frame: scene registered, joining _all");
+        const int n1 = nth_frame_after_handshake(&f, 1, &op, payload, sizeof(payload));
+        check(n1 > 0 && strcmp(payload, "{\"provider\":\"input\",\"payload\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/register\"}}") == 0,
+              "second frame: input registered, on its own slot only");
+        check(nth_frame_after_handshake(&f, 2, &op, payload, sizeof(payload)) == -1,
+              "and nothing else before the application speaks");
+        check(m.link.tx_messages == 0, "registrations are not application messages");
+
+        /* Traffic for the second slot. */
+        const char *env = "{\"provider\":\"input\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":\"brk-9\",\"method\":\"tools/list\"}}";
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, env, strlen(env)));
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 100) == MCPB_OK && slot == 1 &&
+              olen == 52 && memcmp(out, "{\"jsonrpc\":\"2.0\",\"id\":\"brk-9\",\"method\":\"tools/list\"}", 52) == 0,
+              "a frame for input comes out as slot 1 with the bare payload");
+
+        /* A reply on the first slot. */
+        const size_t before = f.outbox_len;
+        check(mcpb_mux_send(&m, 0, "{\"jsonrpc\":\"2.0\",\"id\":\"brk-9\",\"result\":{}}", 42) == MCPB_OK,
+              "send on slot 0");
+        (void)before;
+        const int n2 = nth_frame_after_handshake(&f, 2, &op, payload, sizeof(payload));
+        check(n2 > 0 && strcmp(payload, "{\"provider\":\"scene\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":\"brk-9\",\"result\":{}}}") == 0,
+              "goes out wrapped under the slot name");
+        check(mcpb_mux_send(&m, 2, "{}", 2) == MCPB_ERR_ARG, "a slot index out of range is refused");
+
+        /* An unknown slot: handed over, named. */
+        const char *ghost = "{\"provider\":\"ghost\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}}";
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, ghost, strlen(ghost)));
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 100) == MCPB_OK && slot == MCPB_MUX_UNKNOWN_SLOT && olen == 40,
+              "a frame for an unregistered slot is delivered as UNKNOWN_SLOT");
+
+        /* The broker refuses scene, then serves input: the refusal is an
+         * event, the next message still comes out of the same call. */
+        const char *refusal = "{\"provider\":\"scene\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Slot already held\"}}}";
+        const char *next = "{\"provider\":\"input\",\"payload\":{\"jsonrpc\":\"2.0\",\"id\":\"brk-10\",\"method\":\"ping\"}}";
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, refusal, strlen(refusal)));
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, next, strlen(next)));
+        const int before_n = log.n;
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 100) == MCPB_OK && slot == 1,
+              "a refusal is swallowed and the following message delivered");
+        check(log.n == before_n + 1 && log.ev[log.n - 1].type == MCPB_EVENT_SLOT_REFUSED &&
+              log.ev[log.n - 1].slot == 0 && log.ev[log.n - 1].rpc_code == -32000 &&
+              strcmp(log.ev[log.n - 1].reason, "Slot already held") == 0,
+              "as a SLOT_REFUSED event naming the slot, the code and the broker's words");
+        check(m.refused == 1 && mcpb_mux_is_connected(&m), "counted, and the link is untouched");
+
+        /* A bare JSON-RPC frame on the multiplexed socket: not an envelope. */
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}", 40));
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 100) == MCPB_ERR_PROTOCOL &&
+              strcmp(m.link.ws.detail, "frame is not a tunnel envelope") == 0 && mcpb_mux_is_connected(&m),
+              "a frame that is not an envelope is dropped and named, the link kept");
+
+        /* Resumable underneath: an envelope split across two polls. */
+        const size_t frame_at = f.inbox_len;
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, env, strlen(env)));
+        f.pause_at = frame_at + 20;
+        const int first = mcpb_mux_poll(&m, &slot, &out, &olen, 100);
+        const int second = mcpb_mux_poll(&m, &slot, &out, &olen, 100);
+        check(first == MCPB_ERR_TIMEOUT && second == MCPB_OK && slot == 1 && olen == 52,
+              "an envelope across two polls arrives whole");
+
+        /* Reconnection registers everything again. */
+        unsigned char body[2] = {0x03, 0xE8};
+        fake_push(&f, fr, make_frame(fr, 1, 0x8, body, 2)); /* broker closes */
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 100) == MCPB_ERR_CLOSED && !mcpb_mux_is_connected(&m),
+              "the broker closing drops the link");
+        f.clock += 60000;
+        f.outbox_len = 0; f.inbox_len = 0; f.inbox_pos = 0; f.pause_at = 0; f.paused = 0;
+        push_handshake_ok(&f);
+        check(mcpb_mux_poll(&m, &slot, &out, &olen, 0) == MCPB_ERR_TIMEOUT && mcpb_mux_is_connected(&m),
+              "reconnected");
+        check(nth_frame_after_handshake(&f, 1, &op, payload, sizeof(payload)) > 0 &&
+              strstr(payload, "\"provider\":\"input\"") != NULL,
+              "and both slots were registered again on the new socket");
+    }
+#endif /* MCPB_ENABLE_MUX */
 
     printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all pass");
     return g_fail ? 1 : 0;
