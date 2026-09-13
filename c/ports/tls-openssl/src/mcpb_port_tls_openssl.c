@@ -135,6 +135,17 @@ static int t_open(void *ctx, const char *host, uint16_t port, int tls, int timeo
     t->wbio = wb;
     t->tls = 1;
 
+    /* The policy, on the connection rather than on the context, so that a
+     * borrowed context supplies trust and nothing less than this. 1.2 is
+     * the floor: what a broker on Node accepts, and below it there is
+     * nothing worth the bytes. Partial writes are fine, the send loop
+     * accounts for them; and a write retried after WANT_READ resumes at
+     * the same offset of the same buffer, which is what the engine
+     * requires. */
+    SSL_set_verify(s, SSL_VERIFY_PEER, NULL);
+    (void)SSL_set_min_proto_version(s, TLS1_2_VERSION);
+    SSL_set_mode(s, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+
     /* The name check. An IP literal is matched against the certificate's IP
      * entries and gets no SNI (RFC 6066 forbids it); anything else is a DNS
      * name, matched against DNS entries, and announced in SNI so a broker
@@ -339,10 +350,16 @@ static int t_random(void *ctx, uint8_t *buf, size_t len)
 
 /* --- Init / deinit --------------------------------------------------------- */
 
-static int _trust(SSL_CTX *c, const mcpb_port_tls_config_t *cfg)
+static int _trust(SSL_CTX *c, const mcpb_port_tls_config_t *cfg, int borrowed)
 {
     if (cfg == NULL || cfg->ca_pem == NULL)
+    {
+        /* A borrowed context brings its own roots; an owned one gets the
+         * platform's. */
+        if (borrowed)
+            return MCPB_OK;
         return (SSL_CTX_set_default_verify_paths(c) == 1) ? MCPB_OK : MCPB_ERR_IO;
+    }
 
     const size_t len = (cfg->ca_pem_len != 0u) ? cfg->ca_pem_len : strlen(cfg->ca_pem);
     if (len == 0u || len > (size_t)INT_MAX)
@@ -382,25 +399,20 @@ int mcpb_port_tls_init(mcpb_port_t *port, mcpb_port_tls_t *ctx,
     memset(ctx, 0, sizeof(*ctx));
     ctx->inner = inner;
 
-    SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+    const int borrowed = (cfg != NULL && cfg->ssl_ctx != NULL);
+    SSL_CTX *c = borrowed ? (SSL_CTX *)cfg->ssl_ctx : SSL_CTX_new(TLS_client_method());
     if (c == NULL)
         return MCPB_ERR_IO;
-    /* 1.2 is the floor: what a broker on Node accepts, and below it there is
-     * nothing worth the bytes. */
-    (void)SSL_CTX_set_min_proto_version(c, TLS1_2_VERSION);
-    SSL_CTX_set_verify(c, SSL_VERIFY_PEER, NULL);
-    /* Partial writes are fine, the send loop accounts for them; and a write
-     * retried after WANT_READ resumes at the same offset of the same
-     * buffer, which is what the engine requires. */
-    SSL_CTX_set_mode(c, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
-    const int rc = _trust(c, cfg);
+    const int rc = _trust(c, cfg, borrowed);
     if (rc != MCPB_OK)
     {
-        SSL_CTX_free(c);
+        if (!borrowed)
+            SSL_CTX_free(c);
         return rc;
     }
     ctx->ssl_ctx = c;
+    ctx->ssl_ctx_owned = !borrowed;
 
     port->ctx = ctx;
     port->open = t_open;
@@ -417,11 +429,10 @@ void mcpb_port_tls_deinit(mcpb_port_tls_t *ctx)
     if (ctx == NULL)
         return;
     t_close(ctx);
-    if (ctx->ssl_ctx != NULL)
-    {
+    if (ctx->ssl_ctx != NULL && ctx->ssl_ctx_owned)
         SSL_CTX_free((SSL_CTX *)ctx->ssl_ctx);
-        ctx->ssl_ctx = NULL;
-    }
+    ctx->ssl_ctx = NULL;
+    ctx->ssl_ctx_owned = 0;
 }
 
 const char *mcpb_port_tls_last_error(const mcpb_port_tls_t *ctx, char *buf, size_t cap)

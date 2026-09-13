@@ -57,6 +57,18 @@ typedef struct
     const char *ca_pem;
     /* Length of ca_pem, or 0 for a NUL-terminated string. */
     size_t ca_pem_len;
+
+    /* An SSL_CTX the host owns and has already configured: Unreal's
+     * ISslManager::CreateSslContext(), with the engine's root certificates
+     * and the project's pinning. Borrowed: never freed here, and it must
+     * outlive the port. `ca_pem` still applies, added to that context's
+     * store, so a private CA is trusted next to the host's roots. NULL: the
+     * port builds its own context.
+     *
+     * Whatever the context says, verification is set per connection by
+     * this port: SSL_VERIFY_PEER and TLS 1.2 as the floor. A borrowed
+     * context is a source of trust, not a way to turn it off. */
+    void *ssl_ctx;
 } mcpb_port_tls_config_t;
 
 typedef struct
@@ -64,6 +76,7 @@ typedef struct
     const mcpb_port_t *inner;   /* the port underneath, borrowed */
 
     void *ssl_ctx;              /* SSL_CTX *, lives from init to deinit */
+    int   ssl_ctx_owned;        /* built here, so freed here; else borrowed */
     void *ssl;                  /* SSL *, one per encrypted stream, else NULL */
     void *rbio;                 /* BIO *, bytes from the inner port, owned by ssl */
     void *wbio;                 /* BIO *, bytes for the inner port, owned by ssl */

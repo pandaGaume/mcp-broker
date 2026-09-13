@@ -8,6 +8,8 @@ What it verifies, always: the chain, against the CA PEM in `mcpb_port_tls_config
 
 `tls == 0` on `open` passes straight through, so one outer port serves ws:// and wss:// alike.
 
+A host that already has a configured `SSL_CTX` hands it over in `mcpb_port_tls_config_t.ssl_ctx`: Unreal's `ISslManager::CreateSslContext()`, with the engine's root certificates and the project's pinning, is the case this exists for. The context is borrowed, never freed, and it supplies trust only: verification (`SSL_VERIFY_PEER`, TLS 1.2 floor) is set per connection by the port, so a context with verification off does not turn it off here. `ca_pem` still adds a private CA to that context's store.
+
 ## Use
 
 ```c

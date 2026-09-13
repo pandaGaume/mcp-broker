@@ -258,7 +258,7 @@ static void test_handshake_and_echo(const char *cert, const char *key, const cha
     mcpb_port_tls_t tls;
     check(fake_init(&f, &inner, cert, key) == 0, "fake server loads the test certificate");
 
-    mcpb_port_tls_config_t cfg = { ca_pem, 0 };
+    mcpb_port_tls_config_t cfg = { ca_pem, 0, NULL };
     check(mcpb_port_tls_init(&port, &tls, &inner, &cfg) == MCPB_OK, "tls port init with the test CA");
 
     const int rc = port.open(port.ctx, "localhost", 443, 1, 1000);
@@ -308,7 +308,7 @@ static void test_ip_literal(const char *cert, const char *key, const char *ca_pe
     mcpb_port_t inner, port;
     mcpb_port_tls_t tls;
     fake_init(&f, &inner, cert, key);
-    mcpb_port_tls_config_t cfg = { ca_pem, 0 };
+    mcpb_port_tls_config_t cfg = { ca_pem, 0, NULL };
     mcpb_port_tls_init(&port, &tls, &inner, &cfg);
     check(port.open(port.ctx, "127.0.0.1", 443, 1, 1000) == MCPB_OK, "open 127.0.0.1 succeeds (IP in the SAN)");
     port.close(port.ctx);
@@ -326,7 +326,7 @@ static void test_wrong_name(const char *cert, const char *key, const char *ca_pe
     mcpb_port_t inner, port;
     mcpb_port_tls_t tls;
     fake_init(&f, &inner, cert, key);
-    mcpb_port_tls_config_t cfg = { ca_pem, 0 };
+    mcpb_port_tls_config_t cfg = { ca_pem, 0, NULL };
     mcpb_port_tls_init(&port, &tls, &inner, &cfg);
     check(port.open(port.ctx, "broker.example.invalid", 443, 1, 1000) == MCPB_ERR_TLS, "open with the wrong host name is MCPB_ERR_TLS");
     check(tls.last_verify == X509_V_ERR_HOSTNAME_MISMATCH, "the verify result is the hostname mismatch");
@@ -361,7 +361,7 @@ static void test_close_notify(const char *cert, const char *key, const char *ca_
     mcpb_port_tls_t tls;
     fake_init(&f, &inner, cert, key);
     f.close_after_handshake = 1;
-    mcpb_port_tls_config_t cfg = { ca_pem, 0 };
+    mcpb_port_tls_config_t cfg = { ca_pem, 0, NULL };
     mcpb_port_tls_init(&port, &tls, &inner, &cfg);
     check(port.open(port.ctx, "localhost", 443, 1, 1000) == MCPB_OK, "handshake completes before the server closes");
     uint8_t buf[16];
@@ -383,7 +383,7 @@ static void test_plain_passthrough(const char *cert, const char *key, const char
     mcpb_port_t inner, port;
     mcpb_port_tls_t tls;
     fake_init(&f, &inner, cert, key);
-    mcpb_port_tls_config_t cfg = { ca_pem, 0 };
+    mcpb_port_tls_config_t cfg = { ca_pem, 0, NULL };
     mcpb_port_tls_init(&port, &tls, &inner, &cfg);
     check(port.open(port.ctx, "localhost", 80, 0, 1000) == MCPB_OK, "open with tls=0");
     /* Detach the fake's server so its echo is byte for byte. */
@@ -399,6 +399,37 @@ static void test_plain_passthrough(const char *cert, const char *key, const char
     fake_free(&f);
 }
 
+static void test_borrowed_context(const char *cert, const char *key, const char *ca_pem)
+{
+    puts("a context the host owns is used, not freed, and cannot relax the policy");
+    fake_t f;
+    mcpb_port_t inner, port;
+    mcpb_port_tls_t tls;
+    fake_init(&f, &inner, cert, key);
+
+    /* What a host like Unreal hands over: its own context, its own roots,
+     * and here deliberately no verification at all, to prove the port sets
+     * its own on the connection. */
+    SSL_CTX *host_ctx = SSL_CTX_new(TLS_client_method());
+    SSL_CTX_set_verify(host_ctx, SSL_VERIFY_NONE, NULL);
+
+    mcpb_port_tls_config_t cfg = { NULL, 0, host_ctx };
+    check(mcpb_port_tls_init(&port, &tls, &inner, &cfg) == MCPB_OK, "init with a borrowed context");
+    check(tls.ssl_ctx == host_ctx && tls.ssl_ctx_owned == 0, "the port uses it and knows it is not its own");
+    check(port.open(port.ctx, "localhost", 443, 1, 1000) == MCPB_ERR_TLS, "no CA in the borrowed context: refused, despite SSL_VERIFY_NONE on it");
+    mcpb_port_tls_deinit(&tls);
+
+    mcpb_port_tls_config_t cfg2 = { ca_pem, 0, host_ctx };
+    check(mcpb_port_tls_init(&port, &tls, &inner, &cfg2) == MCPB_OK, "init again over the same context, with the private CA added to it");
+    check(port.open(port.ctx, "localhost", 443, 1, 1000) == MCPB_OK, "open succeeds through the CA now in the host's context");
+    port.close(port.ctx);
+    check(port.open(port.ctx, "broker.example.invalid", 443, 1, 1000) == MCPB_ERR_TLS, "the name is still checked");
+    mcpb_port_tls_deinit(&tls);
+    check(SSL_CTX_get_verify_mode(host_ctx) == SSL_VERIFY_NONE, "the host's context is untouched after deinit (still alive, its own mode)");
+    SSL_CTX_free(host_ctx);
+    fake_free(&f);
+}
+
 static void test_bad_ca(const char *cert, const char *key)
 {
     puts("a CA buffer without a certificate is refused at init");
@@ -406,7 +437,7 @@ static void test_bad_ca(const char *cert, const char *key)
     mcpb_port_t inner, port;
     mcpb_port_tls_t tls;
     fake_init(&f, &inner, cert, key);
-    mcpb_port_tls_config_t cfg = { "not a pem file", 0 };
+    mcpb_port_tls_config_t cfg = { "not a pem file", 0, NULL };
     check(mcpb_port_tls_init(&port, &tls, &inner, &cfg) == MCPB_ERR_ARG, "init returns MCPB_ERR_ARG");
     check(mcpb_port_tls_init(&port, &tls, NULL, NULL) == MCPB_ERR_ARG, "init without an inner port returns MCPB_ERR_ARG");
     fake_free(&f);
@@ -424,6 +455,7 @@ int main(void)
     test_unknown_ca(cert, key);
     test_close_notify(cert, key, ca_pem);
     test_plain_passthrough(cert, key, ca_pem);
+    test_borrowed_context(cert, key, ca_pem);
     test_bad_ca(cert, key);
 
     printf("\n%s: %d failure(s)\n", g_fail ? "FAIL" : "PASS", g_fail);
