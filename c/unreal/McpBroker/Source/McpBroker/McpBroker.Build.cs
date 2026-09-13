@@ -7,6 +7,13 @@
 // set meaningful. The port over ISocketSubsystem is pulled in the same way
 // from c/ports/unreal.
 //
+// TLS: c/ports/tls-openssl, a port over the Unreal port, compiled here against
+// the OpenSSL the engine ships (the same static library the SSL and HTTP
+// modules use) on the platforms where the engine has it. The engine's root
+// certificates and the project's pinning come from the SSL module's
+// certificate manager, added to the port's context the way CurlHttp.cpp does
+// for libcurl. Elsewhere MCPB_UNREAL_TLS is 0 and bTls is refused at Connect.
+//
 // Layout: this file is c/unreal/McpBroker/Source/McpBroker/McpBroker.Build.cs,
 // four hops up reach c/.
 
@@ -23,6 +30,7 @@ public class McpBroker : ModuleRules
 
         PublicIncludePaths.Add(Path.Combine(CRoot, "libmcpb", "include"));
         PublicIncludePaths.Add(Path.Combine(CRoot, "ports", "unreal", "include"));
+        PrivateIncludePaths.Add(Path.Combine(CRoot, "ports", "tls-openssl", "include"));
 
         // The multiplexed endpoint is the point of this plugin: one socket
         // for every server the process hosts. Built in.
@@ -48,5 +56,23 @@ public class McpBroker : ModuleRules
             "Sockets",
             "Networking",
         });
+
+        // Same platform set as the engine's SSL module (SSL.Build.cs).
+        bool bPlatformHasOpenSsl =
+            Target.Platform == UnrealTargetPlatform.Win64 ||
+            Target.Platform == UnrealTargetPlatform.Mac ||
+            Target.IsInPlatformGroup(UnrealPlatformGroup.Unix) ||
+            Target.Platform == UnrealTargetPlatform.IOS ||
+            Target.Platform == UnrealTargetPlatform.Android;
+        if (bPlatformHasOpenSsl)
+        {
+            PrivateDefinitions.Add("MCPB_UNREAL_TLS=1");
+            PrivateDependencyModuleNames.Add("SSL");
+            AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
+        }
+        else
+        {
+            PrivateDefinitions.Add("MCPB_UNREAL_TLS=0");
+        }
     }
 }

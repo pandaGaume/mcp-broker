@@ -9,6 +9,9 @@
 //
 // Command line (all optional):
 //   -McpBrokerHost=192.168.5.32  -McpBrokerPort=3000  -McpBrokerSlot=ue-echo
+//   -McpBrokerTls                wss://, verified against the engine's roots
+//   -McpBrokerCa=C:/path/ca.pem  plus this CA, for a broker with a private
+//                               certificate
 //   -McpBrokerExitAfter=60       quits the process after that many seconds,
 //                               for a headless run in a script
 

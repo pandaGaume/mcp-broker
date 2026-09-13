@@ -6,6 +6,19 @@
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
 
+#if MCPB_UNREAL_TLS
+#include "Ssl.h"
+// OpenSSL declares a type named UI (its text prompt API, unused here) and the
+// engine has a namespace of that name; the typedef is renamed for the span
+// of the include, the way the engine's own WebSockets module does it.
+#define UI UI_ST
+THIRD_PARTY_INCLUDES_START
+#include <openssl/ssl.h>
+#include <openssl/x509_vfy.h>
+THIRD_PARTY_INCLUDES_END
+#undef UI
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogMcpBroker, Log, All);
 
 namespace
@@ -30,9 +43,13 @@ FMcpBrokerLink::FMcpBrokerLink(UMcpBrokerSubsystem* InOwner, const FMcpBrokerCon
     , Options(InOptions)
 {
     FMemory::Memzero(&PortCtx, sizeof(PortCtx));
+    FMemory::Memzero(&InnerPort, sizeof(InnerPort));
     FMemory::Memzero(&Port, sizeof(Port));
     FMemory::Memzero(&Dedicated, sizeof(Dedicated));
     FMemory::Memzero(&Mux, sizeof(Mux));
+#if MCPB_UNREAL_TLS
+    FMemory::Memzero(&TlsCtx, sizeof(TlsCtx));
+#endif
 }
 
 FMcpBrokerLink::~FMcpBrokerLink()
@@ -42,11 +59,13 @@ FMcpBrokerLink::~FMcpBrokerLink()
 
 bool FMcpBrokerLink::Start(FString& OutError)
 {
+#if !MCPB_UNREAL_TLS
     if (Options.bTls)
     {
-        OutError = TEXT("TLS is not available from the Unreal port yet; use ws:// (bTls = false).");
+        OutError = TEXT("TLS is not available on this platform: the engine has no OpenSSL here; use ws:// (bTls = false).");
         return false;
     }
+#endif
     if (Options.Slots.Num() == 0)
     {
         OutError = TEXT("no slot to publish.");
@@ -66,11 +85,47 @@ bool FMcpBrokerLink::Start(FString& OutError)
         }
     }
 
-    if (mcpb_port_unreal_init(&Port, &PortCtx) != MCPB_OK)
+    if (mcpb_port_unreal_init(&InnerPort, &PortCtx) != MCPB_OK)
     {
         OutError = TEXT("no socket subsystem on this platform.");
         return false;
     }
+    Port = InnerPort;
+
+#if MCPB_UNREAL_TLS
+    if (Options.bTls)
+    {
+        // The TLS port over the socket port. Its context is its own; the
+        // engine's roots and the project's pinning are added to it below,
+        // the way the HTTP module does for curl's context (CurlHttp.cpp):
+        // a context created by the SSL module would come from another copy
+        // of OpenSSL in a modular build, which is why the engine does not
+        // hand one out there either.
+        mcpb_port_tls_config_t TlsConfig;
+        FMemory::Memzero(&TlsConfig, sizeof(TlsConfig));
+        if (!Options.CaPem.IsEmpty())
+        {
+            CaPemUtf8 = Utf8Of(Options.CaPem);
+            TlsConfig.ca_pem = CStr(CaPemUtf8);
+            TlsConfig.ca_pem_len = static_cast<size_t>(CaPemUtf8.Num() - 1);
+        }
+        const int TlsRc = mcpb_port_tls_init(&Port, &TlsCtx, &InnerPort, &TlsConfig);
+        if (TlsRc != MCPB_OK)
+        {
+            OutError = (TlsRc == MCPB_ERR_ARG)
+                ? TEXT("CaPem holds no certificate.")
+                : FString::Printf(TEXT("TLS port: %s"), ANSI_TO_TCHAR(mcpb_strerror(TlsRc)));
+            return false;
+        }
+        bTlsPortReady = true;
+
+        SSL_CTX* Context = static_cast<SSL_CTX*>(TlsCtx.ssl_ctx);
+        const ISslCertificateManager& Certificates = FSslModule::Get().GetCertificateManager();
+        Certificates.AddCertificatesToSslContext(Context);
+        SSL_CTX_set_verify(Context, SSL_VERIFY_PEER, &FMcpBrokerLink::SslCertVerify);
+        SSL_CTX_set_app_data(Context, this);
+    }
+#endif
 
     HostUtf8 = Utf8Of(Options.Host);
     if (!Options.Token.IsEmpty())
@@ -96,7 +151,7 @@ bool FMcpBrokerLink::Start(FString& OutError)
     FMemory::Memzero(&Link, sizeof(Link));
     Link.host = CStr(HostUtf8);
     Link.port = static_cast<uint16_t>(Options.Port);
-    Link.tls = 0;
+    Link.tls = Options.bTls ? 1 : 0;
     Link.extra_headers = HeadersUtf8.Num() ? CStr(HeadersUtf8) : nullptr;
     Link.retry_initial_ms = static_cast<uint32_t>(FMath::Max(Options.RetryInitialMs, 0));
     Link.retry_max_ms = static_cast<uint32_t>(FMath::Max(Options.RetryMaxMs, 0));
@@ -135,8 +190,9 @@ bool FMcpBrokerLink::Start(FString& OutError)
         OutError = TEXT("could not create the link thread.");
         return false;
     }
-    UE_LOG(LogMcpBroker, Log, TEXT("dialing ws://%s:%d%s with %d slot(s)"), *Options.Host, Options.Port,
-           Options.bMultiplex ? TEXT("/providers") : TEXT("/provider/<name>"), Options.Slots.Num());
+    UE_LOG(LogMcpBroker, Log, TEXT("dialing %s://%s:%d%s with %d slot(s)%s"), Options.bTls ? TEXT("wss") : TEXT("ws"),
+           *Options.Host, Options.Port, Options.bMultiplex ? TEXT("/providers") : TEXT("/provider/<name>"), Options.Slots.Num(),
+           Options.bTls ? (Options.CaPem.IsEmpty() ? TEXT(", engine roots") : TEXT(", engine roots + CaPem")) : TEXT(""));
     return true;
 }
 
@@ -149,7 +205,34 @@ void FMcpBrokerLink::Shutdown()
         delete Thread;
         Thread = nullptr;
     }
+#if MCPB_UNREAL_TLS
+    if (bTlsPortReady)
+    {
+        mcpb_port_tls_deinit(&TlsCtx);
+        bTlsPortReady = false;
+    }
+#endif
 }
+
+#if MCPB_UNREAL_TLS
+int FMcpBrokerLink::SslCertVerify(int PreverifyOk, X509_STORE_CTX* Context)
+{
+    // Runs on the link thread, inside the handshake, once OpenSSL's own
+    // chain and name checks passed. The engine's certificate manager then
+    // applies the pinned public keys configured for this host, if any.
+    if (PreverifyOk == 1)
+    {
+        SSL* Handle = static_cast<SSL*>(X509_STORE_CTX_get_ex_data(Context, SSL_get_ex_data_X509_STORE_CTX_idx()));
+        SSL_CTX* SslContext = Handle ? SSL_get_SSL_CTX(Handle) : nullptr;
+        FMcpBrokerLink* Self = SslContext ? static_cast<FMcpBrokerLink*>(SSL_CTX_get_app_data(SslContext)) : nullptr;
+        if (Self != nullptr && !FSslModule::Get().GetCertificateManager().VerifySslCertificates(Context, Self->Options.Host))
+        {
+            PreverifyOk = 0;
+        }
+    }
+    return PreverifyOk;
+}
+#endif
 
 bool FMcpBrokerLink::Enqueue(int32 SlotIndex, const FString& Json)
 {
@@ -268,6 +351,16 @@ void FMcpBrokerLink::OnEvent(void* User, const mcpb_event_t* Event)
     Copy.HttpStatus = Event->http_status;
     Copy.Reason = UTF8_TO_TCHAR(Event->reason);
     Copy.Detail = ANSI_TO_TCHAR(Event->detail);
+#if MCPB_UNREAL_TLS
+    if (Event->error == MCPB_ERR_TLS && Self->bTlsPortReady)
+    {
+        // The library cannot say why a certificate was refused (it never
+        // sees TLS); the port can.
+        char Why[128];
+        mcpb_port_tls_last_error(&Self->TlsCtx, Why, sizeof(Why));
+        Copy.Detail = ANSI_TO_TCHAR(Why);
+    }
+#endif
     if (Event->type == MCPB_EVENT_SLOT_REFUSED && Event->slot < static_cast<size_t>(Self->Options.Slots.Num()))
     {
         Copy.Slot = Self->Options.Slots[static_cast<int32>(Event->slot)].Name;

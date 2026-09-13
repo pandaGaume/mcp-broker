@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 
@@ -39,6 +40,17 @@ void AMcpEchoActor::BeginPlay()
     FParse::Value(FCommandLine::Get(), TEXT("McpBrokerPort="), Options.Port);
     FString SlotName = TEXT("ue-echo");
     FParse::Value(FCommandLine::Get(), TEXT("McpBrokerSlot="), SlotName);
+    Options.bTls = FParse::Param(FCommandLine::Get(), TEXT("McpBrokerTls"));
+    FString CaPath;
+    if (FParse::Value(FCommandLine::Get(), TEXT("McpBrokerCa="), CaPath) && !CaPath.IsEmpty())
+    {
+        if (!FFileHelper::LoadFileToString(Options.CaPem, *CaPath))
+        {
+            UE_LOG(LogMcpEcho, Error, TEXT("-McpBrokerCa=%s: cannot read"), *CaPath);
+            return;
+        }
+        Options.bTls = true;
+    }
 
     FMcpBrokerSlot A;
     A.Name = SlotName;
@@ -59,8 +71,8 @@ void AMcpEchoActor::BeginPlay()
         UE_LOG(LogMcpEcho, Error, TEXT("Connect refused; see the McpBroker log above."));
         return;
     }
-    UE_LOG(LogMcpEcho, Log, TEXT("publishing %s (in _all) and %s on one socket to ws://%s:%d/providers"),
-           *A.Name, *B.Name, *Options.Host, Options.Port);
+    UE_LOG(LogMcpEcho, Log, TEXT("publishing %s (in _all) and %s on one socket to %s://%s:%d/providers"),
+           *A.Name, *B.Name, Options.bTls ? TEXT("wss") : TEXT("ws"), *Options.Host, Options.Port);
 
     int32 ExitAfter = 0;
     if (FParse::Value(FCommandLine::Get(), TEXT("McpBrokerExitAfter="), ExitAfter) && ExitAfter > 0)
