@@ -1,6 +1,7 @@
 /* mcp-broker provider client: connection, recovery, keepalive. */
 
 #include "mcpb/mcpb_provider.h"
+#include "mcpb_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,13 +33,48 @@ static void _apply_defaults(mcpb_provider_config_t *c)
     if (c->port == 0u)                c->port = c->tls ? 443u : 80u;
 }
 
+/* What the dedicated path sends first: the `_all` opt-in, when asked. The
+ * broker inspects exactly one frame per socket for it. Not counted in
+ * tx_messages, which counts what the application sent. */
+static int _dedicated_on_open(mcpb_provider_t *p, void *user)
+{
+    (void)user;
+    if (!p->cfg.aggregate)
+        return MCPB_OK;
+    return mcpb_ws_send_text(&p->ws, MCPB_REGISTER_FRAME,
+                             sizeof(MCPB_REGISTER_FRAME) - 1u);
+}
+
 int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
                        const mcpb_provider_config_t *cfg)
 {
-    if (p == NULL || cfg == NULL || cfg->host == NULL || cfg->name == NULL)
+    if (p == NULL || cfg == NULL || cfg->name == NULL)
+        return MCPB_ERR_ARG;
+
+    /* Built once: the slot name never changes, and rebuilding it on every
+     * attempt would charge the encoding to a link that fails in a loop. */
+    char encoded[MCPB_PROVIDER_NAME_MAX * 3 + 1];
+    const int elen = mcpb_url_encode(cfg->name, encoded, sizeof(encoded));
+    if (elen < 0)
+        return elen;
+    char path[MCPB_WS_PATH_MAX];
+    const int n = snprintf(path, sizeof(path), "/provider/%s", encoded);
+    if (n < 0 || (size_t)n >= sizeof(path))
+        return MCPB_ERR_TOO_LARGE;
+
+    return mcpb_provider_init_ex(p, port, cfg, path, _dedicated_on_open, NULL);
+}
+
+int mcpb_provider_init_ex(mcpb_provider_t *p, const mcpb_port_t *port,
+                          const mcpb_provider_config_t *cfg, const char *path,
+                          int (*on_open)(mcpb_provider_t *, void *), void *open_user)
+{
+    if (p == NULL || cfg == NULL || cfg->host == NULL || path == NULL)
         return MCPB_ERR_ARG;
     if (cfg->rx_buffer == NULL || cfg->rx_capacity < 256u)
         return MCPB_ERR_ARG;
+    if (strlen(path) >= sizeof(p->path))
+        return MCPB_ERR_TOO_LARGE;
     const int pc = mcpb_port_check(port);
     if (pc != MCPB_OK)
         return pc;
@@ -47,16 +83,9 @@ int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
     p->port = port;
     p->cfg = *cfg;
     _apply_defaults(&p->cfg);
-
-    /* Built once: the slot name never changes, and rebuilding it on every
-     * attempt would charge the encoding to a link that fails in a loop. */
-    char encoded[MCPB_PROVIDER_NAME_MAX * 3 + 1];
-    const int elen = mcpb_url_encode(cfg->name, encoded, sizeof(encoded));
-    if (elen < 0)
-        return elen;
-    const int n = snprintf(p->path, sizeof(p->path), "/provider/%s", encoded);
-    if (n < 0 || (size_t)n >= sizeof(p->path))
-        return MCPB_ERR_TOO_LARGE;
+    strcpy(p->path, path);
+    p->on_open = on_open;
+    p->open_user = open_user;
 
     p->retry_window_ms = p->cfg.retry_initial_ms;
     /* First attempt is immediate. */
@@ -113,6 +142,8 @@ static void _notify(mcpb_provider_t *p, mcpb_event_type_t type, int error,
     ev.http_status = (error == MCPB_ERR_HANDSHAKE) ? p->ws.http_status : 0;
     ev.reason = closed ? p->ws.close_reason : "";
     ev.detail = p->ws.detail; /* "" unless the library itself refused */
+    ev.slot = 0;
+    ev.rpc_code = 0;
     p->cfg.on_event(p->cfg.event_user, &ev);
 }
 
@@ -174,13 +205,12 @@ static int _connect(mcpb_provider_t *p)
         return rc;
     }
 
-    /* First frame on the socket, before the caller can send anything: the
-     * broker inspects exactly one frame for it. Not counted in tx_messages,
-     * which counts what the application sent. */
-    if (p->cfg.aggregate)
+    /* What the endpoint expects first, before the caller can send anything:
+     * the `_all` opt-in on the dedicated path, one registration per slot on
+     * the multiplexed one. */
+    if (p->on_open != NULL)
     {
-        const int src = mcpb_ws_send_text(&p->ws, MCPB_REGISTER_FRAME,
-                                          sizeof(MCPB_REGISTER_FRAME) - 1u);
+        const int src = p->on_open(p, p->open_user);
         if (src != MCPB_OK)
         {
             /* Not CONNECTED yet, so _drop would not close the socket and

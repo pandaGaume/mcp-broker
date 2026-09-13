@@ -12,9 +12,11 @@
  * no fixed address: it works from behind a NAT, a phone hotspot or a plant
  * firewall.
  *
- * The dedicated endpoint, not the multiplexed /providers one. That envelope
- * exists for a host fronting several providers; a device is one provider and
- * would be paying an encoding to name itself on every frame.
+ * The dedicated endpoint, one socket per provider. A host that fronts
+ * several providers from one process (a game engine, a gateway) uses the
+ * multiplexed /providers endpoint instead, one socket for all of them:
+ * see mcpb_mux.h, built only with MCPB_ENABLE_MUX so a device that has one
+ * provider carries none of it.
  *
  * Two obligations the broker puts on the device (its defaults, both
  * configurable on the broker side):
@@ -97,7 +99,15 @@ typedef enum
     /* An attempt failed while already offline. Distinct from the above: the
      * first is an incident, this is its follow-up. Merging them would raise
      * an alarm on every attempt. */
-    MCPB_EVENT_RETRY_FAILED
+    MCPB_EVENT_RETRY_FAILED,
+
+    /* Multiplexed endpoint only (mcpb_mux.h): the broker refused one slot's
+     * registration, with a JSON-RPC error it sends back on the tunnel. The
+     * link stays up and the other slots keep working, so this is neither a
+     * loss nor a failed attempt; `slot`, `rpc_code` and `reason` say which
+     * slot, why (-32000 unavailable: held by another provider; -32001
+     * forbidden: policy), and what the broker said. */
+    MCPB_EVENT_SLOT_REFUSED
 } mcpb_event_type_t;
 
 typedef struct
@@ -132,6 +142,11 @@ typedef struct
      * NULL; valid for the duration of the callback. Log it with `error`:
      * "protocol violation" alone names nothing. */
     const char *detail;
+
+    /* SLOT_REFUSED only: the index into the slots array given to
+     * mcpb_mux_init, and the JSON-RPC error code. 0 otherwise. */
+    size_t slot;
+    int    rpc_code;
 } mcpb_event_t;
 
 /* Called from the caller's own task, inside mcpb_provider_poll or
@@ -206,7 +221,7 @@ typedef enum
     MCPB_PROVIDER_CONNECTED
 } mcpb_provider_state_t;
 
-typedef struct
+typedef struct mcpb_provider
 {
     mcpb_provider_config_t cfg;
     const mcpb_port_t     *port;
@@ -227,6 +242,14 @@ typedef struct
     uint32_t disconnects;
     uint32_t rx_messages;
     uint32_t tx_messages;
+
+    /* Called right after a successful handshake, before the link is reported
+     * CONNECTED, to send whatever the endpoint expects first. The dedicated
+     * path installs the `_all` opt-in here; the multiplexed path installs
+     * one registration per slot. A failure closes the socket and counts as
+     * a failed attempt. Internal: set by the initialisers. */
+    int (*on_open)(struct mcpb_provider *p, void *user);
+    void *open_user;
 } mcpb_provider_t;
 
 /* Opens nothing: the connection happens on the first poll, so a device

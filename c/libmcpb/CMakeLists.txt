@@ -19,13 +19,27 @@ if(NOT DEFINED MCPB_WARNINGS)
         -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes)
 endif()
 
-add_library(mcpb STATIC
+# The multiplexed endpoint (mcpb_mux.h, mcpb_envelope.h) is two more files
+# and a define. Off, they are not compiled at all: a device with one
+# provider carries none of it, which is stricter than relying on the
+# linker to drop it. On for the host build, whose bench covers them.
+option(MCPB_MUX "Build the multiplexed /providers endpoint" ON)
+
+set(MCPB_SRCS
     src/mcpb_common.c
     src/mcpb_sha1.c
     src/mcpb_ws.c
     src/mcpb_provider.c)
+if(MCPB_MUX)
+    list(APPEND MCPB_SRCS src/mcpb_envelope.c src/mcpb_mux.c)
+endif()
+
+add_library(mcpb STATIC ${MCPB_SRCS})
 
 target_include_directories(mcpb PUBLIC include)
+if(MCPB_MUX)
+    target_compile_definitions(mcpb PUBLIC MCPB_ENABLE_MUX=1)
+endif()
 target_compile_features(mcpb PUBLIC c_std_99)
 set_target_properties(mcpb PROPERTIES C_EXTENSIONS OFF)
 target_compile_options(mcpb PRIVATE

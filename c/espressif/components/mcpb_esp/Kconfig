@@ -47,6 +47,18 @@ menu "mcp-broker provider (mcpb_esp)"
             broker's provider heartbeat (30 s by default): the broker's ping
             is answered from inside the poll.
 
+    config MCPB_ESP_MULTIPLEX
+        bool "Build the multiplexed /providers endpoint (mcpb_mux.h)"
+        default n
+        help
+            Several provider slots on one socket, for a firmware that hosts
+            more than one MCP server. Off, the two source files behind it are
+            not compiled at all and the image carries none of it; a device
+            with one provider uses the dedicated path and leaves this off.
+            The provider task in mcpb_esp.h always uses the dedicated path;
+            this option makes mcpb_mux_t available to an application that
+            runs its own loop.
+
     config MCPB_ESP_TX_QUEUE_LEN
         int "Outbox depth (messages)"
         default 8

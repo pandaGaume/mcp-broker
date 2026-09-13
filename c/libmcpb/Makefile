@@ -23,13 +23,23 @@ WARN    := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
 OPT     ?= -O2
 
 CFLAGS  += $(CSTD) $(WARN) $(OPT) -Iinclude
+
+# The multiplexed endpoint is opt-in: `make MUX=1`. Off, its two files are
+# not compiled, so a one-provider firmware carries none of it.
+MUX     ?= 0
+ifeq ($(MUX),1)
+CFLAGS  += -DMCPB_ENABLE_MUX=1
+MUX_SRCS := src/mcpb_envelope.c src/mcpb_mux.c
+else
+MUX_SRCS :=
+endif
 # Header dependency sidecars, so editing mcpb_port.h rebuilds what includes it.
 CFLAGS  += -MMD -MP
 
 BUILD   := build
 LIB     := $(BUILD)/libmcpb.a
 
-SRCS    := $(wildcard src/*.c)
+SRCS    := $(filter-out src/mcpb_envelope.c src/mcpb_mux.c,$(wildcard src/*.c)) $(MUX_SRCS)
 OBJS    := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 DEPS    := $(OBJS:.o=.d) $(BUILD)/test_mcpb.d
 

@@ -11,6 +11,37 @@ one text frame = one JSON-RPC message, no envelope
 
 So it needs no inbound port, no port forwarding and no fixed address: it works from behind a NAT, a phone hotspot or a plant firewall.
 
+## Two endpoints
+
+**Dedicated** (`mcpb_provider.h`): `ws[s]://<host>/provider/<name>`, one socket per provider, one JSON-RPC message per frame. The default, and all a device with one server needs.
+
+**Multiplexed** (`mcpb_mux.h`): `ws[s]://<host>/providers`, one socket carrying several slots, each frame wrapped in the tunnel envelope `{"provider":"<slot>","payload":<JSON-RPC>}`. For a process that hosts several MCP servers and does not want a socket each: a game engine, a gateway. Each slot is claimed with a registration envelope when the socket opens and again at every reconnection; `aggregate` is per slot. A registration the broker refuses comes back as `MCPB_EVENT_SLOT_REFUSED` with the slot, the JSON-RPC code (`-32000` held by someone else, `-32001` forbidden) and the broker's message, and the other slots keep working.
+
+The envelope is transport framing, not MCP, which is why it lives here without breaking "opaque bytes": the payload is located by a balanced scan of one JSON value and handed over exactly as written, never interpreted.
+
+The multiplexed endpoint is **opt-in at build time**: `MCPB_ENABLE_MUX=1` plus the two files `mcpb_envelope.c` and `mcpb_mux.c`. Off, they are not compiled at all, so a one-provider firmware carries none of it (`cmake -DMCPB_MUX=OFF`, `make` without `MUX=1`, Kconfig `MCPB_ESP_MULTIPLEX` off). On Xtensa at `-Os` they weigh 3.4 KB of flash; and even compiled, a firmware that never calls them does not link them, since IDF builds with function sections. Including `mcpb_mux.h` without the define is a compile error that names the fix, not an undefined reference at link time.
+
+```c
+static const mcpb_mux_slot_t slots[] = { { "scene", 1 }, { "input", 0 } };  /* scene joins _all, input does not */
+static char envelope[4096 + 128];
+
+mcpb_mux_config_t mc = {0};
+mc.link.host = "broker.example.com"; mc.link.port = 3000;
+mc.link.rx_buffer = rx; mc.link.rx_capacity = sizeof(rx);
+mc.tx_buffer = envelope; mc.tx_capacity = sizeof(envelope);
+mcpb_mux_init(&mux, &my_port, &mc, slots, 2);
+
+for (;;) {
+    size_t slot; const char *msg; size_t len;
+    if (mcpb_mux_poll(&mux, &slot, &msg, &len, 100) == MCPB_OK && slot != MCPB_MUX_UNKNOWN_SLOT) {
+        /* msg is the bare JSON-RPC message for slots[slot]; answer with: */
+        mcpb_mux_send(&mux, slot, reply, reply_len);
+    }
+}
+```
+
+Underneath, the multiplexed link is the same `mcpb_provider_t` on a fixed path: connection, retry window, ping and events are the ones documented below, once.
+
 ## Standalone
 
 `libmcpb/` lifts out whole. It includes nothing from CyanMycelium, no platform header, and no third-party library. Everything system-dependent goes through `mcpb_port.h`. It declares its own error codes rather than borrowing the host's, because a library that borrows its first host's types stops being extractable.
@@ -165,17 +196,21 @@ The sink is **called from the caller's own task**, inside `poll` or `send`, neve
 ## Bench
 
 ```bash
-gcc -std=c99 -Wall -Wextra -Iinclude -o test_mcpb \
+gcc -std=c99 -Wall -Wextra -Iinclude -DMCPB_ENABLE_MUX=1 -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-105 checks, no network: the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+153 checks, no network (116 without the multiplexed endpoint): the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
 
+## A frame does not care about your poll timeout
+
+`mcpb_provider_poll` takes a timeout, and on a slow link a single frame arrives across several of them. The receive path is therefore **resumable**: the frame in progress (header, length, bytes received so far) lives in `mcpb_ws_t`, a timeout leaves it where it is, and the next call continues from there. Before 0.2.1 a timeout in the middle of a frame forgot the bytes already consumed, and the next call parsed a "header" out of the middle of the JSON: `{"`, refused as `rsv bits set, header 7B 22`. It was seen on an ESP32 over a weak Wi-Fi link with power save on, every few minutes under load, and never on a LAN, where a message is never split across 200 ms. The bench now pauses the fake link inside the header, inside the extended length, inside the payload and inside a ping, and checks that the message still comes out whole.
+
 ## Known limits
 
-Client role only. No extensions (a server-imposed `permessage-deflate` fails the handshake rather than being ignored). No binary frames on receive, the broker only sends text. No HTTP redirect following: a 3xx is a refusal, because following one would dial a different host from the one that was logged.
+Client role only. No extensions (a server-imposed `permessage-deflate` fails the handshake rather than being ignored). No binary frames on receive, the broker only sends text. No HTTP redirect following: a 3xx is a refusal, because following one would dial a different host from the one that was logged. On the multiplexed endpoint, a slot name that needs a `\u` escape beyond ASCII is not matched.
 
 ## Origin
 
