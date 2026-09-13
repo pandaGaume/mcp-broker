@@ -34,9 +34,24 @@ struct MCPBROKER_API FMcpBrokerConnectOptions
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCP Broker")
     int32 Port = 3000;
 
-    /** wss:// is not available from this port yet; true is refused at Connect. */
+    /**
+     * wss://. The broker's certificate is verified against the engine's root
+     * certificates plus CaPem, and its name against Host; the project's pinned
+     * public keys (SSL module, [SSL] config) apply. There is no way to skip
+     * the check. Refused at Connect on a platform where the engine has no
+     * OpenSSL.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCP Broker")
     bool bTls = false;
+
+    /**
+     * With bTls: the PEM of the CA the broker's certificate chains to, when
+     * it is a private one (a broker on the LAN or an edge box). Empty: the
+     * engine's root certificates only, which is right for a public
+     * certificate and wrong for a private one.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCP Broker")
+    FString CaPem;
 
     /** Sent as X-Provider-Token when the broker has provider authentication. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCP Broker")

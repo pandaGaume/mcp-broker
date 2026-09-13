@@ -16,6 +16,9 @@
 #include "mcpb/mcpb_provider.h"
 #include "mcpb/mcpb_mux.h"
 #include "mcpb_port_unreal.h"
+#if MCPB_UNREAL_TLS
+#include "mcpb_port_tls.h"
+#endif
 
 class UMcpBrokerSubsystem;
 
@@ -48,6 +51,10 @@ private:
     };
 
     static void OnEvent(void* User, const mcpb_event_t* Event);
+#if MCPB_UNREAL_TLS
+    /** OpenSSL's verify callback: the engine's certificate manager gets a say (pinning). */
+    static int SslCertVerify(int PreverifyOk, struct x509_store_ctx_st* Context);
+#endif
     void DrainOutbox();
     void Deliver(int32 SlotIndex, const char* Payload, size_t Length);
 
@@ -58,13 +65,21 @@ private:
     // life of the link: host, token header, slot names.
     TArray<uint8> HostUtf8;
     TArray<uint8> HeadersUtf8;
+    TArray<uint8> CaPemUtf8;
     TArray<TArray<uint8>> SlotNamesUtf8;
     TArray<mcpb_mux_slot_t> Slots;
 
     TArray<uint8> Rx;
     TArray<uint8> Tx;
 
+    // The socket port, and the port libmcpb is handed: the same one, or the
+    // TLS port stacked on it when bTls.
     mcpb_port_unreal_t PortCtx;
+    mcpb_port_t InnerPort;
+#if MCPB_UNREAL_TLS
+    mcpb_port_tls_t TlsCtx;
+    bool bTlsPortReady = false;
+#endif
     mcpb_port_t Port;
     mcpb_provider_t Dedicated; // used when !Options.bMultiplex
     mcpb_mux_t Mux;            // used when Options.bMultiplex

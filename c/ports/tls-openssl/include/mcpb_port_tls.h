@@ -67,7 +67,9 @@ typedef struct
      *
      * Whatever the context says, verification is set per connection by
      * this port: SSL_VERIFY_PEER and TLS 1.2 as the floor. A borrowed
-     * context is a source of trust, not a way to turn it off. */
+     * context is a source of trust, not a way to turn it off. Its verify
+     * callback, if any, is kept: that is where a host hooks certificate
+     * pinning. */
     void *ssl_ctx;
 } mcpb_port_tls_config_t;
 
@@ -96,6 +98,11 @@ typedef struct
 
 /* Fills in `port` over `ctx`, encrypting what goes through `inner`. `inner`
  * must outlive `ctx`. `cfg` may be NULL for the default store.
+ *
+ * After it returns, `ctx->ssl_ctx` is the SSL_CTX every connection will be
+ * made from, owned or borrowed: a host may add roots to its store or set a
+ * verify callback on it before the first `open` (Unreal does both, with its
+ * certificate manager, the way the engine's HTTP module does for curl).
  *
  * Returns MCPB_OK; MCPB_ERR_ARG when `ca_pem` holds no certificate; or
  * MCPB_ERR_IO when OpenSSL refuses to build a context. */

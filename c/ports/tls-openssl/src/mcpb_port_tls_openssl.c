@@ -141,8 +141,12 @@ static int t_open(void *ctx, const char *host, uint16_t port, int tls, int timeo
      * nothing worth the bytes. Partial writes are fine, the send loop
      * accounts for them; and a write retried after WANT_READ resumes at
      * the same offset of the same buffer, which is what the engine
-     * requires. */
-    SSL_set_verify(s, SSL_VERIFY_PEER, NULL);
+     * requires.
+     *
+     * The context's verify callback is kept: a host that pins public keys
+     * (Unreal's certificate manager does it through that callback) put it
+     * there, and forcing the mode must not silence it. */
+    SSL_set_verify(s, SSL_VERIFY_PEER, SSL_CTX_get_verify_callback((SSL_CTX *)t->ssl_ctx));
     (void)SSL_set_min_proto_version(s, TLS1_2_VERSION);
     SSL_set_mode(s, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 

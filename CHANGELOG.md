@@ -50,6 +50,16 @@ repository; the changes it needed for this release are listed under
   on UE 5.7 against the broker: both slots served, `_all` per slot. libmcpb
   gains `MCPB_API` (`MCPB_BUILD_DLL` / `MCPB_USE_DLL`) for a build that calls
   it across shared-library boundaries; empty everywhere else.
+- **c** `c/unreal`: wss:// from the `McpBroker` plugin. `bTls` stacks the
+  TLS port on the socket port, compiled against the OpenSSL the engine ships;
+  the engine's root certificates and the project's pinned keys come from the
+  SSL module's certificate manager, put on the port's context the way the
+  engine's HTTP module does for libcurl; `CaPem` adds a private CA. A refused
+  certificate reaches `OnLinkEvent` with the port's own words in `Detail`.
+  The TLS port itself now keeps a context's verify callback when it forces
+  `SSL_VERIFY_PEER` per connection, which is where that pinning hook lives.
+  Run on UE 5.7 against the broker on HTTPS, accepted with the CA and
+  refused without.
 - **c** libmcpb 0.4.0: TLS for the ports that only move bytes.
   `c/ports/tls-openssl` is a port over another port: OpenSSL driven through
   memory BIOs, so it never sees a socket and stacks on the host port today

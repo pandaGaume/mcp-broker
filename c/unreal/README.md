@@ -14,7 +14,7 @@ Developed and run on UE 5.7 with Visual Studio 2022. No CI: there is no engine o
 
 ## The port: `ports/unreal`
 
-[`mcpb_port_unreal.h`](../ports/unreal/include/mcpb_port_unreal.h): `open` resolves with `ISocketSubsystem::GetAddressInfo`, connects non-blocking and waits with the caller's timeout, then `SetNoDelay`; `send` loops `FSocket::Send` until the last byte; `recv` waits with `FSocket::Wait` and maps a readable socket with nothing to read to `MCPB_ERR_CLOSED`; `now_ms` is `FPlatformTime::Seconds`; `random` draws sixteen bytes at a time from `FGuid::NewGuid`. Plain TCP: `tls != 0` is refused, never downgraded. `wss://` from Unreal is a later port on the engine's `Ssl` module.
+[`mcpb_port_unreal.h`](../ports/unreal/include/mcpb_port_unreal.h): `open` resolves with `ISocketSubsystem::GetAddressInfo`, connects non-blocking and waits with the caller's timeout, then `SetNoDelay`; `send` loops `FSocket::Send` until the last byte; `recv` waits with `FSocket::Wait` and maps a readable socket with nothing to read to `MCPB_ERR_CLOSED`; `now_ms` is `FPlatformTime::Seconds`; `random` draws sixteen bytes at a time from `FGuid::NewGuid`. Plain TCP: on its own, `tls != 0` is refused, never downgraded. `wss://` is the TLS port of [`ports/tls-openssl`](../ports/tls-openssl/) stacked on this one, see below.
 
 Why the engine's sockets rather than its `IWebSocket`: `IWebSocket` would have given TLS for free, at the price of a second reconnection policy, a second envelope codec and a second set of events, in C++, with no bench. With `FSocket`, libmcpb is identical on ESP32 and Unreal, and `ISocketSubsystem` already carries every platform the engine ships on.
 
@@ -43,6 +43,21 @@ Broker->Connect(Options);
 
 `Disconnect` (or the subsystem's own `Deinitialize`) closes the socket, which frees every slot on the broker, and joins the worker.
 
+### wss://
+
+`bTls = true` stacks the TLS port (`ports/tls-openssl`, compiled into the module as one more `.c` wrapper) on the socket port, against the OpenSSL the engine ships: the same static library its `SSL` and `HTTP` modules use, on the platforms where the engine has it (Windows, Mac, Linux, iOS, Android; elsewhere `MCPB_UNREAL_TLS` is 0 and `bTls` is refused at `Connect`, in words).
+
+What the broker's certificate is verified against: the engine's root certificates and the project's pinned public keys, obtained from the `SSL` module's certificate manager and put on the port's context exactly the way `CurlHttp.cpp` does it for libcurl (`AddCertificatesToSslContext`, then a verify callback that asks `VerifySslCertificates` for `Host`); plus `CaPem`, the PEM of a private CA, for a broker on the LAN or an edge box whose certificate chains to nothing public. The name is checked against `Host`, DNS name or IP literal. There is no way to skip any of it.
+
+Why the port's own context rather than one from `ISslManager::CreateSslContext`: in a modular (editor) build that call returns null, because the SSL module's OpenSSL is another copy of the library than the one linked into this module; the engine's HTTP module has the same constraint and solves it the same way, by letting the certificate manager work on a context libcurl created.
+
+A refused certificate reaches `OnLinkEvent` as `RetryFailed` with `Error` "TLS handshake or certificate refused" and `Detail` saying why (`self signed certificate`, `hostname mismatch`, ...), the port's own words, since libmcpb never sees TLS.
+
+```cpp
+Options.bTls = true;
+FFileHelper::LoadFileToString(Options.CaPem, TEXT("C:/certs/broker-ca.pem"));   // omit for a public certificate
+```
+
 ## The sample: `Sample/`
 
 `AMcpEchoActor`, spawned by `AMcpBrokerSampleGameMode` on the engine's Entry map, publishes `ue-echo` (in `_all`) and `ue-echo-b` (not in `_all`) on one socket and serves both with the static `echo` tool shared with the host and ESP32 samples (`../samples/lib/static_provider.c`, pulled in through a wrapper). Every link event is logged in the same line format as the other two samples.
@@ -51,8 +66,12 @@ Build the editor target, then run headless:
 
 ```powershell
 & "C:\Program Files\EpicGames\UE_5.7\Engine\Build\BatchFiles\Build.bat" McpBrokerSampleEditor Win64 Development -Project="<repo>\c\unreal\Sample\McpBrokerSample.uproject" -WaitMutex
-& "C:\Program Files\EpicGames\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<repo>\c\unreal\Sample\McpBrokerSample.uproject" -game -log -nullrhi -unattended -McpBrokerHost=127.0.0.1 -McpBrokerPort=3000 -McpBrokerExitAfter=60
+& "C:\Program Files\EpicGames\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<repo>\c\unreal\Sample\McpBrokerSample.uproject" -game -log -nullrhi -unattended "-McpBrokerHost=127.0.0.1" "-McpBrokerPort=3000" "-McpBrokerExitAfter=60"
 ```
+
+(Quote the `-Name=value` arguments in PowerShell: unquoted, `-McpBrokerHost=127.0.0.1` reaches the engine as `127`.)
+
+Over `wss://`, against the broker on HTTPS with the test certificate of `c/tests/tls` (`MCP_BROKER_TLS_CERT` / `MCP_BROKER_TLS_KEY` on the broker), add `"-McpBrokerCa=<repo>\c\tests\tls\test-cert.pem"` (which implies `-McpBrokerTls`); the log then reads `dialing wss://127.0.0.1:3443/providers with 2 slot(s), engine roots + CaPem` and `connected`. With `-McpBrokerTls` alone the same broker is refused: `attempt 1 failed: TLS handshake or certificate refused: self signed certificate`. Both were run on UE 5.7.
 
 Then, from any MCP client, `tools/call echo` on `http://127.0.0.1:3000/ue-echo/mcp` and on `/ue-echo-b/mcp`, and `ue-echo-echo` on `/_all/mcp` (which does not list `ue-echo-b-echo`: aggregate is per slot). `Saved/Logs/McpBrokerSample.log` shows the `rx <slot> <method>` lines. `-McpBrokerSlot=<name>` renames the pair.
 
