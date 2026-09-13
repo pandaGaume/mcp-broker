@@ -5,7 +5,12 @@
         { "name": "🔌 provider", "path": "node/packages/provider" },
         { "name": "🔷 dotnet", "path": "dotnet" },
         { "name": "🪼 c", "path": "c" },
-        { "name": "⚡ espressif", "path": "c/espressif" }
+        { "name": "⚡ espressif", "path": "c/espressif" },
+        // The ESP-IDF extension only shows its status bar and commands for a
+        // workspace folder that IS an IDF project root (a CMakeLists.txt with
+        // project.cmake). c/espressif is not one; the sample is. Pick it with
+        // "ESP-IDF: Pick a Workspace Folder".
+        { "name": "⚡ espressif / provider", "path": "c/espressif/samples/provider" }
     ],
     "settings": {
         // The ESP-IDF extension reads these per workspace folder; the
