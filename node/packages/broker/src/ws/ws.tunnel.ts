@@ -19,7 +19,7 @@ import type { IBrokerContext, IBrokerProviderInfo, BrokerProviderTransport } fro
 // Imported from the defining module rather than the barrel: these two are the
 // optional `IBrokerContext` extensions `broker_diagnose` reads, and the barrel
 // does not re-export them yet.
-import type { IBrokerSecurityInfo } from "../broker/broker.context";
+import type { IBrokerAggregateInfo, IBrokerSecurityInfo } from "../broker/broker.context";
 import { AggregateServer } from "../broker/aggregate/aggregate.server";
 import {
     HttpAuthGuard,
@@ -431,6 +431,23 @@ export class WsTunnel implements IBrokerContext {
     /** Slot the stdio bridge is pinned to, or `null` when there is no bridge. */
     public getStdioBridgeTarget(): string | null {
         return this._options.stdioClient?.providerName ?? null;
+    }
+
+    /**
+     * Membership of the `_all` aggregate, for `broker_diagnose`.
+     *
+     * Before `start()` the aggregate server does not exist yet, so an enabled
+     * aggregate reports no provider rather than `undefined`: "cannot be read"
+     * is for a host that has no aggregate at all, not for one that has not
+     * started. Without this accessor the CLI's own broker skipped the
+     * `aggregate-empty` check and told the operator to call tools/list on
+     * `_all` by hand.
+     */
+    public getAggregateInfo(): IBrokerAggregateInfo {
+        return {
+            enabled: this._options.enableAggregateProvider !== false,
+            providers: this._aggregateServer?.providerNames ?? [],
+        };
     }
 
     public getProvidersInfo(): IBrokerProviderInfo[] {

@@ -163,6 +163,16 @@ export class AggregateServer implements IMessageTransport {
         }
     }
 
+    /**
+     * Slot names currently contributing to the aggregate, in registration
+     * order. A provider whose handshake failed is not in it: `addProvider`
+     * removed it. This is what `broker_diagnose` reads through
+     * `IBrokerContext.getAggregateInfo()`.
+     */
+    get providerNames(): readonly string[] {
+        return [...this._sessions.keys()];
+    }
+
     /** Removes a provider from the aggregate. */
     removeProvider(name: string): void {
         const session = this._sessions.get(name);

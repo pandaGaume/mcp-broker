@@ -46,6 +46,17 @@ repository; the changes it needed for this release are listed under
   (`HTTP 401`). "protocol violation" alone named nothing; one was seen on the
   board and could not be explained without the bytes.
 
+## [1.3.1] - 2026-09-13
+
+### Fixed
+
+- **broker** `broker_diagnose` on the CLI's own broker skipped the
+  `aggregate-empty` and `aggregate-missing-live-slots` checks with "this
+  broker context does not implement getAggregateInfo()", and sent the operator
+  to call `tools/list` on `_all` by hand. `WsTunnel` now implements the
+  accessor (`AggregateServer.providerNames` behind it), so the two rules run
+  everywhere the tunnel is the context, the CLI included.
+
 ## [1.3.0] - 2026-09-02
 
 The theme of this release is **turning silent failures into named ones**. Nearly

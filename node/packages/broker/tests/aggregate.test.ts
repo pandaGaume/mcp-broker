@@ -166,6 +166,24 @@ describe("aggregate _all slot", () => {
         expect(client.notifications).toContain("notifications/tools/list_changed");
     });
 
+    it("reports its membership through getAggregateInfo, so broker_diagnose can read it", async () => {
+        // `weather` was closed by the previous test; `db` is still registered.
+        const info = tunnel.getAggregateInfo();
+        expect(info.enabled).toBe(true);
+        expect(info.providers).toContain("db");
+        expect(info.providers).not.toContain("weather");
+
+        const client = await rpcClient(`${BASE}/_broker`);
+        sockets.push(client.ws);
+        await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+        const diagnosis = (await client.request("tools/call", { name: "broker_diagnose", arguments: {} })).result as {
+            content: { type: string; text: string }[];
+        };
+        const report = JSON.parse(diagnosis.content[0].text) as { checksSkipped: { id: string }[]; problems: { id: string }[] };
+        expect(report.checksSkipped.map((c) => c.id)).not.toContain("aggregate-empty");
+        expect(report.problems.map((p) => p.id)).not.toContain("aggregate-empty");
+    });
+
     it("aggregates the broker's own introspection tools into `_all`", async () => {
         const client = await rpcClient(`${BASE}/_all`);
         sockets.push(client.ws);
