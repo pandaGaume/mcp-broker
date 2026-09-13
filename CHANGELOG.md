@@ -40,6 +40,16 @@ repository; the changes it needed for this release are listed under
   IDF 6.0 image; 7.4 KB of flash code and 13 KB of RAM with the defaults.
   Validated on an Arduino Nano ESP32 against the 1.3.0 broker: own slot,
   `_all`, broker kill and restart, slot takeover after a reboot.
+- **c** `c/unreal/`: the `McpBroker` Unreal Engine 5 plugin, on the same
+  libmcpb compiled from its single copy (one-line wrappers, UBT compiles them
+  as C) and a port over `ISocketSubsystem` / `FSocket` (`c/ports/unreal`).
+  `UMcpBrokerSubsystem`: one multiplexed socket per game instance for every
+  slot the process publishes, a worker thread around libmcpb, handlers and
+  link events on the game thread, `Send` from any thread. A host project with
+  no content runs two `echo` slots on the engine's Entry map. Built and run
+  on UE 5.7 against the broker: both slots served, `_all` per slot. libmcpb
+  gains `MCPB_API` (`MCPB_BUILD_DLL` / `MCPB_USE_DLL`) for a build that calls
+  it across shared-library boundaries; empty everywhere else.
 - **c** libmcpb 0.3.0: the multiplexed `/providers` endpoint (`mcpb_mux.h`),
   several slots on one socket with the tunnel envelope, one registration per
   slot at every connection, `aggregate` per slot, and a `SLOT_REFUSED` event

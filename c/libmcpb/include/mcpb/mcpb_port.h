@@ -78,7 +78,7 @@ typedef struct mcpb_port
 
 /* Checks each field. A missing one would otherwise show up as a jump to
  * address zero, far from the offending line. */
-int mcpb_port_check(const mcpb_port_t *port);
+MCPB_API int mcpb_port_check(const mcpb_port_t *port);
 
 #ifdef __cplusplus
 } /* extern "C" */

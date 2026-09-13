@@ -1,0 +1,22 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.3.0",
+    "FriendlyName": "MCP Broker",
+    "Description": "Publishes MCP servers running in this process as provider slots on a CyanMycelium mcp-broker, through one WebSocket for all of them. The tunnel client is libmcpb, the same C code that runs on an ESP32.",
+    "Category": "Networking",
+    "CreatedBy": "Guillaume Pelletier (CyanMycelium)",
+    "CreatedByURL": "https://github.com/pandaGaume/mcp-broker",
+    "DocsURL": "https://github.com/pandaGaume/mcp-broker/tree/main/c/unreal",
+    "EngineVersion": "5.7.0",
+    "CanContainContent": false,
+    "IsBetaVersion": true,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "McpBroker",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ]
+}
