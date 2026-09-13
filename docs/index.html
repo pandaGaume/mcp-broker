@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>@cyanmycelium/mcp-broker - WebSocket broker for the Model Context Protocol</title>
+  <title>@cyanmycelium/mcp-broker - one MCP surface, from the simulator to the field</title>
   <meta name="description" content="Routes MCP clients to multiple Model Context Protocol providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides." />
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -73,6 +73,7 @@
       <a href="#architecture">Architecture</a>
       <a href="#quick-start">Quick start</a>
       <a href="#grammar">Grammar</a>
+      <a href="#sim2world">Sim → World</a>
       <a href="#install">Install</a>
       <a class="news-link" href="mhs.html">MHS</a>
       <a href="demo-motor.html">Demo</a>
@@ -88,7 +89,7 @@
   <div class="shell">
     <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
 
-    <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · v0.1</div>
+    <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · v1.3</div>
 
     <a class="newsflash" href="mhs.html">
       <span class="nf-tag">New</span>
@@ -106,8 +107,9 @@
     </p>
 
     <div class="badges">
-      <span class="badge accent"><span class="k">status</span><span class="v">v0.1</span></span>
-      <span class="badge"><span class="k">npm</span><span class="v">v0.1.0</span></span>
+      <span class="badge accent"><span class="k">status</span><span class="v">v1.3</span></span>
+      <span class="badge"><span class="k">npm</span><span class="v">v1.3.1</span></span>
+      <span class="badge"><span class="k">device</span><span class="v">ESP32 · UE5 · C99</span></span>
       <span class="badge"><span class="k">license</span><span class="v">Apache-2.0</span></span>
       <span class="badge"><span class="k">node</span><span class="v">≥&nbsp;20.11</span></span>
       <span class="badge"><span class="k">dotnet</span><span class="v">planned</span></span>
@@ -611,7 +613,7 @@
 </code></pre>
     </div>
 
-    <p>Drop additional <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code> files to override packaged tool/resource descriptions for your organization - no fork required. Full reference in <a href="https://github.com/pandaGaume/mcp-broker/blob/main/node/docs/config.md" target="_blank" rel="noopener">node/docs/config.md</a>.</p>
+    <p>Drop additional <code class="inline">grammars/&lt;userAgent&gt;/&lt;locale&gt;.json</code> files to override packaged tool/resource descriptions for your organization - no fork required. Full reference in <a href="https://github.com/pandaGaume/mcp-broker/blob/main/node/packages/broker/docs/config.md" target="_blank" rel="noopener">node/docs/config.md</a>.</p>
 
     <h3><span class="h3-num">8.2</span>Environment variables</h3>
 
@@ -648,9 +650,85 @@
 </section>
 
 <!-- =============================== INSTALL ============================= -->
+<!-- ================================ SIM TO WORLD ======================= -->
+<section id="sim2world">
+  <div class="shell">
+    <div class="section-num">09 - Sim → World</div>
+    <h2>The same tools, in the simulator and in the field</h2>
+
+    <p class="intro">The providers do not have to be Node processes. The tunnel client also exists in C99, <code>libmcpb</code>, with no allocation and no platform header, and it runs in the two places that need to agree with each other: on the device, and in the simulator of that device.</p>
+
+    <div class="stack" role="img" aria-label="Unreal Engine and ESP32 boards publish the same slots to one broker">
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">SIM</span>
+          <span class="stack-layer-name">UNREAL ENGINE 5</span>
+        </div>
+        <div class="stack-layer-body">The <code>McpBroker</code> plugin: one game-instance subsystem, one multiplexed socket on <code>/providers</code> for every simulated device the engine hosts, handlers and link events on the game thread, libmcpb on a worker thread. An engine is one process; it gets one socket.</div>
+      </div>
+      <div class="stack-arrow" aria-hidden="true">
+        <svg width="14" height="22" viewBox="0 0 14 22"><path d="M7 0v18M2 14l5 5 5-5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">HUB</span>
+          <span class="stack-layer-name">MCP-BROKER</span>
+        </div>
+        <div class="stack-layer-body">Same slot names, same tool schemas, same <code>_all</code>. The agent that learned to drive <code>pump-1</code> in the simulator drives the real <code>pump-1</code> with the same calls: nothing on its side changes except which provider answers. The broker does not care whether a slot is a game object or a board on a bench.</div>
+      </div>
+      <div class="stack-arrow" aria-hidden="true">
+        <svg width="14" height="22" viewBox="0 0 14 22"><path d="M7 0v18M2 14l5 5 5-5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="stack-layer">
+        <div class="stack-layer-head">
+          <span class="stack-layer-idx">IOT</span>
+          <span class="stack-layer-name">ESP32 BOARDS</span>
+        </div>
+        <div class="stack-layer-body">The <code>mcpb_esp</code> ESP-IDF component: one FreeRTOS task, esp-tls, link events on <code>esp_event</code>, 7.4 KB of flash and 13 KB of RAM. One socket per board on <code>/provider/&lt;name&gt;</code>, reconnection with a jittered window, a slot that comes back by itself after a reboot. Validated on an Arduino Nano ESP32 under an overnight soak.</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 26%;">Piece</th>
+            <th style="width: 34%;">What it is</th>
+            <th style="width: 40%;">Where</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>libmcpb</code></td>
+            <td>The tunnel client in C99: RFC 6455 client, dedicated and multiplexed endpoints, reconnection, immediate link events with the peer's refusal. Six-function port, 153 checks without a network. The multiplexed endpoint is opt-in at build time, so a one-provider firmware carries none of it.</td>
+            <td><a href="https://github.com/pandaGaume/mcp-broker/tree/main/c/libmcpb" target="_blank" rel="noopener">c/libmcpb</a></td>
+          </tr>
+          <tr>
+            <td><code>mcpb_esp</code></td>
+            <td>The ESP-IDF component and a Wi-Fi sample. Built for the ESP32-S3 in CI with the official IDF image.</td>
+            <td><a href="https://github.com/pandaGaume/mcp-broker/tree/main/c/espressif" target="_blank" rel="noopener">c/espressif</a></td>
+          </tr>
+          <tr>
+            <td><code>McpBroker</code></td>
+            <td>The Unreal Engine 5 plugin and a host project with no content: two echo slots on one socket, built and run on UE 5.7.</td>
+            <td><a href="https://github.com/pandaGaume/mcp-broker/tree/main/c/unreal" target="_blank" rel="noopener">c/unreal</a></td>
+          </tr>
+          <tr>
+            <td>ports</td>
+            <td>The six functions per platform: host (Linux, macOS, Windows), espressif (esp-tls, lwip), unreal (<code>ISocketSubsystem</code>). Every port is the same shape, and the library is compiled from its single copy everywhere.</td>
+            <td><a href="https://github.com/pandaGaume/mcp-broker/tree/main/c/ports" target="_blank" rel="noopener">c/ports</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The C side is transport only. <code>libmcpb</code> carries JSON-RPC bytes and never interprets them, so the MCP layer stays whatever the host already has: a C++ server on the board and in the engine, mcp-core in Node or a browser. That boundary is what lets one implementation, benched against a fake link, run unchanged from a 240 KB microcontroller to a game engine.</p>
+  </div>
+</section>
+
 <section id="install">
   <div class="shell">
-    <div class="section-num">09 - Install</div>
+    <div class="section-num">10 - Install</div>
     <h2>Install</h2>
 
     <div class="code-wrap">

@@ -29,6 +29,8 @@ A **client** addresses a provider by name. Multiple clients can target the same 
 | Remote upstream | Broker dials out to a URL over Streamable HTTP, SSE or WebSocket | (none) | Config key `mcpServers[]` |
 | `.mcpb` bundle | Broker verifies a detached signature, unpacks, and spawns the bundle as a stdio upstream | (none) | Config key `mcpbBundles[]`. A bundle that fails verification is skipped and never spawned |
 | Loopback | `tunnel.registerLoopbackProvider(name, transport)` | `LoopbackTransport` | Same process, no socket. Outranks a WebSocket provider of the same name |
+| Dedicated WebSocket, from C | `ws[s]://broker/provider/<name>` | `mcpb_provider_t` ([`c/libmcpb`](../c/libmcpb/)) | The same framing as `DirectTransport`, from a firmware or a native process. On the ESP32 through the `mcpb_esp` component |
+| Multiplexed WebSocket, from C | `ws[s]://broker/providers` | `mcpb_mux_t` ([`c/libmcpb`](../c/libmcpb/), opt-in at build time) | The same envelope as `MultiplexTransport`. What the Unreal Engine plugin uses: one socket for every slot the engine hosts |
 
 > **The pairing rule.** A provider's transport and its URL path are a matched
 > pair: `DirectTransport` with `/provider/<name>`, `MultiplexTransport` with
@@ -43,6 +45,14 @@ The three configured kinds (`stdioUpstreams`, `mcpServers`, `mcpbBundles`) all
 report `transport: "stdio"` in `providers_list`, because the broker tracks them
 in one upstream registry. A `transport: "stdio"` entry is therefore not
 necessarily a child process; it may be a remote URL.
+
+The C client speaks exactly the two WebSocket framings above and nothing the
+broker does not already accept: a board and an Unreal instance are ordinary
+providers, indistinguishable from a Node one in `providers_list` (`transport:
+"ws"`). That is what makes the simulator-to-field story work without a line
+of broker code: a simulated `pump-1` in the engine and a real `pump-1` on a
+board publish the same slot name and the same tool schemas, and the agent's
+calls do not change when one replaces the other. See [`c/README.md`](../c/README.md).
 
 ## Client transports (outgoing)
 
