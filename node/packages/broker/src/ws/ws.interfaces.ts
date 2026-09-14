@@ -170,6 +170,12 @@ export interface IProviderState {
     /** The active provider WebSocket, or `null` when the provider is not connected. */
     ws: WebSocket | null;
     /**
+     * `Date.now()` when the provider currently serving the slot attached
+     * (socket, upstream or loopback), `null` while nothing serves it. What
+     * `providers_list` reports as `connectedSince`.
+     */
+    connectedSinceMs: number | null;
+    /**
      * In-flight requests, keyed by the **broker-assigned** id that was written
      * into the frame sent to the provider. See {@link IPendingRequest.clientId}
      * for why the client's own id cannot be the key.

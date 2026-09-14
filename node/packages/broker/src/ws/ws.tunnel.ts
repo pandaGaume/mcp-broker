@@ -482,10 +482,17 @@ export class WsTunnel implements IBrokerContext {
             connected = false;
         }
 
+        // `connected` is decided above from what is actually open; the
+        // timestamp only says since when, and is withheld when they disagree
+        // (an upstream that opened once and is now closed keeps no date).
+        const since = connected ? state.connectedSinceMs : null;
         return {
             name,
             transport,
             connected,
+            aggregate: this._aggregateServer?.providerNames.includes(name) ?? false,
+            connectedSince: since !== null ? new Date(since).toISOString() : null,
+            connectedForMs: since !== null ? Math.max(0, Date.now() - since) : null,
             clientCount: state.wsClients.size,
             sessionCount: state.sseSessions.size + state.httpSessions.size,
             pendingCount: state.pending.size,
@@ -513,6 +520,7 @@ export class WsTunnel implements IBrokerContext {
 
         const state = this._getOrCreateProviderState(name);
         this._loopbackProviders.set(name, transport);
+        state.connectedSinceMs = Date.now();
 
         transport.onMessage = (data: string) => this._routeFromProvider(state, name, data);
         transport.onClose = () => {
@@ -698,9 +706,10 @@ export class WsTunnel implements IBrokerContext {
                         const state = this._providers.get(cfg.name);
                         if (state) this._failProviderDisconnected(state, cfg.name);
                     };
-                    if (cfg.aggregate) {
-                        upstream.onOpen = () => void this._aggregateServer?.addProvider(cfg.name);
-                    }
+                    upstream.onOpen = () => {
+                        this._getOrCreateProviderState(cfg.name).connectedSinceMs = Date.now();
+                        if (cfg.aggregate) void this._aggregateServer?.addProvider(cfg.name);
+                    };
                     this._upstreams.set(cfg.name, upstream);
                     upstream.connect();
                 };
@@ -1938,6 +1947,7 @@ export class WsTunnel implements IBrokerContext {
 
         const state = this._getOrCreateProviderState(name);
         state.ws = ws;
+        state.connectedSinceMs = Date.now();
         this._watchProviderSocket(ws);
         if (providerPrincipal) {
             this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
@@ -2225,6 +2235,7 @@ export class WsTunnel implements IBrokerContext {
                 providerNames.add(name);
                 const state = this._getOrCreateProviderState(name);
                 state.ws = ws;
+                state.connectedSinceMs = Date.now();
                 if (providerPrincipal) {
                     this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
                 }
@@ -2479,6 +2490,7 @@ export class WsTunnel implements IBrokerContext {
      * close handlers (dedicated WS, multiplexed WS, loopback).
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
+        state.connectedSinceMs = null;
         // Echoing the **client's** id rather than `null` or the broker's: a
         // Streamable HTTP session matches the answer to its held-open POST by
         // the id it chose, so an unaddressed error would leave that request
@@ -2516,6 +2528,7 @@ export class WsTunnel implements IBrokerContext {
         if (!state) {
             state = {
                 ws: null,
+                connectedSinceMs: null,
                 pending: new Map(),
                 sseSessions: new Map(),
                 httpSessions: new Map(),

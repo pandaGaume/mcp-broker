@@ -118,7 +118,7 @@ Unreal Engine 5, publishing two slots on one socket:
 & "$UE\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "c\unreal\Sample\McpBrokerSample.uproject" -game -nullrhi -McpBrokerHost=127.0.0.1
 ```
 
-In both cases `tools/call echo` on `http://<broker>:3000/<slot>/mcp` answers from the device or the engine, and `_all` lists the slot next to every other provider. [`c/README.md`](c/README.md) is the map of that folder.
+In both cases the broker is this repository's, started from a checkout with `npm start` in `node/packages/broker` after `npm run build` in `node/` (it listens on `0.0.0.0:3000`, so the board reaches it at the PC's address), and `tools/call echo` on `http://<broker>:3000/<slot>/mcp` answers from the device or the engine, and `_all` lists the slot next to every other provider. [`c/README.md`](c/README.md) is the map of that folder.
 
 ## Documentation
 

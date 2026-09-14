@@ -4,7 +4,7 @@
             "description": "Récupère l'identité du broker : nom, version, uptime, hôte, port, TLS et chemins URL. À appeler en premier pour savoir à qui tu parles."
         },
         "providers_list": {
-            "description": "Liste tous les emplacements de providers de ce broker, connectés ou non. Chaque entrée indique le type de transport, le nombre de clients actuels et le nombre de requêtes en cours. Utilise-le pour découvrir vers qui tu peux router."
+            "description": "Liste tous les emplacements de providers de ce broker, connectés ou non. Chaque entrée indique le type de transport, l'appartenance à `_all`, la date de connexion du provider, le nombre de clients actuels et le nombre de requêtes en cours. Les compteurs sont ceux des appelants du slot, pas du provider : un provider connecté que personne n'appelle affiche des zéros. Utilise-le pour découvrir vers qui tu peux router."
         },
         "provider_status": {
             "description": "Récupère le statut complet d'un emplacement de provider par son nom. Retourne une erreur si l'emplacement n'existe pas, commence par providers_list si tu n'es pas sûr du nom.",

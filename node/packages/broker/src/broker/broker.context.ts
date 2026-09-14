@@ -129,7 +129,29 @@ export interface IBrokerProviderInfo {
     /** `true` iff the slot is reachable for routing right now. */
     connected: boolean;
 
-    /** Number of raw-WebSocket MCP clients on this slot. */
+    /**
+     * `true` when the provider is a member of the `_all` aggregate right now:
+     * it opted in and its `initialize` went through. The other side of
+     * {@link IBrokerAggregateInfo.providers}, per slot.
+     */
+    aggregate: boolean;
+
+    /**
+     * When the provider now serving the slot attached, ISO-8601; `null`
+     * while nothing serves it. Survives nothing: a reconnection is a new
+     * date, which is the point (a slot that says "since 3 s ago" every time
+     * you look is flapping).
+     */
+    connectedSince: string | null;
+
+    /** Milliseconds since `connectedSince`, computed at the time of the call; `null` when disconnected. */
+    connectedForMs: number | null;
+
+    /**
+     * Number of raw-WebSocket MCP clients on this slot. Clients, not the
+     * provider: a connected provider nobody is calling reads
+     * `clientCount: 0, sessionCount: 0, pendingCount: 0`.
+     */
     clientCount: number;
 
     /** Number of long-lived sessions (SSE + Streamable HTTP GET streams). */

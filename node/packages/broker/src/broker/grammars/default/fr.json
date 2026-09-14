@@ -4,7 +4,7 @@
             "description": "Retourne le nom, la version, l'uptime, l'hôte, le port, l'état TLS et les chemins URL du broker."
         },
         "providers_list": {
-            "description": "Liste tous les emplacements de providers connus du broker (connectés et déconnectés), avec leur type de transport, leur nombre de clients et le nombre de requêtes en attente."
+            "description": "Liste tous les emplacements de providers connus du broker (connectés et déconnectés), avec leur type de transport, leur appartenance à `_all`, la date de connexion du provider, leur nombre de clients et le nombre de requêtes en attente. Les compteurs sont ceux des appelants du slot, pas du provider : un provider connecté que personne n'appelle affiche des zéros."
         },
         "provider_status": {
             "description": "Retourne l'état d'un emplacement de provider identifié par son nom. Échoue si le provider n'existe pas.",

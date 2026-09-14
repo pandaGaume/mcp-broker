@@ -22,6 +22,18 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** `providers_list` and `provider_status` entries carry the
+  provider's side, not only the slot's callers: `aggregate` (in `_all` right
+  now), `connectedSince` (ISO-8601, when the provider now serving the slot
+  attached; `null` while nothing serves it) and `connectedForMs`. The three
+  counts were being read as "the board is connected but everything is zero":
+  they count the slot's callers, and the descriptions now say so in every
+  grammar. Same fields on `IBrokerProviderInfo` for the library.
+- **docs** How to run the broker of a checkout, from `node/packages/broker`
+  with `npm start` and a local `.mcp-broker/config.json`, referenced from
+  the C folder, the ESP-IDF README and the root quick start: the samples,
+  the roundtrip and the soak target that broker.
+
 - **c** A new `c/` folder, the device side of the tunnel in C99. `libmcpb`
   (moved from the CyanMycelium repository, now 0.2.0) gains the `_all` opt-in
   (`aggregate`, sending `notifications/register` as the first frame after

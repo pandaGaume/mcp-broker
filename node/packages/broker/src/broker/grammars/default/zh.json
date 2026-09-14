@@ -4,7 +4,7 @@
             "description": "返回 broker 的名称、版本、运行时间、主机、端口、TLS 状态和已配置的 URL 路径。"
         },
         "providers_list": {
-            "description": "列出 broker 已知的所有 provider 槽位（已连接和未连接），包括传输类型、客户端数量和待处理请求数量。"
+            "description": "列出 broker 已知的所有 provider 槽位（已连接和未连接），包括传输类型、是否属于 `_all`、provider 的接入时间、客户端数量和待处理请求数量。计数针对槽位的调用方而非 provider：已连接但无人调用的 provider 显示全零。"
         },
         "provider_status": {
             "description": "返回由名称标识的某个 provider 槽位的状态。如果槽位不存在则返回错误。",

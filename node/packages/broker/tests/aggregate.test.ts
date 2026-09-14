@@ -184,6 +184,34 @@ describe("aggregate _all slot", () => {
         expect(report.problems.map((p) => p.id)).not.toContain("aggregate-empty");
     });
 
+    it("tells, per slot, whether the provider is in _all and since when it attached", async () => {
+        // `weather` is gone, `db` still serves its slot and opted in.
+        const db = tunnel.getProviderInfo("db");
+        expect(db?.connected).toBe(true);
+        expect(db?.aggregate).toBe(true);
+        expect(typeof db?.connectedSince).toBe("string");
+        expect(Number.isNaN(Date.parse(db?.connectedSince ?? ""))).toBe(false);
+        expect(db?.connectedForMs).toBeGreaterThanOrEqual(0);
+        // Nobody is calling db right now: the counts are the slot's callers,
+        // not the provider, and read zero for a connected provider.
+        expect(db?.clientCount).toBe(0);
+        expect(db?.pendingCount).toBe(0);
+
+        const weather = tunnel.getProviderInfo("weather");
+        expect(weather?.connected).toBe(false);
+        expect(weather?.aggregate).toBe(false);
+        expect(weather?.connectedSince).toBeNull();
+        expect(weather?.connectedForMs).toBeNull();
+
+        // The broker's own slot: loopback, attached at start, in _all.
+        const broker = tunnel.getProviderInfo("_broker");
+        expect(broker?.transport).toBe("loopback");
+        expect(broker?.aggregate).toBe(true);
+        expect(broker?.connectedSince).not.toBeNull();
+        // `_all` is the aggregate, not a member of itself.
+        expect(tunnel.getProviderInfo("_all")?.aggregate).toBe(false);
+    });
+
     it("aggregates the broker's own introspection tools into `_all`", async () => {
         const client = await rpcClient(`${BASE}/_all`);
         sockets.push(client.ws);
