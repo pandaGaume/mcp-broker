@@ -352,6 +352,12 @@ static int t_random(void *ctx, uint8_t *buf, size_t len)
     return t->inner->random(t->inner->ctx, buf, len);
 }
 
+static void t_sleep_ms(void *ctx, uint32_t ms)
+{
+    const mcpb_port_tls_t *t = (const mcpb_port_tls_t *)ctx;
+    t->inner->sleep_ms(t->inner->ctx, ms);
+}
+
 /* --- Init / deinit --------------------------------------------------------- */
 
 static int _trust(SSL_CTX *c, const mcpb_port_tls_config_t *cfg, int borrowed)
@@ -425,6 +431,8 @@ int mcpb_port_tls_init(mcpb_port_t *port, mcpb_port_tls_t *ctx,
     port->close = t_close;
     port->now_ms = t_now_ms;
     port->random = t_random;
+    /* Optional in the inner port, so optional here: a NULL passes through. */
+    port->sleep_ms = (inner->sleep_ms != NULL) ? t_sleep_ms : NULL;
     return mcpb_port_check(port);
 }
 

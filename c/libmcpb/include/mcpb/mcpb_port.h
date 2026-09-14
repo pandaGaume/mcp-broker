@@ -4,7 +4,9 @@
 /* The port. Everything libmcpb needs from the system, and nothing else in
  * libmcpb/ includes a platform header.
  *
- * Porting the library means filling in this struct. Six functions.
+ * Porting the library means filling in this struct. Six functions, and an
+ * optional seventh, `sleep_ms`, without which a provider waiting for its
+ * next reconnection attempt spins (see below).
  *
  * TLS lives behind `open` rather than beside it: the library only moves
  * bytes, so a port without TLS just refuses `tls != 0` and no layer above
@@ -74,6 +76,18 @@ typedef struct mcpb_port
      *         the connection: deriving a mask from a counter would be worse,
      *         because nobody would see it. */
     int (*random)(void *ctx, uint8_t *buf, size_t len);
+
+    /* OPTIONAL. Blocks the calling task for `ms` milliseconds, yielding the
+     * processor. While the link is up, a poll waits on the socket through
+     * `recv`; while it is down and the next attempt is not due yet, there is
+     * no socket to wait on, and this is what the poll waits with instead.
+     *
+     * NULL is accepted (mcpb_port_check does not require it) and means the
+     * poll returns MCPB_ERR_TIMEOUT at once in that state, so the caller's
+     * loop runs flat out until the retry is due: on an RTOS that starves
+     * the idle task and trips its watchdog, on a host it burns a core. Fill
+     * it in. Every port in this repository does. */
+    void (*sleep_ms)(void *ctx, uint32_t ms);
 } mcpb_port_t;
 
 /* Checks each field. A missing one would otherwise show up as a jump to

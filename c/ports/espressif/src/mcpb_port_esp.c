@@ -180,6 +180,17 @@ static void e_close(void *ctx)
     c->fd = -1;
 }
 
+/* At least one tick: a zero delay would be a yield, and the idle task of
+ * this core, which feeds the task watchdog, needs the time. */
+static void e_sleep_ms(void *ctx, uint32_t ms)
+{
+    (void)ctx;
+    TickType_t ticks = pdMS_TO_TICKS(ms);
+    if (ticks == 0)
+        ticks = 1;
+    vTaskDelay(ticks);
+}
+
 static uint32_t e_now_ms(void *ctx)
 {
     (void)ctx;
@@ -214,5 +225,6 @@ int mcpb_port_esp_init(mcpb_port_t *port, mcpb_port_esp_t *ctx)
     port->close = e_close;
     port->now_ms = e_now_ms;
     port->random = e_random;
+    port->sleep_ms = e_sleep_ms;
     return mcpb_port_check(port);
 }

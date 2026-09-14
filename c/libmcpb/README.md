@@ -50,7 +50,7 @@ Underneath, the multiplexed link is the same `mcpb_provider_t` on a fixed path: 
 
 `MCPB_API` prefixes the public functions and is empty by default: a static library, or sources compiled into the program, which is every embedded build. A host that packages libmcpb inside one shared library and calls it from another (an Unreal editor build is one DLL per module) defines `MCPB_BUILD_DLL` while compiling the library and `MCPB_USE_DLL` in the consumers; `mcpb.h` turns them into the platform's export and import attributes without depending on any host header.
 
-## Porting: six functions
+## Porting: six functions, and a seventh you want
 
 Fill in an `mcpb_port_t`:
 
@@ -62,6 +62,9 @@ Fill in an `mcpb_port_t`:
 | `close` | closes; must tolerate an already-closed stream |
 | `now_ms` | monotonic clock, no particular epoch |
 | `random` | unpredictable bytes |
+| `sleep_ms` | optional: blocks the task for that long, yielding the processor |
+
+`sleep_ms` is what a poll waits with while the link is down and the next attempt is not due: there is no socket to wait on then. Leave it `NULL` and the poll returns at once in that state, so the caller's loop spins until the retry, which on an RTOS starves the idle task and trips its watchdog (the ESP32 did exactly that before the function existed). Every port in this repository fills it in.
 
 Three conventions the library's correctness depends on:
 

@@ -370,6 +370,20 @@ static int h_random(void *ctx, uint8_t *buf, size_t len)
 #endif
 }
 
+static void h_sleep_ms(void *ctx, uint32_t ms)
+{
+    (void)ctx;
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000u);
+    ts.tv_nsec = (long)(ms % 1000u) * 1000000L;
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR)
+        ; /* interrupted: finish the remainder */
+#endif
+}
+
 /* --- Init ------------------------------------------------------------------ */
 
 int mcpb_port_host_init(mcpb_port_t *port, mcpb_port_host_t *ctx)
@@ -398,5 +412,6 @@ int mcpb_port_host_init(mcpb_port_t *port, mcpb_port_host_t *ctx)
     port->close = h_close;
     port->now_ms = h_now_ms;
     port->random = h_random;
+    port->sleep_ms = h_sleep_ms;
     return mcpb_port_check(port);
 }

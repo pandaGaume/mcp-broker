@@ -261,6 +261,11 @@ MCPB_API int mcpb_provider_init(mcpb_provider_t *p, const mcpb_port_t *port,
 /* Connects, reconnects, keeps the ping going, and returns one message when
  * there is one.
  *
+ * Waits up to `timeout_ms` in every state: on the socket while the link is
+ * up, through the port's `sleep_ms` while the next attempt is not due. A
+ * port without `sleep_ms` makes the second case return at once, and the
+ * caller's loop then spins until the attempt is due (see mcpb_port.h).
+ *
  * @param out  points into the receive buffer, valid until the next call.
  * @return  MCPB_OK           a message is available
  *          MCPB_ERR_TIMEOUT  nothing to read; the normal return of an idle

@@ -10,6 +10,7 @@
 #include "mcpb_port_unreal.h"
 
 #include "CoreMinimal.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Guid.h"
 #include "Sockets.h"
@@ -188,6 +189,13 @@ namespace
         return static_cast<uint32_t>(FPlatformTime::Seconds() * 1000.0);
     }
 
+    void u_sleep_ms(void* ctx, uint32_t ms)
+    {
+        (void)ctx;
+        // On the link's worker thread, never the game thread (McpBrokerLink).
+        FPlatformProcess::Sleep(static_cast<float>(ms) / 1000.0f);
+    }
+
     int u_random(void* ctx, uint8_t* buf, size_t len)
     {
         mcpb_port_unreal_t* Ctx = static_cast<mcpb_port_unreal_t*>(ctx);
@@ -232,5 +240,6 @@ extern "C" int mcpb_port_unreal_init(mcpb_port_t* port, mcpb_port_unreal_t* ctx)
     port->close = u_close;
     port->now_ms = u_now_ms;
     port->random = u_random;
+    port->sleep_ms = u_sleep_ms;
     return mcpb_port_check(port);
 }
