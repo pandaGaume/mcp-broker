@@ -49,6 +49,7 @@
         }
     },
     "scripts": {
+        "leak-probe": "node --expose-gc scripts/leak-probe.mjs",
         "build": "tsup && npm run copy:assets",
         "clean": "rimraf dist",
         "copy:assets": "node scripts/copy-assets.mjs",

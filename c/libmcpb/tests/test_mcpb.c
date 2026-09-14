@@ -50,6 +50,9 @@ typedef struct
      * from the library: a frame whose bytes arrive across two polls. */
     size_t pause_at;
     int    paused;
+    /* sleep_ms: the clock moves by what was asked, and the asks are counted. */
+    uint32_t slept_ms;
+    int      sleeps;
 } fake_t;
 
 static void fake_push(fake_t *f, const void *data, size_t n)
@@ -98,6 +101,13 @@ static int f_recv(void *ctx, uint8_t *b, size_t n, int t)
 }
 static void f_close(void *ctx) { ((fake_t *)ctx)->closed = 1; }
 static uint32_t f_now(void *ctx) { return ((fake_t *)ctx)->clock; }
+static void f_sleep(void *ctx, uint32_t ms)
+{
+    fake_t *f = (fake_t *)ctx;
+    f->clock += ms;
+    f->slept_ms += ms;
+    f->sleeps++;
+}
 static int f_random(void *ctx, uint8_t *b, size_t n)
 {
     fake_t *f = (fake_t *)ctx;
@@ -137,6 +147,7 @@ static void fake_init(fake_t *f, mcpb_port_t *p)
     p->ctx = f;
     p->open = f_open; p->send = f_send; p->recv = f_recv;
     p->close = f_close; p->now_ms = f_now; p->random = f_random;
+    p->sleep_ms = f_sleep;
 }
 
 /* The client's key is deterministic because the randomness is: sixteen bytes
@@ -804,6 +815,63 @@ int main(void)
               "later attempts too");
         check(log.ev[1].attempts == 2, "the consecutive failure counter rises");
         check(log.ev[1].window_ms == 4000u, "and the current window is carried");
+    }
+    {
+        /* While the next attempt is not due, a poll waits through the port's
+         * sleep_ms, bounded by its timeout and by the moment the attempt is
+         * due, and never spins. This is what keeps an RTOS idle task fed
+         * (the ESP32 task watchdog fired on exactly this before). */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[512];
+        const char *out; size_t olen;
+
+        fake_init(&f, &p);
+        memset(&c, 0, sizeof(c));
+        c.host = "h"; c.name = "x"; c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        c.retry_initial_ms = 1000; c.retry_max_ms = 30000;
+        c.retry_no_jitter = 1;
+        mcpb_provider_init(&pr, &p, &c);
+
+        mcpb_provider_poll(&pr, &out, &olen, 0); /* fails: never connected; retry in 1000 */
+        check(pr.state == MCPB_PROVIDER_WAITING && pr.retry_at_ms == 1000u, "waiting, retry due at 1000");
+
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT && f.sleeps == 0,
+              "poll(0) looks and returns, no sleep");
+
+        /* A caller's loop, with a timeout that doubles up to a cap, the way
+         * a backoff would: whatever the timeout, each poll must sleep the
+         * smaller of it and the time left, so the clock climbs to the due
+         * instant and never past it, and the poll never comes back without
+         * sleeping while there is time left. */
+        int timeout = 50, polls = 0, bounded = 1, slept_every_time = 1;
+        while (pr.state == MCPB_PROVIDER_WAITING && polls < 32)
+        {
+            const uint32_t before = f.clock;
+            const uint32_t left = pr.retry_at_ms - before;
+            const uint32_t want = ((uint32_t)timeout < left) ? (uint32_t)timeout : left;
+            const int sleeps_before = f.sleeps;
+            const int rc = mcpb_provider_poll(&pr, &out, &olen, timeout);
+            polls++;
+            if (rc != MCPB_ERR_TIMEOUT) { bounded = 0; break; }
+            if (f.clock - before != want || (int32_t)(f.clock - pr.retry_at_ms) > 0) bounded = 0;
+            if (f.clock == pr.retry_at_ms) break; /* due: the next poll attempts */
+            if (f.sleeps != sleeps_before + 1) slept_every_time = 0;
+            timeout = (timeout * 2 > 5000) ? 5000 : timeout * 2;
+        }
+        check(bounded, "every poll sleeps min(timeout, time left) and the clock never passes the due instant");
+        check(slept_every_time, "and none of them came back without sleeping while time was left");
+        check(f.clock == 1000u && polls == 5, "50+100+200+400 then the 250 left: five polls to the due instant");
+        const int at_due = mcpb_provider_poll(&pr, &out, &olen, 0);
+        check(at_due == MCPB_ERR_TIMEOUT && pr.attempts == 2u && f.sleeps == 5,
+              "at the due instant the poll attempts, it does not sleep");
+
+        /* Without sleep_ms the poll returns at once and says so by leaving
+         * the clock alone: the documented spin, for a port that predates
+         * the function. */
+        p.sleep_ms = NULL;
+        const uint32_t before = f.clock;
+        check(mcpb_provider_poll(&pr, &out, &olen, 500) == MCPB_ERR_TIMEOUT && f.clock == before,
+              "a port without sleep_ms returns immediately while waiting");
     }
     {
         /* Recovery after an outage: the failure counter drops and the

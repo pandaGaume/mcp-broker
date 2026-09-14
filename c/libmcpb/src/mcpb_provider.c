@@ -254,7 +254,21 @@ int mcpb_provider_poll(mcpb_provider_t *p, const char **out, size_t *out_len,
     {
         /* Signed comparison, to survive counter wraparound. */
         if ((int32_t)(now - p->retry_at_ms) < 0)
-            return MCPB_ERR_TIMEOUT; /* not yet: idle, not an error */
+        {
+            /* Not yet. There is no socket to wait on, so the wait is the
+             * port's, bounded by the caller's timeout and by the moment the
+             * attempt is due; a port without sleep_ms returns at once and
+             * the caller spins, which mcpb_port.h says in so many words. */
+            if (p->port->sleep_ms != NULL && timeout_ms != 0)
+            {
+                const uint32_t left = p->retry_at_ms - now;
+                const uint32_t wait = (timeout_ms < 0 || (uint32_t)timeout_ms > left)
+                                          ? left : (uint32_t)timeout_ms;
+                if (wait > 0u)
+                    p->port->sleep_ms(p->port->ctx, wait);
+            }
+            return MCPB_ERR_TIMEOUT; /* idle, not an error */
+        }
 
         /* Result deliberately ignored: a just-opened connection has no
          * message yet, and a failure is already counted and rescheduled by

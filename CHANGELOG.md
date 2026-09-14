@@ -102,6 +102,23 @@ repository; the changes it needed for this release are listed under
 
 ### Fixed
 
+- **c** libmcpb 0.4.1: a provider waiting for its next reconnection attempt
+  no longer spins. `mcpb_provider_poll` returned `MCPB_ERR_TIMEOUT` at once
+  in that state, whatever its timeout, so every caller's loop ran flat out
+  between two attempts (up to 30 s each): on the ESP32 that starved the idle
+  task and tripped the task watchdog (`IDLE0 did not reset the watchdog`,
+  backtrace in `mcpb_provider_poll`), on a host or in Unreal it burned a
+  core while the broker was down. The port gains an optional seventh
+  function, `sleep_ms`, and the poll waits through it, bounded by its
+  timeout and by the moment the attempt is due; the host, ESP-IDF, Unreal
+  and TLS ports fill it in. A port without it keeps the old behaviour and
+  `mcpb_port.h` says so. Seven bench checks pin the wait down.
+- **broker** Not a leak, measured: `scripts/leak-probe.mjs` drives the soak's
+  round in-process under a forced GC and counts the broker's collections.
+  Live heap after 2000 rounds: 12.3 MB before and after (21 bytes per
+  round), no Map or Set grows; the RSS the soak reports moves with V8's
+  heap sizing, up and down, not with the round count.
+
 - **broker** `broker_diagnose` on the CLI's own broker skipped the
   `aggregate-empty` and `aggregate-missing-live-slots` checks with "this
   broker context does not implement getAggregateInfo()", and sent the operator
