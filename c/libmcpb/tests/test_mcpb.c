@@ -835,16 +835,34 @@ int main(void)
         mcpb_provider_poll(&pr, &out, &olen, 0); /* fails: never connected; retry in 1000 */
         check(pr.state == MCPB_PROVIDER_WAITING && pr.retry_at_ms == 1000u, "waiting, retry due at 1000");
 
-        f.sleeps = 0; f.slept_ms = 0;
-        check(mcpb_provider_poll(&pr, &out, &olen, 200) == MCPB_ERR_TIMEOUT && f.sleeps == 1 && f.slept_ms == 200u,
-              "poll(200) sleeps 200 through the port and reports idle");
-        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT && f.sleeps == 1,
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT && f.sleeps == 0,
               "poll(0) looks and returns, no sleep");
-        check(mcpb_provider_poll(&pr, &out, &olen, 5000) == MCPB_ERR_TIMEOUT && f.slept_ms == 1000u,
-              "poll(5000) sleeps only until the attempt is due, 800 more");
-        check(f.clock == 1000u, "the clock is at the retry instant");
+
+        /* A caller's loop, with a timeout that doubles up to a cap, the way
+         * a backoff would: whatever the timeout, each poll must sleep the
+         * smaller of it and the time left, so the clock climbs to the due
+         * instant and never past it, and the poll never comes back without
+         * sleeping while there is time left. */
+        int timeout = 50, polls = 0, bounded = 1, slept_every_time = 1;
+        while (pr.state == MCPB_PROVIDER_WAITING && polls < 32)
+        {
+            const uint32_t before = f.clock;
+            const uint32_t left = pr.retry_at_ms - before;
+            const uint32_t want = ((uint32_t)timeout < left) ? (uint32_t)timeout : left;
+            const int sleeps_before = f.sleeps;
+            const int rc = mcpb_provider_poll(&pr, &out, &olen, timeout);
+            polls++;
+            if (rc != MCPB_ERR_TIMEOUT) { bounded = 0; break; }
+            if (f.clock - before != want || (int32_t)(f.clock - pr.retry_at_ms) > 0) bounded = 0;
+            if (f.clock == pr.retry_at_ms) break; /* due: the next poll attempts */
+            if (f.sleeps != sleeps_before + 1) slept_every_time = 0;
+            timeout = (timeout * 2 > 5000) ? 5000 : timeout * 2;
+        }
+        check(bounded, "every poll sleeps min(timeout, time left) and the clock never passes the due instant");
+        check(slept_every_time, "and none of them came back without sleeping while time was left");
+        check(f.clock == 1000u && polls == 5, "50+100+200+400 then the 250 left: five polls to the due instant");
         const int at_due = mcpb_provider_poll(&pr, &out, &olen, 0);
-        check(at_due == MCPB_ERR_TIMEOUT && pr.attempts == 2u && f.sleeps == 2,
+        check(at_due == MCPB_ERR_TIMEOUT && pr.attempts == 2u && f.sleeps == 5,
               "at the due instant the poll attempts, it does not sleep");
 
         /* Without sleep_ms the poll returns at once and says so by leaving
