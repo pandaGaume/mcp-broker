@@ -16,7 +16,6 @@ on:
             - ".github/workflows/ci-c.yml"
             - "node/packages/broker/**"
 
-
 jobs:
     build:
         runs-on: ubuntu-latest

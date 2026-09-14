@@ -12,7 +12,6 @@ on:
             - "node/**"
             - ".github/workflows/ci-node.yml"
 
-
 defaults:
     run:
         working-directory: node
