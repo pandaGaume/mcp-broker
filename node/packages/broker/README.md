@@ -232,12 +232,22 @@ Each provider entry from `providers_list` / `provider_status`:
     "name": "weather",
     "transport": "ws",
     "connected": true,
+    "aggregate": true,
+    "connectedSince": "2026-09-14T08:12:03.417Z",
+    "connectedForMs": 184211,
     "clientCount": 0,
     "sessionCount": 1,
     "pendingCount": 0
 }
 ```
 
+- The first six fields are about the **provider**: whether something serves
+  the slot, over what, whether it is in `_all`, and since when. A
+  `connectedSince` that is always a few seconds old is a provider that keeps
+  reconnecting.
+- The three counts are about the slot's **callers**. A connected provider that
+  nobody is calling right now reads `clientCount: 0, sessionCount: 0,
+  pendingCount: 0`; that is not a fault.
 - `transport` is `ws` (dedicated socket), `ws-multiplex` (shared socket),
   `stdio` (**any** configured upstream: a child process from `stdioUpstreams`,
   a `.mcpb` bundle, *or* a remote URL from `mcpServers`), `loopback`
@@ -719,6 +729,30 @@ npm start          # node dist/bin.js
 ```
 
 Requires Node 20.11+.
+
+### Running the broker of this checkout
+
+`npm start` runs `dist/bin.js`, the code of the working tree once `npm run
+build` has been run (from `node/`, which builds the provider package first).
+It reads `.mcp-broker/config.json` next to `package.json` when there is one;
+that folder is gitignored, so each checkout keeps its own. A config that makes
+the broker reachable from a device on the LAN and serves this package's `web/`
+(the broker explorer at `/demos/broker-explorer/`) from the same port:
+
+```json
+{
+    "port": 3000,
+    "host": "0.0.0.0",
+    "www": { "open": false, "mounts": [{ "urlPrefix": "/", "dir": "../web" }] },
+    "allowedOrigins": ["http://localhost:3000", "http://127.0.0.1:3000"]
+}
+```
+
+Paths in the file resolve against the file's own directory, hence `../web`.
+Keep the terminal open: the process lives as long as it does. Without the
+file the defaults apply, `0.0.0.0:3000` and no static mount. Every C sample,
+the roundtrip and the soak in [`c/`](https://github.com/pandaGaume/mcp-broker/tree/main/c)
+target this broker, not an installed one.
 
 ## Releasing
 

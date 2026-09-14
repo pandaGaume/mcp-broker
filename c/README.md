@@ -59,6 +59,14 @@ All four paths are exercised by [`ci-c.yml`](../.github/workflows/ci-c.yml): gcc
 
 ## Try it against a broker
 
+The broker is the one in this repository, from its own working tree, so a change on either side is tested against the other at once. Build it once, then start it from its package (keep that terminal open):
+
+```bash
+cd node && npm install && npm run build && cd packages/broker && npm start
+```
+
+It listens on `0.0.0.0:3000` by default, so a board on the LAN reaches it at the PC's address; a `node/packages/broker/.mcp-broker/config.json` (gitignored, see the [broker README](../node/packages/broker/README.md#running-the-broker-of-this-checkout)) adds the web explorer and any other setting. Then the host sample, in another terminal:
+
 ```bash
 c/build/samples/host-provider/host-provider --host 127.0.0.1 --port 3000 --name my-device --aggregate
 ```
