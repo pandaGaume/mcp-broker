@@ -7,10 +7,6 @@ on:
     push:
         tags: ["node-v*"]
 
-env:
-    # Opt into Node 24 for JavaScript-based actions (checkout, setup-node, ...)
-    # to silence the September 2026 deprecation warning for Node 20.
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 defaults:
     run:
