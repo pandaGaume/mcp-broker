@@ -20,6 +20,8 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-09-14
+
 ### Added
 
 - **broker** `providers_list` and `provider_status` entries carry the
@@ -110,8 +112,6 @@ repository; the changes it needed for this release are listed under
   (`HTTP 401`). "protocol violation" alone named nothing; one was seen on the
   board and could not be explained without the bytes.
 
-## [1.3.1] - 2026-09-13
-
 ### Fixed
 
 - **c** libmcpb 0.4.1: a provider waiting for its next reconnection attempt
@@ -130,6 +130,10 @@ repository; the changes it needed for this release are listed under
   Live heap after 2000 rounds: 12.3 MB before and after (21 bytes per
   round), no Map or Set grows; the RSS the soak reports moves with V8's
   heap sizing, up and down, not with the round count.
+
+## [1.3.1] - 2026-09-13
+
+### Fixed
 
 - **broker** `broker_diagnose` on the CLI's own broker skipped the
   `aggregate-empty` and `aggregate-missing-live-slots` checks with "this
