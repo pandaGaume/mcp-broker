@@ -20,6 +20,21 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-09-21
+
+### Changed
+
+- **broker, provider** `@cyanmycelium/mcp-core` `^1.1.0`: a grammar can carry
+  the server's own words (`server.description`, `server.instructions`, used
+  when the initializer sets none), the `initialize` result names the matched
+  wording in `_meta.grammar`, and `loadGrammarDirectory` (`mcp-core/node`)
+  reads a directory of `<agent>/<locale>.json` files composed over
+  `default/<locale>`, checked against the surface they describe;
+  `withWordingRule` on the server builder keeps every tool's and resource's
+  words in one place. Nothing changes on the wire for the broker's own tools;
+  a slot behind the tunnel may now describe itself from files only. The
+  provider's peer range (`>=0.7.0 <2.0.0`) is unchanged.
+
 ## [1.3.2] - 2026-09-14
 
 ### Added
