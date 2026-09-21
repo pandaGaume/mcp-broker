@@ -20,6 +20,21 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-09-21
+
+### Changed
+
+- **broker, provider** `@cyanmycelium/mcp-core` `^1.2.1`: a grammar carries a
+  `phrases` section (keyed sentences with `{holes}`, filled by
+  `grammar.phrase`), `loadGrammarDirectory({ referenceLocale })` checks that
+  every locale of a slot carries the same phrases (keys and holes; only
+  directories that have phrases are asked for the reference file, 1.2.1),
+  and a server hands each session the phrases of its wording as the resource
+  `grammar://phrases`. Nothing changes on the wire for the broker's own tools;
+  a slot behind the tunnel may now give a page or a voice its sentences in
+  the language the session announced. The provider's peer range
+  (`>=0.7.0 <2.0.0`) is unchanged.
+
 ## [1.3.3] - 2026-09-21
 
 ### Changed
