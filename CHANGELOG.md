@@ -20,6 +20,8 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-30
+
 ### Added
 
 - **broker** `resources/subscribe` and `resources/unsubscribe`, on every slot
@@ -56,7 +58,7 @@ repository; the changes it needed for this release are listed under
 - **broker** `broker://providers` and `broker://info` served the snapshot cached
   at their first read forever. Reads are live now.
 
-#### Coordinated releases
+### Coordinated releases
 
 - `@cyanmycelium/mcp-core` 1.3.0: `resources/subscribe`, `resources/unsubscribe`,
   `prompts/list`, `prompts/get`, `completion/complete` and `logging/setLevel`
