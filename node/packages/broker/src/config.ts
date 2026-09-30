@@ -103,6 +103,18 @@ export interface IBrokerConfig {
     providerRequestTimeoutMs?: number;
 
     /**
+     * Bounds on `resources/subscribe` bookkeeping. Each field maps to an env
+     * var: `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT` (default 64),
+     * `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT` (default 1024),
+     * `MCP_BROKER_MAX_RESOURCE_URI_LENGTH` (default 2048).
+     */
+    resourceSubscriptions?: {
+        maxSubscriptionsPerClient?: number;
+        maxSubscriptionsPerSlot?: number;
+        maxResourceUriLength?: number;
+    };
+
+    /**
      * What happens when a provider connects to a slot another socket already
      * holds. Maps to `MCP_BROKER_PROVIDER_TAKEOVER`.
      *

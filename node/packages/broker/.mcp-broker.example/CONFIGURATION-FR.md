@@ -340,6 +340,41 @@ autre socket.
 
 Aussi `MCP_BROKER_PROVIDER_TAKEOVER`.
 
+## Abonnements aux ressources
+
+```json
+"resourceSubscriptions": {
+    "maxSubscriptionsPerClient": 64,
+    "maxSubscriptionsPerSlot": 1024,
+    "maxResourceUriLength": 2048
+}
+```
+
+Quand un client envoie `resources/subscribe`, le broker y répond lui-même et ne
+sollicite le fournisseur qu'une seule fois par URI, quel que soit le nombre de
+clients qui la surveillent. Il remet ensuite `notifications/resources/updated`
+aux seuls clients abonnés à cette URI. Ces trois clés facultatives bornent ce
+que les clients peuvent lui faire conserver ; les valeurs montrées sont celles
+par défaut.
+
+### `maxSubscriptionsPerClient`
+
+Nombre d'URI qu'un même client (un WebSocket, un flux SSE, une session
+Streamable HTTP) peut surveiller à la fois. Au-delà, l'abonnement est refusé
+avec `-32000`. Aussi `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT`.
+
+### `maxSubscriptionsPerSlot`
+
+Nombre total d'abonnements clients qu'un slot peut conserver. C'est la borne qui
+compte pour les clients Streamable HTTP qui ferment leur onglet sans `DELETE` :
+leurs sessions n'expirent jamais, leurs abonnements non plus. Aussi
+`MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT`.
+
+### `maxResourceUriLength`
+
+Longueur maximale d'une URI, en caractères. Une URI plus longue est refusée avec
+`-32602`. Aussi `MCP_BROKER_MAX_RESOURCE_URI_LENGTH`.
+
 ## TLS
 
 ```json

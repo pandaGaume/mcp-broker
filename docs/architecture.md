@@ -17,7 +17,7 @@
 
 A **provider** registers under a named slot. Each slot is independent: pending requests, notification streams, and connected clients are tracked per slot.
 
-A **client** addresses a provider by name. Multiple clients can target the same provider simultaneously and each receives the responses to its own requests plus broadcast notifications from that provider.
+A **client** addresses a provider by name. Multiple clients can target the same provider simultaneously and each receives the responses to its own requests plus broadcast notifications from that provider, and the `notifications/resources/updated` for the URIs it subscribed to.
 
 ## Provider transports (incoming)
 
@@ -79,7 +79,17 @@ both use JSON-RPC id `1` without colliding; keying `pending` on the client's raw
 id, as earlier versions did, hung one caller and delivered the other caller's
 body to it. A provider therefore sees **string** ids it must echo verbatim.
 Notifications without an id are not tracked and are broadcast to all sinks of
-that slot.
+that slot, with one exception: `notifications/resources/updated` goes only to
+the sessions subscribed to its URI.
+
+`resources/subscribe` and `resources/unsubscribe` never reach the provider one
+per client. A per-slot `ResourceSubscriptionRegistry` keeps who is subscribed to
+what and sends the provider one subscribe per URI (first subscriber) and one
+unsubscribe (last one out), with broker-owned ids whose answers it consumes.
+Operations on one URI run through a queue, so concurrent subscribers cannot race.
+A provider disconnect keeps the subscribers; the next provider on the slot gets
+the last client `initialize` replayed, then one subscribe per URI. See
+[protocol.md](protocol.md#resource-subscriptions).
 
 A pending entry is released by a matching response, by the provider
 disconnecting, by the caller's own connection closing, or by expiry
@@ -184,7 +194,8 @@ Stated explicitly, because each of these has cost an integrator time:
   resolves when the port is bound, and no provider can exist yet.
 - **Streamable HTTP and SSE sessions never expire.** A client that closes its
   tab without `DELETE /<slot>/mcp` leaves its session alive, and every
-  broadcast notification is queued into it. `sessionCount` growing
+  broadcast notification is queued into it, and every resource subscription it
+  took stays held. `sessionCount` (and `resourceSubscriptionCount`) growing
   monotonically across a run is the only signal.
 - **Slots are not declared.** A name nobody serves is not an error; it is an
   empty slot that answers `-32000 Provider "<name>" not connected`.

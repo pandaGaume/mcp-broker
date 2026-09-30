@@ -176,6 +176,9 @@ envFromConfig("MCP_BROKER_SSE_PATH", config.paths?.sse);
 envFromConfig("MCP_BROKER_MESSAGES_PATH", config.paths?.messages);
 envFromConfig("MCP_BROKER_PROVIDER_HEARTBEAT_MS", config.providerHeartbeatIntervalMs);
 envFromConfig("MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS", config.providerRequestTimeoutMs);
+envFromConfig("MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT", config.resourceSubscriptions?.maxSubscriptionsPerClient);
+envFromConfig("MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT", config.resourceSubscriptions?.maxSubscriptionsPerSlot);
+envFromConfig("MCP_BROKER_MAX_RESOURCE_URI_LENGTH", config.resourceSubscriptions?.maxResourceUriLength);
 envFromConfig("MCP_BROKER_PROVIDER_TAKEOVER", config.providerTakeover);
 // `www.open` is `boolean | string`: `true` means the root, a string is a path
 // or a same-origin URL. Both travel as the env string and are resolved once,
@@ -252,6 +255,24 @@ function millisFromEnv(envName: string): number | undefined {
 
 const providerHeartbeatIntervalMs = millisFromEnv("MCP_BROKER_PROVIDER_HEARTBEAT_MS");
 const providerRequestTimeoutMs = millisFromEnv("MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS");
+
+/** Reads a positive whole number from the environment, or `undefined` (with a warning) for anything else. */
+function countFromEnv(envName: string): number | undefined {
+    const raw = process.env[envName];
+    if (raw === undefined || raw.trim() === "") return undefined;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) {
+        console.warn(`[mcp-broker] Ignoring ${envName}="${raw}": expected a whole number of at least 1. Using the default.`);
+        return undefined;
+    }
+    return value;
+}
+
+const resourceSubscriptionLimits = {
+    maxSubscriptionsPerClient: countFromEnv("MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT"),
+    maxSubscriptionsPerSlot: countFromEnv("MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT"),
+    maxResourceUriLength: countFromEnv("MCP_BROKER_MAX_RESOURCE_URI_LENGTH"),
+};
 
 const takeoverRaw = process.env["MCP_BROKER_PROVIDER_TAKEOVER"]?.trim().toLowerCase();
 let providerTakeover: ProviderTakeoverMode | undefined;
@@ -366,6 +387,11 @@ async function main(): Promise<void> {
     }
     if (providerRequestTimeoutMs !== undefined) {
         builder.withProviderRequestTimeout(providerRequestTimeoutMs);
+    }
+    // Only the limits actually set: an `undefined` field would override the default.
+    const limits = Object.fromEntries(Object.entries(resourceSubscriptionLimits).filter(([, v]) => v !== undefined));
+    if (Object.keys(limits).length > 0) {
+        builder.withResourceSubscriptionLimits(limits);
     }
     if (providerTakeover) {
         builder.withProviderTakeover(providerTakeover);

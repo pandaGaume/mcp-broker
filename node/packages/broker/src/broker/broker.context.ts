@@ -1,3 +1,5 @@
+import type { IEventSource } from "@cyanmycelium/mcp-core";
+
 /**
  * Read-only view of the broker's runtime state, exposed to broker behaviors.
  *
@@ -76,6 +78,19 @@ export interface IBrokerContext {
      * a slot that cannot exist at host start.
      */
     getStdioBridgeTarget?(): string | null | undefined;
+
+    /**
+     * Fires with the names of the slots whose *state* changed: a slot
+     * appeared, a provider attached or detached, a slot joined or left `_all`.
+     * Changes in the same tick arrive as one batch.
+     *
+     * Counters (`pendingCount`, `clientCount`, `sessionCount`) deliberately do
+     * not fire it: reading a resource moves them, so notifying on them would
+     * make every read trigger the next notification. They stay readable on
+     * demand. `_broker` turns this into `notifications/resources/updated` on
+     * `broker://providers` and `broker://providers/<name>`.
+     */
+    readonly onProvidersChanged?: IEventSource<readonly string[]>;
 }
 
 /**
@@ -159,6 +174,14 @@ export interface IBrokerProviderInfo {
 
     /** Number of in-flight JSON-RPC requests awaiting a response. */
     pendingCount: number;
+
+    /**
+     * Client/URI pairs held by `resources/subscribe` on this slot. A number
+     * that only grows is the signature of Streamable HTTP clients leaving
+     * without `DELETE`: their sessions, and so their subscriptions, never
+     * expire. Optional so hand-written contexts keep compiling.
+     */
+    resourceSubscriptionCount?: number;
 }
 
 /** @deprecated Use {@link IBrokerContext}. */

@@ -173,6 +173,27 @@ await tunnel.stop();
 - It emits `notifications/tools/list_changed` and `notifications/prompts/list_changed`, so a provider that appears mid-session shows up without a reconnect.
 - Neither name can be claimed by a provider: `/provider/_all` is refused with `Provider "_all" is reserved by the broker`.
 
+`_broker`, for events: `broker://providers` and `broker://providers/<name>` accept `resources/subscribe`. A slot appearing, a provider attaching or detaching, a slot joining or leaving `_all` each send `notifications/resources/updated` (batched per tick). Counters (`pendingCount`, `clientCount`, `sessionCount`) never notify: reading moves them. A slot name is percent-encoded in its URI (`a/b` is `broker://providers/a%2Fb`).
+
+### Resource subscriptions (every slot except `_all`)
+
+```ts
+// Client side: any MCP client. With mcp-core's McpClient:
+client.onResourceUpdated.subscribe((uri) => reread(uri));
+await client.subscribeResource("plant://gauge");
+
+// Provider side, with mcp-core >= 1.3.0: the server answers subscribe/unsubscribe
+// itself. A behavior only reports changes; an McpAdapterBase does it with:
+this._forwardResourceContentChanged("plant://gauge");
+```
+
+- **The broker owns the reference count.** N clients on one URI cost the provider **one** `resources/subscribe`; the last one leaving sends **one** `resources/unsubscribe`. Concurrent subscribes are serialized per URI.
+- **Updates are addressed.** `notifications/resources/updated` reaches only the sessions subscribed to that exact `params.uri` (no normalization). One without a usable `uri` is dropped and logged, never broadcast. Every other notification is still broadcast to the slot.
+- **Cleanup is automatic** on WS close, SSE stream close, `DELETE /<slot>/mcp`, stdio close, `close()` of a `tunnel.openInternalClient()` handle, and broker stop. In-process clients subscribe like any other. A Streamable HTTP session never deleted never expires, and neither do its subscriptions.
+- **Provider reconnect:** subscriptions are kept; the broker replays the last client `initialize`, `notifications/initialized`, then one subscribe per URI, and sends each subscriber one `updated` so it re-reads. A provider must install its message handler **before** its socket opens.
+- **Policy:** `resources/subscribe` needs `mcp.resources.read` (`broker.providers.read` on `_broker`), and each update is re-checked per recipient; a recipient that lost the grant is unsubscribed. `resources/unsubscribe` is never refused.
+- **Limits** (`resourceSubscriptions` in `config.json`, `withResourceSubscriptionLimits()`, or `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT` / `_PER_SLOT` / `MCP_BROKER_MAX_RESOURCE_URI_LENGTH`): 64 URIs per client, 1024 client subscriptions per slot, 2048-character URIs. Past a limit: `-32000`; an overlong URI: `-32602`.
+
 ## 6. Symptom to fix
 
 | symptom | cause | fix |
@@ -190,6 +211,10 @@ await tunnel.stop();
 | `-32601 Method not found` on `_all` | `_all` covers tools and prompts only | use the provider's own slot |
 | `-32602 Unknown aggregated tool` | you built the prefixed name yourself | re-run `tools/list`, pass the name back verbatim |
 | Request errors with `did not respond within 60000ms` | the provider never answered | raise `providerRequestTimeoutMs`, or fix the provider |
+| Subscribed, `notifications/resources/updated` never arrives | the update names another URI (matching is exact), has no `params.uri` (dropped, logged once), or the read grant was revoked (unsubscribed) | compare URIs byte for byte; read the broker log |
+| `resources/subscribe` answers `-32601` on a provider slot | the provider does not implement it (mcp-core before 1.3.0 did not) | upgrade the provider to mcp-core 1.3.0 or implement the method |
+| `-32000 Subscription limit reached` | `maxSubscriptionsPerClient` / `maxSubscriptionsPerSlot` | unsubscribe what you no longer watch, or raise `resourceSubscriptions` |
+| `resourceSubscriptionCount` in `provider_status` only grows | HTTP clients leave without `DELETE` | send the DELETE on shutdown |
 
 ## 7. Anti-goals, stated plainly
 
@@ -199,7 +224,8 @@ await tunnel.stop();
 - `_broker` routes to **nothing** else.
 - Grammar files (`.mcp-broker/grammars/<userAgent>/<locale>.json`, `MCP_BROKER_LOCALE`) reword the `_broker` tools, resources and templates **only**. Provider tools are relayed as published, on their slot and in `_all`; a provider localizes its own descriptions in its own server.
 - Slots are **not** declared. An unknown name is not an error; it is an empty slot that answers `not connected`.
-- Streamable HTTP and SSE sessions do **not** expire. A client that closes its tab without `DELETE /<slot>/mcp` leaves its session alive forever, and `sessionCount` growing monotonically is the only signal.
+- Streamable HTTP and SSE sessions do **not** expire. A client that closes its tab without `DELETE /<slot>/mcp` leaves its session alive forever, with its resource subscriptions, and `sessionCount` / `resourceSubscriptionCount` growing monotonically is the only signal.
+- `notifications/resources/updated` is **not** broadcast. Only subscribers of that exact URI get it.
 - `brokerName` is **library-only**. It is a valid `config.json` key and `WsTunnel` honors it, but `WsTunnelBuilder` has no `withBrokerName()`, so the CLI never forwards it and setting it in the file changes nothing. `enableBrokerProvider` and `enableAggregateProvider` are `IWsTunnelOptions` fields only, not config-file keys at all. Confirm effective values with `broker_info` rather than assuming the file won.
 
 ## 8. Where the runnable samples live
