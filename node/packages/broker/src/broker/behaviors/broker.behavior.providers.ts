@@ -1,5 +1,5 @@
 import { McpBehavior } from "@cyanmycelium/mcp-core";
-import type { McpResource, McpResourceTemplate, McpTool } from "@cyanmycelium/mcp-core";
+import type { McpResource, McpResourceContent, McpResourceTemplate, McpTool } from "@cyanmycelium/mcp-core";
 import { BrokerProvidersAdapter, PROVIDERS_URI, PROVIDER_URI_TEMPLATE } from "../adapters/broker.adapter.providers";
 import {
     brokerBaselinePropertyDescription,
@@ -27,6 +27,15 @@ export class BrokerProvidersBehavior extends McpBehavior {
         super(new BrokerProvidersAdapter(context), {
             namespace: BrokerProvidersBehavior.NAMESPACE,
         });
+    }
+
+    /**
+     * Always reads live. `McpBehavior` caches the content of its root
+     * resource on first read and never refreshes it, which suits static
+     * content but froze this snapshot at whatever the first reader saw.
+     */
+    public override readResourceAsync(uri: string): Promise<McpResourceContent | undefined> {
+        return this.adapter.readResourceAsync(uri);
     }
 
     protected override _buildResources(): McpResource[] {

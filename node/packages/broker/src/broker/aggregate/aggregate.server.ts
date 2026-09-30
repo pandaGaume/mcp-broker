@@ -68,6 +68,12 @@ export class AggregateServer implements IMessageTransport {
     onClose: (() => void) | null = null;
     onError: ((error: Error) => void) | null = null;
 
+    /**
+     * Called with a slot name whenever it joins or leaves the aggregate, so the
+     * broker can announce the change on `broker://providers`.
+     */
+    onMembershipChanged: ((name: string) => void) | null = null;
+
     constructor(openClient: InternalClientFactory) {
         this._openClient = openClient;
     }
@@ -139,6 +145,7 @@ export class AggregateServer implements IMessageTransport {
 
         const session = new ProviderClientSession(name, this._openClient(name));
         this._sessions.set(name, session);
+        this.onMembershipChanged?.(name);
 
         session.onCatalogChanged = (): void => {
             this._catalog.setProvider(name, { tools: session.tools, prompts: session.prompts });
@@ -181,6 +188,7 @@ export class AggregateServer implements IMessageTransport {
         session.close();
         this._catalog.removeProvider(name);
         this._emitListChanged();
+        this.onMembershipChanged?.(name);
     }
 
     private _subjectFor(principal: IPrincipal | null): IAuthorizationSubject {

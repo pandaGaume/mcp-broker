@@ -22,6 +22,11 @@ interface IProviderMapping {
 const STATIC_CAPABILITIES: Readonly<Record<string, string>> = {
     "resources/list": "mcp.resources.read",
     "resources/read": "mcp.resources.read",
+    "resources/templates/list": "mcp.resources.read",
+    // Subscribing is reading over time. Unsubscribing is deliberately absent:
+    // an unclassified method is not refused, and a client whose grant was
+    // revoked must still be able to drop what it holds.
+    "resources/subscribe": "mcp.resources.read",
     "tools/list": "mcp.tools.list",
     "prompts/list": "mcp.prompts.read",
     "prompts/get": "mcp.prompts.read",
@@ -33,6 +38,14 @@ const STATIC_CAPABILITIES: Readonly<Record<string, string>> = {
 };
 
 const BROKER_READ_TOOLS = new Set(["broker_info", "providers_list", "provider_status"]);
+
+/**
+ * Methods that only read broker state. On `_broker` they all need
+ * `broker.providers.read`, the capability its tools need, rather than the
+ * generic `mcp.resources.read`: otherwise a caller could read the list and
+ * not subscribe to it, or the reverse.
+ */
+const BROKER_READ_METHODS = new Set(["tools/list", "resources/list", "resources/read", "resources/templates/list", "resources/subscribe", "notifications/resources/updated"]);
 
 function toolNameFrom(params: unknown): string | undefined {
     if (typeof params !== "object" || params === null || Array.isArray(params)) return undefined;
@@ -80,7 +93,7 @@ export class ConfiguredCapabilityClassifier implements ICapabilityClassifier {
         if (!method) return undefined;
 
         if (provider === "_broker") {
-            if (method === "tools/list" || method === "resources/list" || method === "resources/read") {
+            if (BROKER_READ_METHODS.has(method)) {
                 return { capability: "broker.providers.read" };
             }
             if (method === "tools/call") {

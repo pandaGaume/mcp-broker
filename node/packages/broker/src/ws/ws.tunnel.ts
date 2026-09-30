@@ -5,7 +5,8 @@ import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
-import type { IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
+import { createEventEmitter } from "@cyanmycelium/mcp-core";
+import type { IEventEmitter, IEventSource, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioTransport, StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
 // The broker is itself a provider: it publishes its own `_broker` and `_all`
 // slots: so sharing the provider package's wire contract is the natural way to
@@ -42,6 +43,7 @@ import {
     type ISlotResourceResolver,
 } from "../authorization/index";
 import { VERSION, PACKAGE_NAME } from "../version";
+import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
 import type {
     AllowedOrigins,
     IHttpSession,
@@ -104,6 +106,9 @@ function requestIdOf(frame: string): string | number | undefined {
  * a provider's own logs, instead of looking like a client's.
  */
 const BROKER_REQUEST_ID_PREFIX = "brk-";
+
+/** The {@link ClientKey} of the stdio bridge: there is at most one per broker. */
+const STDIO_CLIENT_KEY: ClientKey = "stdio";
 
 /** Default heartbeat period, in ms, for `providerHeartbeatIntervalMs`. */
 const DEFAULT_PROVIDER_HEARTBEAT_MS = 30_000;
@@ -355,6 +360,30 @@ export class WsTunnel implements IBrokerContext {
     private readonly _pendingProviderPrincipals = new WeakMap<IncomingMessage, IProviderPrincipal>();
     private readonly _providerPrincipals = new WeakMap<WebSocket, IProviderPrincipal>();
 
+    /**
+     * `resources/subscribe` bookkeeping for every slot: who is subscribed to
+     * what, and the one upstream subscription per URI that stands for them.
+     */
+    private readonly _subscriptions: ResourceSubscriptionRegistry<ResponseSink>;
+
+    /** Stable id per raw WS client socket, the WS part of a {@link ClientKey}. */
+    private readonly _wsClientIds = new WeakMap<WebSocket, number>();
+    private _nextWsClientId = 1;
+
+    /** Stable id per in-process client, the internal part of a {@link ClientKey}. */
+    private readonly _internalClientIds = new WeakMap<IInternalClient, number>();
+    private _nextInternalClientId = 1;
+
+    /** Emitter behind {@link onProvidersChanged}. */
+    private readonly _providersChanged: IEventEmitter<readonly string[]> = createEventEmitter<readonly string[]>();
+
+    /** Slots changed since the last {@link _providersChanged} batch went out. */
+    private readonly _changedSlots = new Set<string>();
+    private _changedSlotsTimer: NodeJS.Timeout | null = null;
+
+    /** Slots already warned about for a malformed `notifications/resources/updated`. */
+    private readonly _invalidUpdateWarnedProviders = new Set<string>();
+
     constructor(options: IWsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
@@ -363,6 +392,16 @@ export class WsTunnel implements IBrokerContext {
         this._authorization = options.authorization ?? options.auth?.authorization ?? null;
         this._slotResourceResolver =
             options.slotResourceResolver ?? this._authorization?.slotResourceResolver ?? options.auth?.slotResourceResolver ?? new DefaultSlotResourceResolver();
+        this._subscriptions = new ResourceSubscriptionRegistry<ResponseSink>(
+            {
+                request: (slot, method, uri) => this._subscriptionRequest(slot, method, uri),
+                isConnected: (slot) => {
+                    const state = this._providers.get(slot);
+                    return state !== undefined && this._isProviderConnected(slot, state);
+                },
+            },
+            options.resourceSubscriptions
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -450,6 +489,11 @@ export class WsTunnel implements IBrokerContext {
         };
     }
 
+    /** See {@link IBrokerContext.onProvidersChanged}. */
+    get onProvidersChanged(): IEventSource<readonly string[]> {
+        return this._providersChanged;
+    }
+
     public getProvidersInfo(): IBrokerProviderInfo[] {
         const out: IBrokerProviderInfo[] = [];
         for (const [name, state] of this._providers) {
@@ -496,6 +540,7 @@ export class WsTunnel implements IBrokerContext {
             clientCount: state.wsClients.size,
             sessionCount: state.sseSessions.size + state.httpSessions.size,
             pendingCount: state.pending.size,
+            resourceSubscriptionCount: this._subscriptions.countFor(name),
         };
     }
 
@@ -521,6 +566,7 @@ export class WsTunnel implements IBrokerContext {
         const state = this._getOrCreateProviderState(name);
         this._loopbackProviders.set(name, transport);
         state.connectedSinceMs = Date.now();
+        this._onProviderAttached(name);
 
         transport.onMessage = (data: string) => this._routeFromProvider(state, name, data);
         transport.onClose = () => {
@@ -547,6 +593,10 @@ export class WsTunnel implements IBrokerContext {
             onClose: null,
             send: (message: string): void => {
                 if (closed) return;
+                // Same subscription bookkeeping as every other client: without
+                // it the subscribe reached the provider, and the updates it
+                // produced had no registered recipient to go to.
+                if (this._interceptClientFrame(state, providerName, message, { type: "internal", client })) return;
                 if (this._isProviderConnected(providerName, state)) {
                     this._sendToProvider(state, providerName, this._trackRequest(state, message, { type: "internal", client }));
                 } else if (requestIdOf(message) !== undefined) {
@@ -560,6 +610,7 @@ export class WsTunnel implements IBrokerContext {
                 for (const [brokerId, entry] of state.pending) {
                     if (entry.sink.type === "internal" && entry.sink.client === client) state.pending.delete(brokerId);
                 }
+                void this._subscriptions.removeClient(this._internalClientKey(client));
             },
         };
 
@@ -708,6 +759,7 @@ export class WsTunnel implements IBrokerContext {
                     };
                     upstream.onOpen = () => {
                         this._getOrCreateProviderState(cfg.name).connectedSinceMs = Date.now();
+                        this._onProviderAttached(cfg.name);
                         if (cfg.aggregate) void this._aggregateServer?.addProvider(cfg.name);
                     };
                     this._upstreams.set(cfg.name, upstream);
@@ -730,7 +782,10 @@ export class WsTunnel implements IBrokerContext {
                         console.error(`[broker] stdio client transport: ${err.message}`);
                     };
                     transport.onClose = (): void => {
-                        // Client disconnected: nothing to clean up; pending sinks will time out.
+                        // Client disconnected: pending sinks will time out, but its
+                        // subscriptions are released now, so the provider stops
+                        // producing updates nobody reads.
+                        void this._subscriptions.removeClient(STDIO_CLIENT_KEY);
                     };
                     transport.connect();
                 }
@@ -829,6 +884,7 @@ export class WsTunnel implements IBrokerContext {
             const server = new AggregateServer((providerName) => this.openInternalClient(providerName));
             server.setScopeFilter(this._options.auth?.aggregateScopeFilter ?? null);
             server.setPolicyAuthorization(this._authorization);
+            server.onMembershipChanged = (name) => this._emitProviderChanged(name);
             server.start();
             this.registerLoopbackProvider(AggregateServer.SLOT, server);
             this._aggregateServer = server;
@@ -848,6 +904,14 @@ export class WsTunnel implements IBrokerContext {
         this._stopHeartbeat();
         this._stopRequestTimeoutSweep();
         this._providerSockets.clear();
+
+        // Forgotten without an upstream unsubscribe each: every provider is
+        // about to be disconnected, which drops its subscriptions anyway, and
+        // the closes below must not queue requests to sockets being torn down.
+        this._subscriptions.clear();
+        if (this._changedSlotsTimer) clearTimeout(this._changedSlotsTimer);
+        this._changedSlotsTimer = null;
+        this._changedSlots.clear();
 
         // Stop the embedded broker first so it does not see its loopback close
         // as an unexpected disconnect (and to flush any pending broker responses).
@@ -1161,6 +1225,9 @@ export class WsTunnel implements IBrokerContext {
                 return;
             case "internal":
                 sink.client.onMessage?.(data);
+                return;
+            case "broker":
+                sink.resolve(data);
                 return;
         }
     }
@@ -1734,6 +1801,7 @@ export class WsTunnel implements IBrokerContext {
             for (const [brokerId, entry] of state.pending) {
                 if (entry.sink.type === "sse" && entry.sink.sessionId === sessionId) state.pending.delete(brokerId);
             }
+            void this._subscriptions.removeClient(`sse:${sessionId}`);
         });
     }
 
@@ -1763,7 +1831,9 @@ export class WsTunnel implements IBrokerContext {
                 res.end(this._policyDeniedPayload(body));
                 return;
             }
-            if (this._isProviderConnected(providerName, state)) {
+            if (this._interceptClientFrame(state, providerName, body, { type: "sse", sessionId })) {
+                // Answered on the SSE stream, like every other response here.
+            } else if (this._isProviderConnected(providerName, state)) {
                 // Tracked only once the frame is actually on its way out: an
                 // entry added before the connectivity check has nothing to
                 // answer it and would pin that id until the slot next
@@ -1834,6 +1904,7 @@ export class WsTunnel implements IBrokerContext {
                     start: () => openTransport(transport),
                     stop: () => {
                         state.httpSessions.delete(sessionId);
+                        void this._subscriptions.removeClient(`http:${sessionId}`);
                         // Nothing can answer the requests this session had in
                         // flight; leaving them would pin the ids forever.
                         for (const [brokerId, entry] of state.pending) {
@@ -1853,6 +1924,8 @@ export class WsTunnel implements IBrokerContext {
             session.transport.send(this._policyDeniedPayload(frame));
             return;
         }
+
+        if (this._interceptClientFrame(state, providerName, frame, { type: "http-session", sessionId })) return;
 
         if (!this._isProviderConnected(providerName, state)) {
             session.transport.send(this._notConnectedPayload(providerName, frame));
@@ -1949,6 +2022,7 @@ export class WsTunnel implements IBrokerContext {
         state.ws = ws;
         state.connectedSinceMs = Date.now();
         this._watchProviderSocket(ws);
+        this._onProviderAttached(name);
         if (providerPrincipal) {
             this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
         }
@@ -2142,6 +2216,7 @@ export class WsTunnel implements IBrokerContext {
             for (const [brokerId, entry] of state.pending) {
                 if (entry.sink.type === "ws" && entry.sink.socket === ws) state.pending.delete(brokerId);
             }
+            void this._subscriptions.removeClient(this._wsClientKey(ws));
         });
 
         // Same reason as on the provider sockets: an unhandled 'error' event is
@@ -2236,6 +2311,7 @@ export class WsTunnel implements IBrokerContext {
                 const state = this._getOrCreateProviderState(name);
                 state.ws = ws;
                 state.connectedSinceMs = Date.now();
+                this._onProviderAttached(name);
                 if (providerPrincipal) {
                     this._logProviderRegistration(providerPrincipal, name, this._slotResourceResolver.resolve(name), true);
                 }
@@ -2320,6 +2396,7 @@ export class WsTunnel implements IBrokerContext {
     }
 
     private _routeFromStdioClient(state: IProviderState, data: string): void {
+        if (this._interceptClientFrame(state, this._stdioClientProvider!, data, { type: "stdio" })) return;
         if (this._isProviderConnected(this._stdioClientProvider!, state)) {
             this._sendToProvider(state, this._stdioClientProvider!, this._trackRequest(state, data, { type: "stdio" }));
         } else {
@@ -2359,6 +2436,8 @@ export class WsTunnel implements IBrokerContext {
             client.send(this._policyDeniedPayload(data));
             return;
         }
+
+        if (this._interceptClientFrame(state, providerName, data, { type: "ws", socket: client })) return;
 
         if (!this._isProviderConnected(providerName, state)) {
             // Echo the request id and name the slot. With `id: null` a client that
@@ -2403,6 +2482,9 @@ export class WsTunnel implements IBrokerContext {
                 } else {
                     this._warnUnmatchedResponseId(providerName, msg.id);
                 }
+            } else if ((msg as { method?: unknown }).method === "notifications/resources/updated") {
+                // Addressed: only the sessions subscribed to that URI get it.
+                this._routeResourceUpdated(state, providerName, msg as { params?: unknown }, data);
             } else {
                 // Notification (no id): broadcast to all clients of this provider.
                 this._broadcast(state, providerName, data);
@@ -2491,6 +2573,8 @@ export class WsTunnel implements IBrokerContext {
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
         state.connectedSinceMs = null;
+        this._subscriptions.providerDisconnected(name);
+        this._emitProviderChanged(name);
         // Echoing the **client's** id rather than `null` or the broker's: a
         // Streamable HTTP session matches the answer to its held-open POST by
         // the id it chose, so an unaddressed error would leave that request
@@ -2537,8 +2621,245 @@ export class WsTunnel implements IBrokerContext {
                 httpEndpoint: null,
             };
             this._providers.set(name, state);
+            this._emitProviderChanged(name);
         }
         return state;
+    }
+
+    // -------------------------------------------------------------------------
+    // Resource subscriptions
+    // -------------------------------------------------------------------------
+
+    /** The {@link ClientKey} of a raw WS client socket. */
+    private _wsClientKey(ws: WebSocket): ClientKey {
+        let id = this._wsClientIds.get(ws);
+        if (id === undefined) {
+            id = this._nextWsClientId++;
+            this._wsClientIds.set(ws, id);
+        }
+        return `ws:${id}`;
+    }
+
+    /** The {@link ClientKey} of a sink that is a client, `null` for the broker's own and internal sinks. */
+    private _clientKeyOf(sink: ResponseSink): ClientKey | null {
+        switch (sink.type) {
+            case "ws":
+                return this._wsClientKey(sink.socket);
+            case "sse":
+                return `sse:${sink.sessionId}`;
+            case "http-session":
+                return `http:${sink.sessionId}`;
+            case "stdio":
+                return STDIO_CLIENT_KEY;
+            case "internal":
+                return this._internalClientKey(sink.client);
+            default:
+                return null;
+        }
+    }
+
+    /** The {@link ClientKey} of an in-process client from {@link openInternalClient}. */
+    private _internalClientKey(client: IInternalClient): ClientKey {
+        let id = this._internalClientIds.get(client);
+        if (id === undefined) {
+            id = this._nextInternalClientId++;
+            this._internalClientIds.set(client, id);
+        }
+        return `internal:${id}`;
+    }
+
+    /** The principal behind a client sink, for the per-notification policy check. */
+    private _principalOfSink(state: IProviderState, sink: ResponseSink): IPrincipal | null {
+        switch (sink.type) {
+            case "ws":
+                return this._clientPrincipals.get(sink.socket) ?? null;
+            case "sse": {
+                const res = state.sseSessions.get(sink.sessionId);
+                return res ? (this._streamPrincipals.get(res) ?? null) : null;
+            }
+            case "http-session":
+                return state.httpSessions.get(sink.sessionId)?.principal ?? null;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Answers `resources/subscribe` and `resources/unsubscribe` from the
+     * broker's own registry instead of relaying them. Returns `true` when the
+     * frame was one of those and has been (or will be) answered.
+     *
+     * Also remembers the last `initialize` of the slot, for {@link _replaySubscriptions}.
+     *
+     * Runs after the policy check. `resources/unsubscribe` is not classified,
+     * so it is never refused: a client whose read grant was revoked must
+     * still be able to drop what it holds. `_all` is skipped: it serves tools
+     * and prompts only, and answers resources methods with `-32601` itself.
+     */
+    private _interceptClientFrame(state: IProviderState, providerName: string, frame: string, sink: ResponseSink): boolean {
+        // A cheap guard before parsing: almost every frame is neither.
+        if (!frame.includes('"resources/') && !frame.includes('"initialize"')) return false;
+        const msg = parseObjectFrame(frame);
+        if (!msg) return false;
+        if (msg.method === "initialize") {
+            state.lastInitializeParams = msg.params;
+            return false;
+        }
+        if (msg.method !== "resources/subscribe" && msg.method !== "resources/unsubscribe") return false;
+        if (providerName === AggregateServer.SLOT) return false;
+        const id = msg.id;
+        if (typeof id !== "string" && typeof id !== "number") return false;
+        const client = this._clientKeyOf(sink);
+        if (!client) return false;
+
+        const answer = (outcome: SubscriptionOutcome): void => {
+            const reply = outcome.ok ? { jsonrpc: "2.0", id, result: {} } : { jsonrpc: "2.0", id, error: outcome.error };
+            this._deliverToSink(state, sink, JSON.stringify(reply));
+        };
+        const uri = (msg.params as { uri?: unknown } | undefined)?.uri;
+        if (typeof uri !== "string" || uri.length === 0) {
+            answer({ ok: false, error: { code: -32602, message: "Missing required parameter: uri" } });
+            return true;
+        }
+
+        const pending =
+            msg.method === "resources/subscribe" ? this._subscriptions.subscribe(providerName, client, sink, uri) : this._subscriptions.unsubscribe(providerName, client, uri);
+        void pending.then(answer, (error: unknown) => answer({ ok: false, error: { code: -32603, message: `Subscription failed: ${(error as Error).message}` } }));
+        return true;
+    }
+
+    /**
+     * Sends one aggregated `resources/subscribe` or `resources/unsubscribe` to
+     * the provider behind `slot` and resolves with its answer. Never rejects:
+     * a disconnect or a timeout arrives as an error answer through the same
+     * pending-request machinery every client request uses.
+     */
+    private _subscriptionRequest(slot: string, method: "resources/subscribe" | "resources/unsubscribe", uri: string): Promise<SubscriptionOutcome> {
+        return this._brokerRequest(slot, method, { uri }).then((reply) => (reply.error ? { ok: false, error: reply.error } : { ok: true }));
+    }
+
+    /** Sends a request of the broker's own to a provider and resolves with the parsed answer. */
+    private _brokerRequest(slot: string, method: string, params: unknown): Promise<{ result?: unknown; error?: { code: number; message: string } }> {
+        const state = this._providers.get(slot);
+        if (!state || !this._isProviderConnected(slot, state)) {
+            return Promise.resolve({ error: { code: -32000, message: `Provider "${slot}" not connected` } });
+        }
+        return new Promise((resolve) => {
+            const sink: ResponseSink = {
+                type: "broker",
+                resolve: (frame) => {
+                    const reply = parseObjectFrame(frame) as { result?: unknown; error?: { code: number; message: string } } | undefined;
+                    resolve(reply ?? { error: { code: -32700, message: "Unparseable answer" } });
+                },
+            };
+            this._sendToProvider(state, slot, this._trackRequest(state, JSON.stringify({ jsonrpc: "2.0", id: 0, method, params }), sink));
+        });
+    }
+
+    /**
+     * Delivers a provider's `notifications/resources/updated` to the sessions
+     * subscribed to its URI, and to nobody else.
+     *
+     * A frame without a usable URI is dropped, never broadcast: there is no
+     * safe audience for it. Each recipient is re-checked against the policy,
+     * because a grant can be revoked after the subscription was accepted; a
+     * recipient that fails the check is unsubscribed as well as skipped.
+     */
+    private _routeResourceUpdated(state: IProviderState, providerName: string, msg: { params?: unknown }, data: string): void {
+        const uri = (msg.params as { uri?: unknown } | undefined)?.uri;
+        if (typeof uri !== "string" || uri.length === 0 || uri.length > this._subscriptions.limits.maxResourceUriLength) {
+            if (!this._invalidUpdateWarnedProviders.has(providerName)) {
+                this._invalidUpdateWarnedProviders.add(providerName);
+                console.warn(
+                    `[broker] provider "${providerName}" sent notifications/resources/updated without a usable params.uri; it was dropped, not broadcast. ` +
+                        `The notification must name the one URI that changed, as a string of at most ${this._subscriptions.limits.maxResourceUriLength} characters. Further such frames from this slot are not logged.`
+                );
+            }
+            return;
+        }
+        this._deliverResourceUpdated(state, providerName, uri, data);
+    }
+
+    private _deliverResourceUpdated(state: IProviderState, providerName: string, uri: string, data: string): void {
+        for (const { client, sink } of this._subscriptions.subscribers(providerName, uri)) {
+            // The stdio bridge and in-process clients are unchecked on every
+            // path, this one included: neither carries a principal.
+            if (sink.type !== "stdio" && sink.type !== "internal" && !this._authorizeMcpFrame(providerName, data, this._principalOfSink(state, sink))) {
+                void this._subscriptions.unsubscribe(providerName, client, uri);
+                continue;
+            }
+            this._deliverToSink(state, sink, data);
+        }
+    }
+
+    /** A provider now serves `name`: announce it, and restore the subscriptions it should hold. */
+    private _onProviderAttached(name: string): void {
+        this._emitProviderChanged(name);
+        if (this._subscriptions.hasSubscriptions(name)) {
+            void this._replaySubscriptions(name).catch((error: unknown) => {
+                console.error(`[broker] provider "${name}": restoring resource subscriptions failed: ${(error as Error).message}`);
+            });
+        }
+    }
+
+    /**
+     * Re-subscribes a provider that (re)attached to URIs clients still hold,
+     * once per URI.
+     *
+     * The provider is handshaken first, with the last `initialize` a client
+     * sent on this slot, because a fresh provider has no session: requests
+     * before `initialize` break the MCP lifecycle, and an mcp-core server
+     * suppresses its list_changed notifications until it sees
+     * `notifications/initialized`.
+     *
+     * Every subscriber then gets one `notifications/resources/updated`: the
+     * content may have changed while nobody was watching, so a re-read is due.
+     * Where the new provider refuses a URI, that is also what tells its
+     * subscribers, since their re-read fails; their subscription is dropped.
+     */
+    private async _replaySubscriptions(name: string): Promise<void> {
+        const params = this._providers.get(name)?.lastInitializeParams ?? {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: this.name, version: this.version },
+        };
+        const init = await this._brokerRequest(name, "initialize", params);
+        if (init.error) {
+            console.warn(`[broker] provider "${name}" refused the initialize sent before restoring subscriptions: ${init.error.message}. Subscriptions are restored anyway.`);
+        } else {
+            const state = this._providers.get(name);
+            if (state) this._sendToProvider(state, name, JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+        }
+
+        const state = this._providers.get(name);
+        for (const result of await this._subscriptions.replay(name)) {
+            if (!result.outcome.ok) {
+                console.warn(
+                    `[broker] provider "${name}" refused to restore the subscription to "${result.uri}" after reconnecting: ${result.outcome.error.message}. ` +
+                        `Its ${result.subscribers.length} subscriber(s) were dropped and told to re-read.`
+                );
+            }
+            if (!state) continue;
+            const data = JSON.stringify({ jsonrpc: "2.0", method: "notifications/resources/updated", params: { uri: result.uri } });
+            for (const { sink } of result.subscribers) this._deliverToSink(state, sink, data);
+        }
+    }
+
+    /**
+     * Queues `name` for the next {@link onProvidersChanged} batch. Batched per
+     * tick, so a multiplexed socket announcing ten slots, or a slot attaching
+     * and joining `_all` in the same breath, produces one notification.
+     */
+    private _emitProviderChanged(name: string): void {
+        this._changedSlots.add(name);
+        if (this._changedSlotsTimer) return;
+        this._changedSlotsTimer = setTimeout(() => {
+            this._changedSlotsTimer = null;
+            const names = [...this._changedSlots];
+            this._changedSlots.clear();
+            if (names.length > 0) this._providersChanged.emit(names);
+        }, 0);
+        this._changedSlotsTimer.unref?.();
     }
 
     // -------------------------------------------------------------------------

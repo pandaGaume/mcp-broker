@@ -166,6 +166,7 @@ don't ask for v2 fall back to `default:fr` or further down the chain.
 
     "providerHeartbeatIntervalMs": 30000,
     "providerRequestTimeoutMs": 60000,
+    "resourceSubscriptions": { "maxSubscriptionsPerClient": 64, "maxSubscriptionsPerSlot": 1024, "maxResourceUriLength": 2048 },
     "providerTakeover": "liveness",
 
     "paths": {
@@ -243,6 +244,7 @@ it here would look functional and do nothing.
 | `providerHeartbeatIntervalMs` | `number` | `30000` | `MCP_BROKER_PROVIDER_HEARTBEAT_MS` | ws-level ping interval on provider sockets. `0` disables |
 | `providerRequestTimeoutMs` | `number` | `60000` | `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS` | Deadline for one provider request. `0` disables |
 | `providerTakeover` | `"reject" \| "liveness" \| "always"` | `"liveness"` | `MCP_BROKER_PROVIDER_TAKEOVER` | What happens when a second provider claims an occupied slot |
+| `resourceSubscriptions` | `object` | see below | see below | Bounds on `resources/subscribe` bookkeeping |
 
 ### `brokerName` is library-only
 
@@ -347,6 +349,24 @@ caller's own id, plus one log line naming the usual causes. Raise it if you host
 genuinely long-running tools. The counter-argument to a deadline is those tools;
 the argument for one is that a hang with no diagnostic is strictly worse than a
 nameable error, and this is a knob.
+
+### `resourceSubscriptions`
+
+The broker answers `resources/subscribe` itself and keeps one upstream
+subscription per URI for all the clients of a slot. These bounds cap what
+clients can make it hold.
+
+| Field | Default | Env var | Past the limit |
+|---|---|---|---|
+| `maxSubscriptionsPerClient` | `64` | `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT` | `-32000 Subscription limit reached` |
+| `maxSubscriptionsPerSlot` | `1024` | `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT` | `-32000 Subscription limit reached` |
+| `maxResourceUriLength` | `2048` | `MCP_BROKER_MAX_RESOURCE_URI_LENGTH` | `-32602` |
+
+A client is one WebSocket, one SSE stream, one Streamable HTTP session or the
+stdio bridge. The per-slot bound is what caps Streamable HTTP clients that leave
+without `DELETE`: their sessions never expire, and neither do their
+subscriptions. `resourceSubscriptionCount` in `provider_status` shows the
+current total. Programmatically: `withResourceSubscriptionLimits({ ... })`.
 
 ### `paths` (URL routing)
 

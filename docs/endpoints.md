@@ -89,7 +89,7 @@ The same client-side endpoints apply, with `<encodedName>` = `_broker`:
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/_broker/mcp` | Call the five introspection tools, or read the introspection resources |
-| GET | `/_broker/mcp` | Notification stream from the broker (currently no broker-emitted notifications) |
+| GET | `/_broker/mcp` | Notification stream: `notifications/resources/updated` for subscribed `broker://providers` URIs |
 | WS | `/_broker` | Raw WebSocket MCP transport to the broker introspection server |
 
 Tools: `broker_info`, `providers_list`, `provider_status({ name })`,
@@ -105,8 +105,13 @@ Resources: `broker://info`, `broker://providers`, the template
 effective configuration (host, port, scheme, all six URL paths) appended to each
 page, so it can never silently contradict what the process is actually doing.
 `broker_diagnose` returns live state plus proven problems, each with `symptom`,
-`evidence` and a `fix`; it has no backing resource on purpose, because resource
-content is cached and a cached diagnosis is stale exactly when it matters.
+`evidence` and a `fix`; it has no backing resource on purpose, because a
+resource invites caching and a cached diagnosis is stale exactly when it matters.
+
+`broker://providers` and `broker://providers/<name>` accept
+`resources/subscribe`: a slot appearing, a provider attaching or detaching, and a
+slot joining or leaving `_all` each send `notifications/resources/updated`.
+Counters never do. Reads of both resources are always live.
 
 The broker's MCP server is in-process and connected to the routing layer via
 a loopback transport, there is no real network hop. Reachable through every

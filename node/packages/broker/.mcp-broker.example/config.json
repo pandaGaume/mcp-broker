@@ -19,6 +19,12 @@
     "providerRequestTimeoutMs": 60000,
     "providerTakeover": "liveness",
 
+    "resourceSubscriptions": {
+        "maxSubscriptionsPerClient": 64,
+        "maxSubscriptionsPerSlot": 1024,
+        "maxResourceUriLength": 2048
+    },
+
     "tls": {
         "cert": "certs/cert.pem",
         "key":  "certs/key.pem"

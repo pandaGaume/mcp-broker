@@ -333,6 +333,40 @@ What happens when a provider connects to a slot another socket already holds.
 
 Also `MCP_BROKER_PROVIDER_TAKEOVER`.
 
+## Resource subscriptions
+
+```json
+"resourceSubscriptions": {
+    "maxSubscriptionsPerClient": 64,
+    "maxSubscriptionsPerSlot": 1024,
+    "maxResourceUriLength": 2048
+}
+```
+
+When a client sends `resources/subscribe`, the broker answers it itself and
+asks the provider only once per URI, however many clients watch it. It then
+delivers `notifications/resources/updated` to the clients that subscribed to
+that URI, and to nobody else. These three optional keys bound what clients can
+make it hold; the values shown are the defaults.
+
+### `maxSubscriptionsPerClient`
+
+How many URIs one client (a WebSocket, an SSE stream, a Streamable HTTP session)
+may watch at once. Past it, the subscription is refused with `-32000`. Also
+`MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT`.
+
+### `maxSubscriptionsPerSlot`
+
+How many client subscriptions one slot may hold in total. This is the bound that
+matters for Streamable HTTP clients that close their tab without `DELETE`:
+their sessions never expire, and neither do their subscriptions. Also
+`MCP_BROKER_MAX_SUBSCRIPTIONS_PER_SLOT`.
+
+### `maxResourceUriLength`
+
+The longest URI accepted, in characters. A longer one is refused with `-32602`.
+Also `MCP_BROKER_MAX_RESOURCE_URI_LENGTH`.
+
 ## TLS
 
 ```json

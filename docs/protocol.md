@@ -151,6 +151,34 @@ Endpoints:
   ```
 - `POST /<name>/messages?sessionId=<uuid>`, body is a JSON-RPC request. Always returns `202 Accepted`. The response is delivered as a `message` event on the matching SSE stream.
 
+## Resource subscriptions
+
+`resources/subscribe` and `resources/unsubscribe` are answered by the broker, on
+every client transport and every slot except `_all`, and never relayed one per
+client:
+
+```
+client A  resources/subscribe {uri}  ->  broker  ->  provider  resources/subscribe {uri}   (first subscriber)
+client B  resources/subscribe {uri}  ->  broker  answers {} locally                        (already active)
+client A  resources/unsubscribe      ->  broker  answers {} locally                        (B still holds it)
+client B  resources/unsubscribe      ->  broker  ->  provider  resources/unsubscribe {uri} (last one out)
+```
+
+Operations on one URI are serialized, so concurrent subscribers produce one
+upstream call and an unsubscribe never overtakes the subscribe it undoes. The
+upstream requests carry broker-assigned ids (`brk-<n>`) and their answers are
+consumed by the broker.
+
+A provider's `notifications/resources/updated` is delivered to the sessions
+subscribed to `params.uri`, matched exactly, after a per-recipient policy check.
+One without a string `params.uri` is dropped. Every other provider notification
+is broadcast to the slot as before.
+
+When a provider (re)attaches to a slot that still has subscribers, the broker
+sends, in order: the last `initialize` a client sent on that slot,
+`notifications/initialized`, then one `resources/subscribe` per URI. Each
+subscriber then receives one `notifications/resources/updated`.
+
 ## Error envelopes
 
 When a client targets a provider that is not connected, the broker fabricates:

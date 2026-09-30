@@ -9,12 +9,30 @@ export const PROVIDERS_URI = "broker://providers";
 export const PROVIDER_URI_TEMPLATE = "broker://providers/{name}";
 
 /**
+ * The URI of one slot's resource, as the `broker://providers/{name}` template
+ * expands it. The name is percent-encoded, so a slot such as `a/b` is
+ * `broker://providers/a%2Fb`; a subscription must use that exact string.
+ */
+export function providerUri(name: string): string {
+    return `broker://providers/${encodeURIComponent(name)}`;
+}
+
+/**
  * Adapter that exposes the broker's current provider slots, both as a list
  * (read of `broker://providers`) and individually (`broker://providers/<name>`).
  */
 export class BrokerProvidersAdapter extends McpAdapterBase {
     constructor(private readonly _context: IBrokerContext) {
         super("broker");
+
+        // Each batch of slot changes updates the list once, and each slot's
+        // own resource once. The server delivers them only to a session that
+        // subscribed to that exact URI.
+        _context.onProvidersChanged?.subscribe((names) => {
+            if (names.length === 0) return;
+            this._forwardResourceContentChanged(PROVIDERS_URI);
+            for (const name of new Set(names)) this._forwardResourceContentChanged(providerUri(name));
+        });
     }
 
     public async readResourceAsync(uri: string): Promise<McpResourceContent | undefined> {

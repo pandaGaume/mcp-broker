@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
 import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMode } from "./ws.interfaces";
+import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "../auth/index";
@@ -44,6 +45,7 @@ export class WsTunnelBuilder {
     private _providerHeartbeatIntervalMs: number | undefined = undefined;
     private _providerTakeover: ProviderTakeoverMode | undefined = undefined;
     private _providerRequestTimeoutMs: number | undefined = undefined;
+    private _resourceSubscriptions: Partial<IResourceSubscriptionLimits> | undefined = undefined;
     private _staticMounts: IStaticMount[] = [];
     private _stdioUpstreams: IStdioUpstreamConfig[] = [];
     private _remoteUpstreams: IRemoteUpstreamConfig[] = [];
@@ -213,6 +215,16 @@ export class WsTunnelBuilder {
     }
 
     /**
+     * Bounds what `resources/subscribe` can make the broker hold. Fields left
+     * out keep their default: 64 URIs per client, 1024 client subscriptions per
+     * slot, URIs of at most 2048 characters.
+     */
+    withResourceSubscriptionLimits(limits: Partial<IResourceSubscriptionLimits>): this {
+        this._resourceSubscriptions = { ...this._resourceSubscriptions, ...limits };
+        return this;
+    }
+
+    /**
      * Adds a static-file mount served over plain HTTP.
      * Can be called multiple times; longest-prefix match wins at runtime.
      *
@@ -373,6 +385,7 @@ export class WsTunnelBuilder {
             providerHeartbeatIntervalMs: this._providerHeartbeatIntervalMs,
             providerTakeover: this._providerTakeover,
             providerRequestTimeoutMs: this._providerRequestTimeoutMs,
+            resourceSubscriptions: this._resourceSubscriptions,
             staticMounts: this._staticMounts.length > 0 ? [...this._staticMounts] : undefined,
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
             remoteUpstreams: this._remoteUpstreams.length > 0 ? [...this._remoteUpstreams] : undefined,

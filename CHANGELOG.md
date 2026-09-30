@@ -20,6 +20,54 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-30
+
+### Added
+
+- **broker** `resources/subscribe` and `resources/unsubscribe`, on every slot
+  except `_all` and over every client transport. The broker owns the reference
+  count: N clients on one URI cost the provider one upstream subscribe, and the
+  last one leaving sends one unsubscribe. Operations on one URI are serialized.
+  Subscriptions are released on WebSocket close, SSE close, `DELETE`, stdio
+  close, in-process client (`openInternalClient()`) close and broker stop, and restored when a provider reconnects (after a
+  replayed `initialize`), each subscriber then getting one update.
+- **broker** `_broker` emits `notifications/resources/updated` on
+  `broker://providers` and `broker://providers/<name>` when a slot appears, a
+  provider attaches or detaches, or a slot joins or leaves `_all`
+  (`IBrokerContext.onProvidersChanged`). Counters never notify.
+- **broker** `resourceSubscriptions` config key (`maxSubscriptionsPerClient`,
+  `maxSubscriptionsPerSlot`, `maxResourceUriLength`), the matching
+  `MCP_BROKER_MAX_*` env vars and `WsTunnelBuilder.withResourceSubscriptionLimits()`.
+  `provider_status` reports `resourceSubscriptionCount`.
+- **broker** `ResourceSubscriptionRegistry` is exported for embedders.
+
+### Changed
+
+- **broker** `notifications/resources/updated` from a provider is no longer
+  broadcast to the slot: only sessions subscribed to that exact URI receive it,
+  after a per-recipient policy check. One without a usable `params.uri` is
+  dropped and logged.
+- **broker** Authorization classifies `resources/subscribe` and
+  `resources/templates/list` as `mcp.resources.read` (`broker.providers.read`
+  on `_broker`). `resources/templates/list` was unclassified and so never
+  checked. `resources/unsubscribe` stays unclassified on purpose.
+- **broker, provider** `@cyanmycelium/mcp-core` `^1.3.0`.
+
+### Fixed
+
+- **broker** `broker://providers` and `broker://info` served the snapshot cached
+  at their first read forever. Reads are live now.
+
+### Coordinated releases
+
+- `@cyanmycelium/mcp-core` 1.3.0: `resources/subscribe`, `resources/unsubscribe`,
+  `prompts/list`, `prompts/get`, `completion/complete` and `logging/setLevel`
+  in `McpServer`, all in the spec since `2024-11-05` and all answered `-32601`
+  until now; behaviors report changes through `onResourceUpdated`,
+  `onResourcesListChanged` and `onPromptsChanged`, and `McpBehavior` finally
+  forwards its adapter's change events; a spec-coverage test fails on any spec
+  method left unanswered without a declared reason.
+
 ## [1.3.4] - 2026-09-21
 
 ### Changed

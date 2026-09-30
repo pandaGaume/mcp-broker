@@ -6,6 +6,7 @@ import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import type { IResolvedAuth, IProviderAuthenticator, IPrincipal } from "../auth/index";
 import type { IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
+import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
 
 /**
  * Every type the WebSocket tunnel exchanges or is configured with.
@@ -36,7 +37,10 @@ export type ResponseSink =
     | { type: "sse"; sessionId: string }
     | { type: "http-session"; sessionId: string }
     | { type: "stdio" }
-    | { type: "internal"; client: IInternalClient };
+    | { type: "internal"; client: IInternalClient }
+    // A request the broker itself sent (an aggregated `resources/subscribe`,
+    // the handshake before a replay). Its answer is consumed, never relayed.
+    | { type: "broker"; resolve: (frame: string) => void };
 
 /**
  * The client-transport handlers a provider route can resolve to.
@@ -191,6 +195,13 @@ export interface IProviderState {
     readonly internalClients: Set<IInternalClient>;
     /** Lazily built Streamable HTTP endpoint serving this slot. */
     httpEndpoint: StreamableHttpEndpoint | null;
+    /**
+     * `params` of the last `initialize` a client sent on this slot. Replayed
+     * to a provider that reconnects while subscriptions are held, so the
+     * broker can restore them on a session the provider considers open,
+     * instead of sending requests to one that was never initialized.
+     */
+    lastInitializeParams?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +373,19 @@ export interface IWsTunnelOptions {
      * @default 60000
      */
     providerRequestTimeoutMs?: number;
+
+    /**
+     * Bounds on `resources/subscribe` bookkeeping. Every field is optional and
+     * falls back to {@link DEFAULT_RESOURCE_SUBSCRIPTION_LIMITS}: 64 URIs per
+     * client, 1024 client subscriptions per slot, URIs of at most 2048
+     * characters. A subscription past a limit is refused with `-32000`, an
+     * overlong URI with `-32602`.
+     *
+     * The per-slot bound is what caps a Streamable HTTP client that closes its
+     * tab without `DELETE`: its session never expires, so neither do its
+     * subscriptions.
+     */
+    resourceSubscriptions?: Partial<IResourceSubscriptionLimits>;
 
     /**
      * Optional static-file mounts served over plain HTTP.

@@ -6,6 +6,15 @@ export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream
 export { RemoteUpstream } from "./remote.upstream";
 export type { IRemoteUpstreamConfig, RemoteUpstreamConfig } from "./remote.upstream";
 export type { IUpstream, Upstream } from "./upstream";
+export { ResourceSubscriptionRegistry, DEFAULT_RESOURCE_SUBSCRIPTION_LIMITS, SUBSCRIPTION_LIMIT_ERROR_CODE } from "./subscriptions/resource.subscription.registry";
+export type {
+    ClientKey,
+    IReplayResult,
+    IResourceSubscriptionLimits,
+    IResourceSubscriptionUpstream,
+    SubscriptionOutcome,
+    SubscriptionState,
+} from "./subscriptions/resource.subscription.registry";
 
 // `.mcpb` bundle loading, verifies + unpacks a bundle into a stdio upstream.
 export { loadMcpbBundle } from "./mcpb/mcpb.loader";

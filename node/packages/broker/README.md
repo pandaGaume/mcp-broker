@@ -225,6 +225,19 @@ Matching resources for clients that prefer `resources/read`: `broker://info`,
 `broker://providers`, the template `broker://providers/{name}`, the six
 `broker://guide/<topic>` pages and the template `broker://guide/{topic}`.
 
+**Watch slots instead of polling.** `broker://providers` and
+`broker://providers/<name>` accept `resources/subscribe`. A slot appearing, a
+provider attaching or detaching, a slot joining or leaving `_all` each send
+`notifications/resources/updated`; the counters never do, since reading moves
+them. Reads are always live.
+
+```jsonc
+// -> {"jsonrpc":"2.0","id":2,"method":"resources/subscribe","params":{"uri":"broker://providers"}}
+// <- {"jsonrpc":"2.0","id":2,"result":{}}
+// ...a provider connects:
+// <- {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"broker://providers"}}
+```
+
 Each provider entry from `providers_list` / `provider_status`:
 
 ```json
@@ -237,7 +250,8 @@ Each provider entry from `providers_list` / `provider_status`:
     "connectedForMs": 184211,
     "clientCount": 0,
     "sessionCount": 1,
-    "pendingCount": 0
+    "pendingCount": 0,
+    "resourceSubscriptionCount": 0
 }
 ```
 
@@ -256,6 +270,9 @@ Each provider entry from `providers_list` / `provider_status`:
   Streamable HTTP client reads as `clientCount: 0, sessionCount: 1`.
 - `pendingCount` is the number of in-flight requests. One that only grows is the
   signature of a provider that is connected and not answering.
+- `resourceSubscriptionCount` is the client/URI pairs held by
+  `resources/subscribe`. One that only grows is HTTP clients leaving without
+  `DELETE`.
 
 ### `_all`, the aggregate
 
@@ -305,6 +322,44 @@ When authorization is enabled, `_all` **filters the catalog** rather than
 rejecting the call: a caller sees only the providers it is scoped for, and a
 tool it may not see answers `-32602 Unknown aggregated tool`, deliberately
 indistinguishable from a name that does not exist.
+
+## Resource subscriptions
+
+`resources/subscribe` works on every slot except `_all`, over every client
+transport. The broker owns the reference count between clients and provider:
+
+- N clients on one URI cost the provider **one** `resources/subscribe`; the last
+  one leaving sends **one** `resources/unsubscribe`. Concurrent requests are
+  serialized per URI.
+- `notifications/resources/updated` reaches only the sessions subscribed to that
+  exact `params.uri`. One without a usable `uri` is dropped and logged, never
+  broadcast. Every other notification is still broadcast to the slot.
+- Closing a WebSocket or an SSE stream, `DELETE /<slot>/mcp`, closing stdio,
+  closing an in-process client from `openInternalClient()`, and stopping the
+  broker all release what the client held.
+- When a provider reconnects, the broker replays the last client `initialize`,
+  then one subscribe per URI still held, then sends each subscriber one
+  `updated` so it re-reads. Install the provider's message handler before its
+  socket opens.
+- `resources/subscribe` needs `mcp.resources.read` on the slot
+  (`broker.providers.read` on `_broker`); each update is re-checked per
+  recipient, and one that lost the grant is unsubscribed. `resources/unsubscribe`
+  is never refused.
+- Limits: `resourceSubscriptions` in `config.json` (see
+  [config.md](docs/config.md#resourcesubscriptions)), or
+  `withResourceSubscriptionLimits()` on the builder.
+
+A provider built on `@cyanmycelium/mcp-core` 1.3.0 or later answers
+`resources/subscribe` itself; its behaviors only report changes:
+
+```ts
+class GaugeAdapter extends McpAdapterBase {
+    set(value: number): void {
+        this._value = value;
+        this._forwardResourceContentChanged("plant://gauge"); // -> notifications/resources/updated, subscribers only
+    }
+}
+```
 
 ## Authorization (OAuth 2.1)
 
@@ -709,6 +764,9 @@ covers the failures the broker cannot see from the inside.
 | `-32602 Unknown aggregated tool` | the prefixed name was reconstructed rather than echoed | re-run `tools/list`, pass the name back verbatim |
 | `did not respond within 60000ms` | the provider stayed connected and never answered | raise `providerRequestTimeoutMs`, or fix the provider |
 | `sessionCount` grows and never falls | Streamable HTTP and SSE sessions do not expire | send `DELETE /<slot>/mcp` when a client is done; restart if it is already large |
+| Subscribed, `notifications/resources/updated` never arrives | the update names another URI (exact match), carries no `params.uri` (dropped, logged once), or the read grant was revoked | compare URIs byte for byte; read the broker log |
+| `resources/subscribe` answers `-32601` on a provider slot | the provider does not implement it (mcp-core before 1.3.0 did not) | upgrade the provider |
+| `-32000 Subscription limit reached` | `maxSubscriptionsPerClient` or `maxSubscriptionsPerSlot` | unsubscribe what you no longer watch, or raise `resourceSubscriptions` |
 
 Reading the console: the broker prints one line per accepted WebSocket upgrade
 naming the path, the role the router assigned (`dedicated-provider`,
