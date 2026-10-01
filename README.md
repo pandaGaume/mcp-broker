@@ -127,6 +127,7 @@ Start with **[AGENTS.md](AGENTS.md)** if you want one file that covers the decis
 - [docs/packages.md](docs/packages.md): the packages, what belongs in each, and why `client` was split into `provider` and `consumer`
 - [docs/architecture.md](docs/architecture.md), overview, roles, request flow, the reserved `_broker` and `_all` slots
 - [docs/protocol.md](docs/protocol.md), provider WebSocket framing, JSON-RPC envelopes, the aggregate opt-in frame
+- [docs/telemetry.md](docs/telemetry.md), provider trace transport, MCU codec, bounded queue, OTLP export and PDU security
 - [docs/endpoints.md](docs/endpoints.md): every HTTP and WS endpoint exposed by the broker
 - [docs/authorization.md](docs/authorization.md): OAuth 2.1 resource server, provider auth, `_all` scope filtering (opt-in)
 - [docs/hierarchical-authorization.md](docs/hierarchical-authorization.md): roles, ISA-95-aligned resource paths, inherited permissions, explicit deny, and provider namespaces

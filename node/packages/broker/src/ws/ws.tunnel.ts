@@ -53,6 +53,7 @@ import {
     type IBrokerAuthorityInfo,
 } from "../authority/broker.authority";
 import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
+import { ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD, type IProviderTelemetryStats } from "../telemetry/index";
 import type {
     AllowedOrigins,
     IHttpSession,
@@ -470,6 +471,9 @@ export class WsTunnel implements IBrokerContext {
     /** Periodic cleanup of caller references whose request went away without an answer. */
     private _callerRefSweepTimer: NodeJS.Timeout | null = null;
 
+    /** Optional low-priority provider telemetry queue. */
+    private readonly _telemetry: ProviderTelemetryDispatcher | null;
+
     constructor(options: IWsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
@@ -488,6 +492,7 @@ export class WsTunnel implements IBrokerContext {
             },
             options.resourceSubscriptions
         );
+        this._telemetry = options.telemetry ? new ProviderTelemetryDispatcher(options.telemetry) : null;
         this._validateProtectedSlots();
         this._authority = new BrokerAuthority({
             protectedSlots: options.protectedSlots,
@@ -642,6 +647,23 @@ export class WsTunnel implements IBrokerContext {
         const state = this._providers.get(name);
         if (!state) return undefined;
         return this._buildProviderInfo(name, state);
+    }
+
+    /** Current bounded telemetry pipeline counters. */
+    public getTelemetryStats(): IProviderTelemetryStats {
+        return (
+            this._telemetry?.stats ?? {
+                enabled: false,
+                accepted: 0,
+                exported: 0,
+                droppedInvalid: 0,
+                droppedOversize: 0,
+                droppedQueueFull: 0,
+                droppedExporter: 0,
+                exportErrors: 0,
+                queued: 0,
+            }
+        );
     }
 
     private _buildProviderInfo(name: string, state: IProviderState): IBrokerProviderInfo {
@@ -1120,6 +1142,10 @@ export class WsTunnel implements IBrokerContext {
         // not by ending their responses here: `closeAll` runs each session's
         // `stop`, which is what empties `httpSessions`.
         await Promise.all([...this._providers.values()].map((state) => state.httpEndpoint?.closeAll() ?? Promise.resolve()));
+
+        // Telemetry is lower priority than control traffic, but accepted spans
+        // are flushed before the exporter is closed during a graceful stop.
+        await this._telemetry?.close();
 
         return new Promise((resolve, reject) => {
             for (const state of this._providers.values()) {
@@ -2809,6 +2835,10 @@ export class WsTunnel implements IBrokerContext {
                 // the id lookup: a `broker/*` request carries an id of the
                 // provider's choosing, which must not be taken for a response.
                 this._answerBrokerMethod(state, providerName, msg.id, msg.method, msg.params, origin);
+            } else if (msg.id == null && msg.method === TELEMETRY_NOTIFICATION_METHOD) {
+                // A provider trace is broker infrastructure, not an MCP
+                // notification. Disabled telemetry is deliberately dropped.
+                this._telemetry?.enqueue(providerName, msg.params, Buffer.byteLength(data));
             } else if (msg.id != null && typeof msg.method === "string") {
                 // A request the provider opened itself: a response never
                 // carries `method`. Answered here, at once, because nothing

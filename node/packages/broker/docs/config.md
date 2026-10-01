@@ -270,6 +270,7 @@ it here would look functional and do nothing.
 | `providerRequestTimeoutMs` | `number` | `60000` | `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS` | Deadline for one provider request. `0` disables |
 | `providerTakeover` | `"reject" \| "liveness" \| "always"` | `"liveness"` | `MCP_BROKER_PROVIDER_TAKEOVER` | What happens when a second provider claims an occupied slot |
 | `resourceSubscriptions` | `object` | see below | see below | Bounds on `resources/subscribe` bookkeeping |
+| `telemetry` | `object` | (unset) | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | Optional provider trace export over OTLP/HTTP |
 
 ### `brokerName` is library-only
 
@@ -392,6 +393,47 @@ stdio bridge. The per-slot bound is what caps Streamable HTTP clients that leave
 without `DELETE`: their sessions never expire, and neither do their
 subscriptions. `resourceSubscriptionCount` in `provider_status` shows the
 current total. Programmatically: `withResourceSubscriptionLimits({ ... })`.
+
+### `telemetry`
+
+Provider telemetry is disabled when this object and
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` are both absent. When enabled, the broker
+consumes `notifications/telemetry`, validates each compact span, enriches it
+with the provider slot, and sends OTLP/HTTP JSON to the configured collector.
+Telemetry is never relayed to MCP clients.
+
+```json
+{
+    "telemetry": {
+        "otlpHttpEndpoint": "http://otel-collector:4318/v1/traces",
+        "headers": { "Authorization": "Bearer example" },
+        "timeoutMs": 5000,
+        "serviceNamespace": "factory-gateway",
+        "maxFrameBytes": 65536,
+        "queueCapacity": 256,
+        "batchSize": 32,
+        "maxAttributes": 64,
+        "maxEvents": 32
+    }
+}
+```
+
+| Field | Default | Role |
+|---|---:|---|
+| `otlpHttpEndpoint` | required | Full OTLP/HTTP traces endpoint, usually ending in `/v1/traces` |
+| `headers` | `{}` | Static collector headers. Environment headers override matching keys |
+| `timeoutMs` | `5000` | Network timeout for one export batch |
+| `serviceNamespace` | `mcp-broker.provider` | OTLP resource namespace |
+| `maxFrameBytes` | `65536` | Largest provider telemetry notification accepted |
+| `queueCapacity` | `256` | Maximum spans waiting for export |
+| `batchSize` | `32` | Maximum spans in one exporter call |
+| `maxAttributes` | `64` | Maximum attributes on one span or event |
+| `maxEvents` | `32` | Maximum events on one span |
+
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` overrides `otlpHttpEndpoint`.
+`OTEL_EXPORTER_OTLP_HEADERS` adds or overrides headers using the standard
+comma-separated, percent-encoded `key=value` form. Queue overflow, invalid
+input and exporter errors are counted by `WsTunnel.getTelemetryStats()`.
 
 ### `paths` (URL routing)
 

@@ -36,6 +36,19 @@ export type {
     SubscriptionState,
 } from "./subscriptions/resource.subscription.registry";
 
+// Optional provider telemetry pipeline and OTLP/HTTP exporter.
+export { OtlpHttpTraceExporter, ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD } from "./telemetry/index";
+export type {
+    IOtlpHttpTraceExporterOptions,
+    IProviderTelemetryExporter,
+    IProviderTelemetryOptions,
+    IProviderTelemetryRecord,
+    IProviderTelemetryStats,
+    ITelemetryEvent,
+    ITelemetrySpan,
+    TelemetryAttributeValue,
+} from "./telemetry/index";
+
 // `.mcpb` bundle loading, verifies + unpacks a bundle into a stdio upstream.
 export { loadMcpbBundle } from "./mcpb/mcpb.loader";
 export type { IMcpbBundleConfig, McpbBundleConfig } from "./mcpb/mcpb.loader";

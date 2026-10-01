@@ -42,6 +42,34 @@ for (;;) {
 
 Underneath, the multiplexed link is the same `mcpb_provider_t` on a fixed path: connection, retry window, ping and events are the ones documented below, once.
 
+## Optional telemetry notification
+
+`mcpb_telemetry.h` wraps a pre-serialized compact trace span in the broker's
+`notifications/telemetry` wire format. It allocates nothing, does not parse the
+span, and does not link an OpenTelemetry SDK into the firmware. The same encoded
+notification works with a dedicated provider or a multiplexed slot:
+
+```c
+#include "mcpb/mcpb_telemetry.h"
+
+static char telemetry_frame[768];
+static const char span[] =
+    "{\"traceId\":\"0123456789abcdef0123456789abcdef\","
+    "\"spanId\":\"0123456789abcdef\",\"name\":\"modbus.read\","
+    "\"startTimeUnixNano\":\"1720000000000000000\","
+    "\"endTimeUnixNano\":\"1720000000001000000\"}";
+
+int n = mcpb_telemetry_encode(span, sizeof(span) - 1u,
+                              telemetry_frame, sizeof(telemetry_frame));
+if (n >= 0)
+    mcpb_provider_send(&provider, telemetry_frame, (size_t)n);
+```
+
+For `mcpb_mux_t`, pass the same buffer to `mcpb_mux_send`. The broker validates
+IDs, timestamps, counts, and sizes before queueing the span. Telemetry is
+optional and lower priority than MCP traffic. Firmware should keep its own
+trace enable flag and call the codec only while tracing is requested.
+
 ## Standalone
 
 `libmcpb/` lifts out whole. It includes nothing from CyanMycelium, no platform header, and no third-party library. Everything system-dependent goes through `mcpb_port.h`. It declares its own error codes rather than borrowing the host's, because a library that borrows its first host's types stops being extractable.
@@ -209,7 +237,7 @@ gcc -std=c99 -Wall -Wextra -Iinclude -DMCPB_ENABLE_MUX=1 -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-153 checks, no network (116 without the multiplexed endpoint): the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+157 checks, no network (120 without the multiplexed endpoint): the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
 

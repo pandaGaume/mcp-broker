@@ -2,6 +2,7 @@ import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
 import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMode } from "./ws.interfaces";
 import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
+import { OtlpHttpTraceExporter, type IOtlpHttpTraceExporterOptions, type IProviderTelemetryOptions } from "../telemetry/index";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import {
@@ -55,6 +56,7 @@ export class WsTunnelBuilder {
     private _providerTakeover: ProviderTakeoverMode | undefined = undefined;
     private _providerRequestTimeoutMs: number | undefined = undefined;
     private _resourceSubscriptions: Partial<IResourceSubscriptionLimits> | undefined = undefined;
+    private _telemetry: IProviderTelemetryOptions | undefined = undefined;
     private _staticMounts: IStaticMount[] = [];
     private _stdioUpstreams: IStdioUpstreamConfig[] = [];
     private _remoteUpstreams: IRemoteUpstreamConfig[] = [];
@@ -235,6 +237,18 @@ export class WsTunnelBuilder {
      */
     withResourceSubscriptionLimits(limits: Partial<IResourceSubscriptionLimits>): this {
         this._resourceSubscriptions = { ...this._resourceSubscriptions, ...limits };
+        return this;
+    }
+
+    /** Consumes provider telemetry notifications through a bounded exporter pipeline. */
+    withTelemetry(options: IProviderTelemetryOptions): this {
+        this._telemetry = options;
+        return this;
+    }
+
+    /** Configures the dependency-free OTLP/HTTP JSON trace exporter. */
+    withOtlpHttpTelemetry(options: IOtlpHttpTraceExporterOptions, limits: Omit<IProviderTelemetryOptions, "exporter"> = {}): this {
+        this._telemetry = { ...limits, exporter: new OtlpHttpTraceExporter(options) };
         return this;
     }
 
@@ -440,6 +454,7 @@ export class WsTunnelBuilder {
             providerTakeover: this._providerTakeover,
             providerRequestTimeoutMs: this._providerRequestTimeoutMs,
             resourceSubscriptions: this._resourceSubscriptions,
+            telemetry: this._telemetry,
             staticMounts: this._staticMounts.length > 0 ? [...this._staticMounts] : undefined,
             stdioUpstreams: this._stdioUpstreams.length > 0 ? [...this._stdioUpstreams] : undefined,
             remoteUpstreams: this._remoteUpstreams.length > 0 ? [...this._remoteUpstreams] : undefined,

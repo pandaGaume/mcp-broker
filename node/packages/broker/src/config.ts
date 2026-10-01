@@ -117,6 +117,20 @@ export interface IBrokerConfig {
         maxResourceUriLength?: number;
     };
 
+    /** Optional OTLP/HTTP trace export for provider telemetry notifications. */
+    telemetry?: {
+        /** Full traces endpoint, usually http://collector:4318/v1/traces. */
+        otlpHttpEndpoint: string;
+        headers?: Record<string, string>;
+        timeoutMs?: number;
+        serviceNamespace?: string;
+        maxFrameBytes?: number;
+        queueCapacity?: number;
+        batchSize?: number;
+        maxAttributes?: number;
+        maxEvents?: number;
+    };
+
     /**
      * What happens when a provider connects to a slot another socket already
      * holds. Maps to `MCP_BROKER_PROVIDER_TAKEOVER`.

@@ -9,6 +9,7 @@
 #include "mcpb/mcpb.h"
 #include "mcpb/mcpb_port.h"
 #include "mcpb/mcpb_provider.h"
+#include "mcpb/mcpb_telemetry.h"
 #include "mcpb/mcpb_ws.h"
 #include "../src/mcpb_internal.h"
 #if defined(MCPB_ENABLE_MUX) && MCPB_ENABLE_MUX
@@ -311,6 +312,31 @@ int main(void)
         check(strcmp(b, "scrubber-01") == 0, "a plain name passes through");
         check(mcpb_url_encode("MAC:ACA70405A4EC", b, 4) == MCPB_ERR_TOO_LARGE,
               "short buffer refused");
+    }
+
+    printf("== telemetry notification codec ==\n");
+    {
+        static const char span[] =
+            "{\"traceId\":\"0123456789abcdef0123456789abcdef\","
+            "\"spanId\":\"0123456789abcdef\",\"name\":\"modbus.read\","
+            "\"startTimeUnixNano\":\"1\",\"endTimeUnixNano\":\"2\"}";
+        char frame[512];
+        const int n = mcpb_telemetry_encode(span, sizeof(span) - 1u,
+                                             frame, sizeof(frame));
+        static const char expected_prefix[] =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/telemetry\","
+            "\"params\":{\"version\":1,\"signal\":\"traces\",\"span\":";
+        check(n > 0 && strncmp(frame, expected_prefix,
+                               sizeof(expected_prefix) - 1u) == 0,
+              "a compact span is wrapped as a telemetry notification");
+        check(n > 2 && strcmp(frame + n - 2, "}}") == 0,
+              "the notification closes params and the JSON-RPC object");
+        check(mcpb_telemetry_encode(span, sizeof(span) - 1u,
+                                    frame, 8u) == MCPB_ERR_TOO_LARGE,
+              "a short caller buffer is refused without allocation");
+        check(mcpb_telemetry_encode("[]", 2u, frame,
+                                    sizeof(frame)) == MCPB_ERR_ARG,
+              "a span that is not a JSON object is refused");
     }
 
     printf("== handshake ==\n");
