@@ -566,6 +566,14 @@ export interface IWsTunnelOptions {
      * @default 256
      */
     authorizeBatchLimit?: number;
+
+    /**
+     * How long the broker waits for the `broker/audit/result` of an allowed
+     * decision whose capability the provider listed in `resultsRequired`,
+     * before `broker_diagnose` reports it overdue.
+     * @default 60000
+     */
+    authorizationResultTimeoutMs?: number;
 }
 
 /**
@@ -578,6 +586,8 @@ export interface ILoopbackProviderHandle {
     declare(params: unknown): Promise<BrokerMethodOutcome>;
     /** `broker/authorize`. */
     authorize(params: unknown): Promise<BrokerMethodOutcome>;
+    /** `broker/audit/result`: a notification, so nothing is returned; an unmatched report is counted. */
+    reportResult(params: unknown): void;
 }
 
 /** @deprecated Use {@link IStaticMount}. */

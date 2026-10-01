@@ -111,15 +111,36 @@ await transport.broker.declare({
     domain: "scada",
     namespace: { resource: "/production/site1" },
     capabilities: ["scada.observe", "scada.control"],
+    resources: [
+        {
+            resource: "uns://production/site1/line1/motor01/speed_sp",
+            resourcePath: "/production/site1/line1/motor01/speed_sp",
+            limits: { minValue: 0, maxValue: 1500 },
+        },
+    ],
+    resultsRequired: ["scada.control"],
 });
 
 // In a tool handler (mcp-core 1.4.0 hands the adapter the request's _meta):
 const caller = callerReferenceOf(request?.meta);
 const { decisions } = await transport.broker.authorize({
     principal: { type: "caller-ref", ref: caller!.ref },
-    checks: [{ capability: "scada.control", resource: "uns://production/site1/line1/motor01/speed", resourcePath: "/production/site1/line1/motor01/speed" }],
+    checks: [{ capability: "scada.control", resource: "uns://production/site1/line1/motor01/speed_sp", resourcePath: "/production/site1/line1/motor01/speed_sp" }],
 });
+// decisions[0]: { effect: "allow-with-constraints", allowed: false, obligations: { constraints: { minValue: 0, maxValue: 1500 } }, ... }
+
+// Once the write is done, or refused by a constraint:
+transport.broker.reportResult({ decisionId: decisions[0].decisionId, result: "success", nativeStatus: "Good" });
 ```
+
+- `effect` is `allow`, `deny` or `allow-with-constraints`. The last one comes
+  with the resource's declared limits in `obligations.constraints`; apply them
+  right before executing. `allowed` is `true` only for a plain `allow`, so code
+  that reads `allowed` alone refuses a constrained allow instead of ignoring
+  its limits.
+- `reportResult()` is a notification: nothing comes back. The broker writes the
+  outcome next to the decision in its audit, and `broker_diagnose` reports
+  decisions of `resultsRequired` capabilities still unreported.
 
 - The provider needs its own identity on the broker (an entry in the security
   file's `providers` table), which means presenting a secret:

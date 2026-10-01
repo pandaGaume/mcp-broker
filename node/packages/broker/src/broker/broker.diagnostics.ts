@@ -56,6 +56,7 @@ export type BrokerDiagnosisRuleId =
     | "self-served-page-blocked"
     | "protected-slot-unconfirmed"
     | "undeclared-capability"
+    | "decision-result-overdue"
     | "telemetry-export-failures"
     | "telemetry-spans-dropped";
 
@@ -473,6 +474,22 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
                     declarations: authorityInfo.declarations.map((d) => ({ principalId: d.principalId, capabilities: d.capabilities })),
                 },
                 fix: "Start the provider that owns this domain and check its declaration was accepted, or correct the capability names in the security file's roles (they are case-sensitive).",
+            });
+        }
+        const results = authorityInfo.results;
+        const overdue = results ? results.overdue.filter((o) => slot === undefined || o.slot === slot) : [];
+        if (results && overdue.length > 0) {
+            problems.push({
+                id: "decision-result-overdue",
+                severity: "warning",
+                ...(slot !== undefined ? { slot } : {}),
+                symptom:
+                    `${overdue.length} allowed decision${overdue.length === 1 ? " has" : "s have"} had no broker/audit/result for more than ${results.resultTimeoutMs} ms, ` +
+                    `although the provider declared it reports them (resultsRequired). The audit shows the decision, not what the equipment did.`,
+                evidence: { overdue, awaited: results.awaited, reported: results.reported, unmatched: results.unmatched },
+                fix:
+                    "Check the provider sends broker/audit/result with the decisionId it was given, once the operation finished. " +
+                    "A provider still executing is fine; one that crashed or lost its socket between decision and report leaves exactly this trace.",
             });
         }
     }

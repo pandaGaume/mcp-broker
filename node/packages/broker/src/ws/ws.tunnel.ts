@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "async_hooks";
 import * as fs from "fs";
 import * as http from "http";
 import * as https from "https";
@@ -45,6 +46,7 @@ import {
 import { VERSION, PACKAGE_NAME } from "../version";
 import {
     BrokerAuthority,
+    BROKER_AUDIT_RESULT_METHOD,
     BROKER_AUTHORIZE_METHOD,
     BROKER_DECLARE_METHOD,
     BROKER_METHOD_PREFIX,
@@ -289,6 +291,12 @@ function openTransport(transport: IMessageTransport): void {
     }
 }
 
+/** The client's `X-Correlation-Id`, when it sent exactly one. Its format is checked where it is used. */
+function correlationHeaderOf(req: IncomingMessage): string | undefined {
+    const value = req.headers["x-correlation-id"];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // WsTunnel
 // ---------------------------------------------------------------------------
@@ -374,6 +382,9 @@ export class WsTunnel implements IBrokerContext {
      * provider that keeps asking warns once.
      */
     private readonly _providerRequestWarnedProviders = new Set<string>();
+
+    /** The `X-Correlation-Id` of the Streamable HTTP request being served, if it sent one. */
+    private readonly _httpCorrelation = new AsyncLocalStorage<string | undefined>();
 
     /** Slots already warned about for a `broker/*` notification the broker does not handle. */
     private readonly _brokerNotificationWarnedProviders = new Set<string>();
@@ -500,6 +511,7 @@ export class WsTunnel implements IBrokerContext {
             authorization: this._authorization,
             securityVersion: options.securityVersion,
             authorizeBatchLimit: options.authorizeBatchLimit,
+            resultTimeoutMs: options.authorizationResultTimeoutMs,
             knownPrincipals: options.knownProviderPrincipals,
             callerRefMaxAgeMs: (options.providerRequestTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS) || DEFAULT_CALLER_REF_MAX_AGE_MS,
         });
@@ -765,6 +777,9 @@ export class WsTunnel implements IBrokerContext {
         return {
             declare: (params: unknown) => call(BROKER_DECLARE_METHOD, params),
             authorize: (params: unknown) => call(BROKER_AUTHORIZE_METHOD, params),
+            reportResult: (params: unknown) => {
+                if (this._loopbackProviders.get(name) === transport) this._authority.recordResult(params, { slot: name, principal });
+            },
         };
     }
 
@@ -1392,7 +1407,14 @@ export class WsTunnel implements IBrokerContext {
      * which has no top-level id) are returned untouched and untracked, exactly
      * as before.
      */
-    private _trackRequest(state: IProviderState, providerName: string, frame: string, sink: ResponseSink, principal: IPrincipal | null = null): string {
+    private _trackRequest(
+        state: IProviderState,
+        providerName: string,
+        frame: string,
+        sink: ResponseSink,
+        principal: IPrincipal | null = null,
+        clientCorrelationId?: string
+    ): string {
         let parsed: unknown;
         try {
             parsed = JSON.parse(frame);
@@ -1443,7 +1465,14 @@ export class WsTunnel implements IBrokerContext {
         if (sink.type !== "broker") {
             const providerPrincipal = this._providerPrincipalOfSlot(providerName, state);
             if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id)) {
-                const issued = this._authority.issueRef(providerName, brokerId, providerPrincipal.id, this._authorizationSubject(principal), trace.traceId);
+                const issued = this._authority.issueRef(
+                    providerName,
+                    brokerId,
+                    providerPrincipal.id,
+                    this._authorizationSubject(principal),
+                    trace.traceId,
+                    clientCorrelationId ?? this._httpCorrelation.getStore()
+                );
                 injectCallerMeta(message, issued);
                 callerRef = issued.ref;
             }
@@ -2142,7 +2171,12 @@ export class WsTunnel implements IBrokerContext {
                 // entry added before the connectivity check has nothing to
                 // answer it and would pin that id until the slot next
                 // disconnects (the raw-WS path had the same ordering bug).
-                this._sendToProvider(state, providerName, this._trackRequest(state, providerName, body, { type: "sse", sessionId }, principal), principal);
+                this._sendToProvider(
+                    state,
+                    providerName,
+                    this._trackRequest(state, providerName, body, { type: "sse", sessionId }, principal, correlationHeaderOf(req)),
+                    principal
+                );
             } else {
                 const sseRes = state.sseSessions.get(sessionId);
                 if (sseRes) this._sendSseEvent(sseRes, this._notConnectedPayload(providerName, body));
@@ -2195,7 +2229,11 @@ export class WsTunnel implements IBrokerContext {
             }
         }
 
-        void this._endpointFor(providerName, state).handleRequest(req, res);
+        // `X-Correlation-Id` belongs to this request only. The endpoint reads the
+        // body asynchronously and hands the frame over without the request, so
+        // the header rides in an async scope; a field on the session would be
+        // overwritten by a concurrent request on the same session.
+        this._httpCorrelation.run(correlationHeaderOf(req), () => void this._endpointFor(providerName, state).handleRequest(req, res));
     }
 
     /**
@@ -2903,6 +2941,10 @@ export class WsTunnel implements IBrokerContext {
      */
     private _answerBrokerMethod(state: IProviderState, providerName: string, id: string | number | undefined, method: string, params: unknown, origin: IProviderFrameOrigin): void {
         if (id === undefined || id === null) {
+            if (method === BROKER_AUDIT_RESULT_METHOD && origin.kind !== "upstream") {
+                this._authority.recordResult(params, { slot: providerName, principal: origin.principal });
+                return;
+            }
             // Keyed by slot alone: a provider inventing method names must not
             // grow this set without bound.
             if (!this._brokerNotificationWarnedProviders.has(providerName)) {

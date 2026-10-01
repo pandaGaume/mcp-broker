@@ -13,14 +13,16 @@ export type {
 } from "./ws/ws.interfaces";
 export {
     BrokerAuthority,
+    BROKER_AUDIT_RESULT_METHOD,
     BROKER_AUTHORIZE_METHOD,
     BROKER_DECLARE_METHOD,
     BROKER_METHOD_PREFIX,
     CALLER_META_KEY,
+    CORRELATION_ID_PATTERN,
     DEFAULT_AUTHORIZE_BATCH_LIMIT,
 } from "./authority/broker.authority";
-export type { BrokerMethodOutcome, IBrokerAuthorityInfo, IBrokerAuthorityOptions, IBrokerMethodOrigin } from "./authority/broker.authority";
-export type { IDeclaredResource, IProtectedSlot, IProviderDeclaration } from "./authority/declaration";
+export type { BrokerMethodOutcome, IBrokerAuthorityInfo, IBrokerAuthorityOptions, IBrokerMethodOrigin, IOverdueDecision } from "./authority/broker.authority";
+export type { IDeclaredResource, IProtectedSlot, IProviderDeclaration, IResourceLimits } from "./authority/declaration";
 export { StdioUpstream } from "./stdio.upstream";
 export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream";
 export { RemoteUpstream } from "./remote.upstream";

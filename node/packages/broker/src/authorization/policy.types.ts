@@ -133,6 +133,22 @@ export interface IAuthorizationAuditEvent {
     readonly nativeResource?: string;
     /** Only for a `broker/authorize` decision: the attributes the provider sent, sensitive keys masked. */
     readonly attributes?: Readonly<Record<string, unknown>>;
+    /**
+     * Only for `broker/authorize`: `"decision"` when the broker decided,
+     * `"result"` when the provider reported the outcome of that decision
+     * (`broker/audit/result`). Both carry the same `decisionId`.
+     */
+    readonly phase?: "decision" | "result";
+    /** Only for a `broker/authorize` decision: the effect returned to the provider. */
+    readonly effect?: "allow" | "deny" | "allow-with-constraints";
+    /** Only for a `broker/authorize` decision: the obligations returned with it. */
+    readonly obligations?: Readonly<Record<string, unknown>>;
+    /** Only for a `"result"` event: what the provider says happened. */
+    readonly result?: "success" | "failure" | "refused";
+    /** Only for a `"result"` event: the protocol's own status (`Good`, `0x02`, ...). */
+    readonly nativeStatus?: string;
+    /** Only for a `"result"` event: the provider's error code, when it failed or refused. */
+    readonly errorCode?: string;
 }
 
 /** @deprecated Use {@link IAuthorizationSubject}. */

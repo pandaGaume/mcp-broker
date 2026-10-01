@@ -17,6 +17,9 @@ export const TRACEPARENT_META_KEY = "traceparent";
 /** Provider-to-broker telemetry notification. */
 export const TELEMETRY_NOTIFICATION_METHOD = "broker/telemetry";
 
+/** Provider-to-broker notification reporting what happened after a decision. */
+export const AUDIT_RESULT_NOTIFICATION_METHOD = "broker/audit/result";
+
 const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
 const TRACE_ID = /^[0-9a-f]{32}$/;
 const SPAN_ID = /^[0-9a-f]{16}$/;
@@ -138,12 +141,24 @@ export function callerReferenceOf(meta: Readonly<Record<string, unknown>> | unde
     return typeof ref === "string" && typeof correlationId === "string" ? { ref, correlationId, ...(typeof traceId === "string" ? { traceId } : {}) } : undefined;
 }
 
+/**
+ * Engineering limits of one resource. They hold for every caller, and the
+ * broker returns them with each allow on that resource as
+ * `obligations.constraints`, for the provider to apply.
+ */
+export interface IResourceLimits {
+    readonly minValue?: number;
+    readonly maxValue?: number;
+    readonly allowedValues?: readonly (string | number | boolean | null)[];
+    readonly destinations?: readonly string[];
+}
+
 /** One resource of a declaration: the provider's own identifier, and the path the broker evaluates. */
 export interface IDeclaredResource {
     readonly resource: string;
     readonly resourcePath: string;
     readonly effect?: string;
-    readonly limits?: Readonly<Record<string, unknown>>;
+    readonly limits?: IResourceLimits;
 }
 
 /** `broker/authorization/declare` parameters. Describes; grants nothing. */
@@ -154,6 +169,12 @@ export interface IAuthorizationDeclaration {
     readonly capabilities: readonly string[];
     readonly resources?: readonly IDeclaredResource[];
     readonly protects?: readonly string[];
+    /**
+     * Declared capabilities whose allowed decisions this provider promises to
+     * report with {@link BrokerClient.reportResult}. One not reported in time
+     * shows up in `broker_diagnose`.
+     */
+    readonly resultsRequired?: readonly string[];
 }
 
 export interface IDeclarationAccepted {
@@ -181,12 +202,36 @@ export interface IAuthorizationQuery {
     readonly checks: readonly IAuthorizationCheck[];
 }
 
+/** What an allow comes with. */
+export interface IAuthorizationObligations {
+    /** The declared limits of the resource. Apply them right before executing. */
+    readonly constraints?: IResourceLimits;
+}
+
 export interface IAuthorizationDecision {
     readonly decisionId: string;
-    readonly effect: "allow" | "deny";
+    /** `allow-with-constraints`: allowed, within `obligations`. */
+    readonly effect: "allow" | "deny" | "allow-with-constraints";
+    /**
+     * `true` only for an unconditional `allow`. A provider that reads only
+     * this field therefore refuses a constrained allow rather than ignoring
+     * its constraints; read `effect` to apply them.
+     */
     readonly allowed: boolean;
     readonly reason: string;
     readonly policies?: readonly string[];
+    readonly obligations?: IAuthorizationObligations;
+}
+
+/** `broker/audit/result` parameters: the outcome of what a decision allowed or refused. */
+export interface IAuditResult {
+    /** The `decisionId` the broker returned. */
+    readonly decisionId: string;
+    readonly result: "success" | "failure" | "refused";
+    /** The protocol's own status (`Good`, an exception code, ...). */
+    readonly nativeStatus?: string;
+    /** The provider's error code, when it failed or refused. */
+    readonly errorCode?: string;
 }
 
 export interface IAuthorizationAnswer {
@@ -264,6 +309,23 @@ export class BrokerClient {
     /** Asks for one decision per check. */
     authorize(query: IAuthorizationQuery): Promise<IAuthorizationAnswer> {
         return this._request("broker/authorize", query) as Promise<IAuthorizationAnswer>;
+    }
+
+    /**
+     * Reports what happened after a decision, so the broker's audit shows the
+     * outcome next to the decision. A notification: nothing comes back, and a
+     * report the broker cannot match is counted on its side.
+     */
+    reportResult(report: IAuditResult): void {
+        if (typeof report?.decisionId !== "string" || report.decisionId.length === 0) throw new TypeError("decisionId must be the non-empty id the broker returned");
+        if (report.result !== "success" && report.result !== "failure" && report.result !== "refused") throw new TypeError('result must be "success", "failure" or "refused"');
+        const params: IAuditResult = {
+            decisionId: report.decisionId,
+            result: report.result,
+            ...(report.nativeStatus !== undefined ? { nativeStatus: report.nativeStatus } : {}),
+            ...(report.errorCode !== undefined ? { errorCode: report.errorCode } : {}),
+        };
+        this._write(JSON.stringify({ jsonrpc: "2.0", method: AUDIT_RESULT_NOTIFICATION_METHOD, params }));
     }
 
     /** Emits one complete provider span, or returns false when the link is down. */
