@@ -1,6 +1,7 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import { decodeEnvelope, encodeEnvelope, encodeRegisterEnvelope, envelopeFrame, tunnelErrorOf } from "./protocol/index";
 import { describeFrame, PendingFrames, ThrottledNotice, truncate, warnIfSlotScopedPath } from "./transport.support";
+import { BrokerClient } from "./broker.client";
 
 /** The diagnostics one socket may repeat, counted per socket so each is said once in full. */
 interface ISocketNotices {
@@ -249,6 +250,7 @@ class MultiplexSocket {
 
             this._ws = null;
             for (const transport of this._transports.values()) {
+                transport.broker.rejectAll(`MultiplexTransport: the shared socket to ${this._wsUrl} closed before the broker answered`);
                 transport.onClose?.();
             }
             if (!this._stopped) {
@@ -322,7 +324,7 @@ class MultiplexSocket {
             }
         }
 
-        transport.onMessage?.(envelopeFrame(envelope));
+        transport._receive(envelopeFrame(envelope));
     }
 
     private _scheduleReconnect(): void {
@@ -374,6 +376,13 @@ export interface IMultiplexTransportOptions {
      * appears in `_all`.
      */
     aggregate?: boolean;
+
+    /**
+     * Rejects a `broker.declare()` / `broker.authorize()` the broker did not
+     * answer within this many ms. Off by default: a broker from 1.4.1 on answers
+     * at once. Only for an older broker, which drops methods it does not know.
+     */
+    brokerRequestTimeoutMs?: number;
 }
 
 /**
@@ -398,10 +407,28 @@ export class MultiplexTransport implements IMessageTransport {
     onClose: (() => void) | null = null;
     onError: ((error: Error) => void) | null = null;
 
+    /**
+     * The broker's own methods for this slot: declaring an authorization
+     * domain, asking for decisions. Its answers are taken off the socket
+     * before {@link onMessage} sees anything.
+     */
+    readonly broker: BrokerClient;
+
     constructor(name: string, socket: MultiplexSocket, options?: IMultiplexTransportOptions) {
         this._name = name;
         this._socket = socket;
         this._aggregate = options?.aggregate;
+        this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
+    }
+
+    /**
+     * One frame from the broker for this slot: the broker's answer to one of
+     * {@link broker}'s requests, or MCP traffic for the server.
+     * @internal Called by the shared socket.
+     */
+    _receive(frame: string): void {
+        if (this.broker.handleIncoming(frame)) return;
+        this.onMessage?.(frame);
     }
 
     /**

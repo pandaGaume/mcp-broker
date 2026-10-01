@@ -1,5 +1,6 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import { encodeRegisterFrame } from "./protocol/index";
+import { BrokerClient } from "./broker.client";
 import { describeFrame, PendingFrames, ThrottledNotice, warnIfMultiplexPath } from "./transport.support";
 
 /** Options accepted by {@link DirectTransport}. */
@@ -23,6 +24,13 @@ export interface IDirectTransportOptions {
      * the provider silently never appears in `_all`.
      */
     aggregate?: boolean;
+
+    /**
+     * Rejects a `broker.declare()` / `broker.authorize()` the broker did not
+     * answer within this many ms. Off by default: a broker from 1.4.1 on answers
+     * at once. Only for an older broker, which drops methods it does not know.
+     */
+    brokerRequestTimeoutMs?: number;
 }
 
 /**
@@ -55,10 +63,18 @@ export class DirectTransport implements IMessageTransport {
     onClose: (() => void) | null = null;
     onError: ((error: Error) => void) | null = null;
 
+    /**
+     * The broker's own methods for this slot: declaring an authorization
+     * domain, asking for decisions. Its answers are taken off the socket
+     * before {@link onMessage} sees anything.
+     */
+    readonly broker: BrokerClient;
+
     constructor(wsUrl: string, options?: IDirectTransportOptions) {
         this._wsUrl = wsUrl;
         this._aggregate = options?.aggregate;
         this._pending = new PendingFrames(`DirectTransport ${wsUrl}`);
+        this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
     }
 
     get isOpen(): boolean {
@@ -107,6 +123,7 @@ export class DirectTransport implements IMessageTransport {
             this._ws = null;
 
             const discarded = this._pending.clear();
+            this.broker.rejectAll(`DirectTransport: the socket to ${this._wsUrl} closed before the broker answered`);
 
             // ORDER IS LOAD-BEARING: `onError` must fire before `onClose`.
             // An MCP server's `onClose` clears its running flag, after which it
@@ -121,6 +138,7 @@ export class DirectTransport implements IMessageTransport {
         };
 
         ws.onmessage = (event: MessageEvent<string>) => {
+            if (this.broker.handleIncoming(event.data)) return;
             this.onMessage?.(event.data);
         };
     }
