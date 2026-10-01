@@ -691,7 +691,14 @@ export class WsTunnel implements IBrokerContext {
             this._failProviderDisconnected(state, name);
         };
 
-        const call = (method: string, params: unknown): Promise<BrokerMethodOutcome> => Promise.resolve(this._brokerMethod(state, name, method, params));
+        // The handle speaks for this registration only: once the slot was
+        // released, or taken by another loopback, it has nobody to speak for.
+        const call = (method: string, params: unknown): Promise<BrokerMethodOutcome> =>
+            Promise.resolve(
+                this._loopbackProviders.get(name) === transport
+                    ? this._brokerMethod(state, name, method, params, principal)
+                    : { error: { code: -32000, message: `Loopback provider "${name}" is no longer registered.` } }
+            );
         return {
             declare: (params: unknown) => call(BROKER_DECLARE_METHOD, params),
             authorize: (params: unknown) => call(BROKER_AUTHORIZE_METHOD, params),
@@ -2796,11 +2803,17 @@ export class WsTunnel implements IBrokerContext {
      * (authenticated or not; anonymity is refused further in) or a loopback.
      * An upstream the broker spawned or dialed has none, so it is refused.
      */
-    private _brokerMethod(state: IProviderState, providerName: string, method: string, params: unknown): BrokerMethodOutcome {
+    private _brokerMethod(
+        state: IProviderState,
+        providerName: string,
+        method: string,
+        params: unknown,
+        principal: IProviderPrincipal | null = this._providerPrincipalOfSlot(providerName, state)
+    ): BrokerMethodOutcome {
         if (this._upstreams.get(providerName)?.isOpen) {
             return { error: { code: -32601, message: `Method not found: ${method} is not available to a stdio or remote upstream, which has no provider identity.` } };
         }
-        const origin = { slot: providerName, principal: this._providerPrincipalOfSlot(providerName, state) };
+        const origin = { slot: providerName, principal };
         switch (method) {
             case BROKER_DECLARE_METHOD:
                 return this._authority.declare(params, origin);

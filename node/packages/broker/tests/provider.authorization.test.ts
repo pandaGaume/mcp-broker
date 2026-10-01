@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
+import { LoopbackTransport } from "@cyanmycelium/mcp-core";
+import { diagnoseBroker } from "../src/broker/broker.diagnostics";
 import { AuthError, CALLER_META_KEY, WsTunnelBuilder, compileAuthorizationPolicy, type IResolvedAuth, type ITokenValidator, type WsTunnel } from "../src/index";
 
 /**
@@ -453,6 +455,51 @@ describe("protected slots", () => {
                 .withProtectedSlots({ _all: { declaredBy: "a", publishedBy: "b" } })
                 .build()
         ).toThrow(/reserved/);
+    });
+});
+
+describe("in-process loopback providers", () => {
+    it("declare and decide through the handle registerLoopbackProvider returns", async () => {
+        await start((b) =>
+            b
+                .withProtectedSlots({ "bench-motor01": { declaredBy: "in-process-scada", publishedBy: "modbus-bench" } })
+                .withProviderPrincipals([...PROVIDERS, { id: "in-process-scada", secret: "unused", subjects: ["service:mcp-scada"], allowedResources: ["/production/site1/**"] }])
+        );
+        const [, providerEnd] = LoopbackTransport.createPair();
+        const handle = tunnel!.registerLoopbackProvider("scada", providerEnd, {
+            principal: { id: "in-process-scada", subjects: ["service:mcp-scada"], allowedResources: ["/production/site1/**"] },
+        });
+
+        const declared = await handle.declare(DECLARATION);
+        expect("result" in declared && declared.result).toMatchObject({ accepted: true });
+        const decided = await handle.authorize({
+            principal: { type: "provider" },
+            checks: [{ capability: "scada.observe", resource: "uns://x", resourcePath: "/production/site1/line1" }],
+        });
+        // The provider's own subjects hold no scada grant in this policy.
+        expect("result" in decided && (decided.result as { decisions: { reason: string }[] }).decisions[0].reason).toBe("no-matching-grant");
+    });
+
+    it("cannot publish into a protected slot under another principal", async () => {
+        await start();
+        const [, providerEnd] = LoopbackTransport.createPair();
+        expect(() => tunnel!.registerLoopbackProvider("bench-motor01", providerEnd, { principal: { id: "mcp-scada" } })).toThrow(/protected/);
+    });
+});
+
+describe("broker_diagnose", () => {
+    it("reports an unconfirmed protected slot, then the confirmation, and capabilities nobody declared", async () => {
+        const base = await start();
+        const before = diagnoseBroker(tunnel!)!;
+        expect(before.problems.find((p) => p.id === "protected-slot-unconfirmed")?.slot).toBe("bench-motor01");
+        expect(before.problems.find((p) => p.id === "undeclared-capability")?.evidence.undeclaredCapabilities).toEqual(["scada.control", "scada.observe"]);
+
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+        const after = diagnoseBroker(tunnel!)!;
+        expect(after.problems.map((p) => p.id)).not.toContain("protected-slot-unconfirmed");
+        expect(after.problems.map((p) => p.id)).not.toContain("undeclared-capability");
+        expect(after.authority?.policyVersion).toMatch(/\.1$/);
     });
 });
 
