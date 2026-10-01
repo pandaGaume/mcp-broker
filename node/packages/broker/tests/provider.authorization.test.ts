@@ -3,6 +3,7 @@ import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
 import { LoopbackTransport } from "@cyanmycelium/mcp-core";
 import { diagnoseBroker } from "../src/broker/broker.diagnostics";
+import { mcpCall, openSession, sessionPost } from "./streamable.helper";
 import { AuthError, CALLER_META_KEY, WsTunnelBuilder, compileAuthorizationPolicy, type IResolvedAuth, type ITokenValidator, type WsTunnel } from "../src/index";
 
 /**
@@ -511,5 +512,121 @@ describe("without any declaration", () => {
         await client.request("tools/call", { name: "write", arguments: { a: 1 } });
         const call = plain.received.find((m) => m.method === "tools/call")!;
         expect(call.params).toEqual({ name: "write", arguments: { a: 1 } });
+    });
+});
+
+describe("hardening found in review", () => {
+    it("refuses a reserved domain, a domain another provider owns, namespace /, and a provider allowed everywhere", async () => {
+        const base = await start((b) =>
+            b.withProviderPrincipals([...PROVIDERS, { id: "other-scada", secret: "s-other", subjects: ["service:other"], allowedResources: ["/production/site1/**"] }])
+        );
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+
+        const other = await FakeProvider.open(base, "scada2", "s-other");
+        const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
+        expect(taken.error?.data?.errors?.join("\n")).toContain('already declared by provider "mcp-scada"');
+        const reserved = await other.call("broker/authorization/declare", { ...DECLARATION, domain: "mcp", capabilities: ["mcp.tools.call"], protects: [] });
+        expect(reserved.error?.data?.errors?.join("\n")).toContain("reserved");
+        const root = await other.call("broker/authorization/declare", {
+            ...DECLARATION,
+            domain: "other",
+            capabilities: ["other.read"],
+            namespace: { resource: "/" },
+            resources: [],
+            protects: [],
+        });
+        expect(root.error?.data?.errors?.join("\n")).toContain('cannot be "/"');
+
+        const everywhere = await FakeProvider.open(base, "plain", "s-intruder");
+        const wide = await everywhere.call("broker/authorization/declare", { ...DECLARATION, domain: "wide", capabilities: ["wide.read"], resources: [], protects: [] });
+        expect(wide.error?.data?.errors?.[0]).toContain("may publish anywhere");
+    });
+
+    it("re-serializes every client frame, drops response-shaped batch items, and strips the key from notifications", async () => {
+        const base = await start();
+        const raw: string[] = [];
+        const { ws } = await connect(`${base}/provider/plain`, { "x-provider-token": "s-intruder" });
+        ws.on("message", (data: Buffer) => raw.push(data.toString()));
+        const client = await connect(`${base}/plain`, { authorization: "Bearer operator" });
+
+        // Two `_meta` keys: JSON.parse keeps the last, a C parser may keep the first.
+        client.ws.send(`{"jsonrpc":"2.0","method":"notifications/x","params":{"_meta":{"${CALLER_META_KEY}":{"ref":"cr_forgedforgedforged"}},"_meta":{}}}`);
+        client.ws.send(
+            JSON.stringify([
+                { jsonrpc: "2.0", id: "provider-broker-1", result: { accepted: true } },
+                { jsonrpc: "2.0", method: "notifications/y", params: { _meta: { [CALLER_META_KEY]: { ref: "cr_forgedforgedforged" } } } },
+            ])
+        );
+        await delay(100);
+        expect(raw.join("\n")).not.toContain("cr_forged");
+        expect(raw.join("\n")).not.toContain("provider-broker-1");
+    });
+
+    it("refuses a reference once its client went away", async () => {
+        const base = await start();
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+        let release: () => void = () => {};
+        const held = new Promise<void>((r) => (release = r));
+        let ref = "";
+        scada.onCall = async (request) => {
+            ref = callerOf(request)!.ref;
+            await held;
+            return {};
+        };
+        const client = await Client.open(base, "scada", "operator");
+        void client.request("tools/call", { name: "write", arguments: {} });
+        await delay(50);
+        client.ws.close();
+        await delay(50);
+        const reply = await scada.call("broker/authorize", {
+            principal: { type: "caller-ref", ref },
+            checks: [{ capability: "scada.observe", resource: "uns://x", resourcePath: "/production/site1/line1" }],
+        });
+        expect(reply.error?.message).toMatch(/unknown, expired|expired/);
+        release();
+    });
+
+    it("refuses a protected slot over Streamable HTTP and SSE as well", async () => {
+        const base = (await start()).replace("ws://", "http://");
+        const post = await mcpCall(base, "bench-motor01", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }), { authorization: "Bearer operator" });
+        expect(post.status).toBe(403);
+        const sse = await fetch(`${base}/bench-motor01/sse`, { headers: { authorization: "Bearer operator" } });
+        expect(sse.status).toBe(403);
+    });
+
+    it("refuses the wrong publisher on the multiplexed path", async () => {
+        const base = await start();
+        const { ws } = await connect(`${base}/providers`, { "x-provider-token": "s-intruder" });
+        const answer = new Promise<string>((resolve) => ws.once("message", (data: Buffer) => resolve(data.toString())));
+        ws.send(JSON.stringify({ provider: "bench-motor01", payload: { jsonrpc: "2.0", method: "notifications/register" } }));
+        expect(await answer).toContain("protected");
+        expect(tunnel!.getProviderInfo("bench-motor01")?.connected ?? false).toBe(false);
+    });
+
+    it("pins a Streamable HTTP session to the caller that opened it", async () => {
+        const base = (await start()).replace("ws://", "http://");
+        await FakeProvider.open(base.replace("http://", "ws://"), "plain", "s-intruder");
+        const opened = await openSession(base, "plain", { authorization: "Bearer operator" });
+        expect(opened.sessionId).toBeTruthy();
+        const own = await sessionPost(base, "plain", opened.sessionId!, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }), { authorization: "Bearer operator" });
+        expect(own.status).toBe(200);
+        const other = await sessionPost(base, "plain", opened.sessionId!, JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" }), { authorization: "Bearer visitor" });
+        expect(other.status).toBe(403);
+    });
+
+    it("refuses protectedSlots naming the shared secret or an unknown provider", () => {
+        const build = (declaredBy: string, publishedBy: string) => () =>
+            new WsTunnelBuilder().withPort(0).withProviderPrincipals(PROVIDERS).withProtectedSlots({ x: { declaredBy, publishedBy } }).build();
+        expect(build("mcp-scada", "shared-secret")).toThrow(/shared-secret/);
+        expect(build("nobody", "modbus-bench")).toThrow(/not in the providers table/);
+    });
+
+    it("refuses a loopback over a slot a live socket holds", async () => {
+        const base = await start();
+        await FakeProvider.open(base, "plain", "s-intruder");
+        const [, providerEnd] = LoopbackTransport.createPair();
+        expect(() => tunnel!.registerLoopbackProvider("plain", providerEnd)).toThrow(/WebSocket provider currently holds/);
     });
 });

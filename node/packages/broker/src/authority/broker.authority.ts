@@ -44,6 +44,8 @@ interface ICallerRef {
     readonly providerPrincipalId: string;
     readonly subject: IAuthorizationSubject;
     readonly correlationId: string;
+    /** `Date.now()` at issue; a reference older than the maximum age is refused. */
+    readonly issuedAt: number;
 }
 
 /** What `getAuthorityInfo` reports, for `broker_diagnose` and `broker_info`. */
@@ -74,6 +76,8 @@ export interface IBrokerAuthorityOptions {
     readonly authorizeBatchLimit?: number;
     /** Provider principals known from configuration, for the subjects of a protected slot's declarer. */
     readonly knownPrincipals?: readonly IProviderPrincipal[];
+    /** Longest a caller reference stays usable, even while its request is pending. @default 600000 */
+    readonly callerRefMaxAgeMs?: number;
 }
 
 /** Keys of an attribute map that are masked in the audit, whatever their value. */
@@ -123,6 +127,7 @@ export class BrokerAuthority {
     private readonly _authorization: IPolicyAuthorization | null;
     private readonly _securityVersion: string;
     private readonly _batchLimit: number;
+    private readonly _refMaxAgeMs: number;
 
     private readonly _declarations = new Map<string, IProviderDeclaration>();
     private readonly _refs = new Map<string, ICallerRef>();
@@ -135,6 +140,7 @@ export class BrokerAuthority {
         this._authorization = options.authorization;
         this._securityVersion = options.securityVersion ?? "config";
         this._batchLimit = Math.max(1, options.authorizeBatchLimit ?? DEFAULT_AUTHORIZE_BATCH_LIMIT);
+        this._refMaxAgeMs = Math.max(1, options.callerRefMaxAgeMs ?? 600_000);
         for (const principal of options.knownPrincipals ?? []) this._principals.set(principal.id, principal);
     }
 
@@ -204,7 +210,12 @@ export class BrokerAuthority {
     /** Handles `broker/authorization/declare`. */
     declare(params: unknown, origin: IBrokerMethodOrigin): BrokerMethodOutcome {
         const policyVersion = `${this._securityVersion}.${this._declarationCount + 1}`;
-        const outcome = validateDeclaration(params, { principal: origin.principal, protectedSlots: this._protectedSlots, slotResources: this._slotResources }, policyVersion);
+        const owners = new Map([...this._declarations.values()].map((d) => [d.domain, d.principalId] as const));
+        const outcome = validateDeclaration(
+            params,
+            { principal: origin.principal, protectedSlots: this._protectedSlots, slotResources: this._slotResources, domainOwner: (domain) => owners.get(domain) },
+            policyVersion
+        );
         if (!outcome.ok) {
             console.warn(
                 `[broker] authorization declaration from slot "${origin.slot}" (principal "${origin.principal?.id ?? "(anonymous)"}") refused: ${outcome.errors.join("; ")}`
@@ -232,7 +243,7 @@ export class BrokerAuthority {
     issueRef(slot: string, brokerId: string, providerPrincipalId: string, subject: IAuthorizationSubject): { readonly ref: string; readonly correlationId: string } {
         const ref = randomId("cr_");
         const correlationId = randomId("corr_", 9);
-        this._refs.set(ref, { slot, brokerId, providerPrincipalId, subject, correlationId });
+        this._refs.set(ref, { slot, brokerId, providerPrincipalId, subject, correlationId, issuedAt: Date.now() });
         return { ref, correlationId };
     }
 
@@ -243,7 +254,8 @@ export class BrokerAuthority {
 
     /** Drops every reference whose request is no longer pending. */
     sweepRefs(isPending: (slot: string, brokerId: string) => boolean): void {
-        for (const [ref, entry] of this._refs) if (!isPending(entry.slot, entry.brokerId)) this._refs.delete(ref);
+        const oldest = Date.now() - this._refMaxAgeMs;
+        for (const [ref, entry] of this._refs) if (entry.issuedAt < oldest || !isPending(entry.slot, entry.brokerId)) this._refs.delete(ref);
     }
 
     get liveCallerRefs(): number {
@@ -293,7 +305,7 @@ export class BrokerAuthority {
                     "principal.ref is unknown, expired, or was issued for another slot or provider. A reference is valid only on the slot it came with, until the request it came with is answered."
                 );
             }
-            if (!isPending(entry.slot, entry.brokerId)) {
+            if (entry.issuedAt < Date.now() - this._refMaxAgeMs || !isPending(entry.slot, entry.brokerId)) {
                 this._refs.delete(a.ref);
                 return invalidParams("principal.ref has expired: the request it came with was already answered or abandoned.");
             }

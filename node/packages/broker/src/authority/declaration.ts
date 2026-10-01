@@ -57,7 +57,12 @@ export interface IDeclarationContext {
     readonly principal: IProviderPrincipal | null;
     readonly protectedSlots: Readonly<Record<string, IProtectedSlot>>;
     readonly slotResources: ISlotResourceResolver;
+    /** The principal whose accepted declaration holds `domain`, if any. */
+    readonly domainOwner?: (domain: string) => string | undefined;
 }
+
+/** Domains the broker's own capabilities live in (`mcp.tools.call`, `broker.providers.read`). No provider may declare them. */
+const RESERVED_DOMAINS: ReadonlySet<string> = new Set(["mcp", "broker"]);
 
 /** Keys a declaration may carry. Anything else refuses it. */
 const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects"]);
@@ -136,6 +141,17 @@ export function validateDeclaration(
             ],
         };
     }
+    // A provider allowed to publish anywhere could otherwise declare the whole
+    // tree and ask about its callers' rights on every other provider's slots.
+    const allowedResources = principal.allowedResources;
+    if (!allowedResources || allowedResources.length === 0 || allowedResources.some((pattern) => pattern === "**" || pattern === "/**")) {
+        return {
+            ok: false,
+            errors: [
+                `provider "${principal.id}" may publish anywhere (allowedResources absent or "**"). A provider that declares an authorization domain must be confined to its own subtree: give it explicit allowedResources, e.g. ["/production/site1/**"]`,
+            ],
+        };
+    }
     if (!isObject(params)) return { ok: false, errors: ["params must be an object"] };
 
     for (const key of Object.keys(params)) {
@@ -150,6 +166,11 @@ export function validateDeclaration(
     const domain = params.domain;
     const domainOk = typeof domain === "string" && DOMAIN_PATTERN.test(domain);
     if (!domainOk) errors.push('domain must be lowercase letters, digits and "-", starting with a letter (e.g. "scada")');
+    else if (RESERVED_DOMAINS.has(domain as string)) errors.push(`domain "${String(domain)}" is reserved for the broker's own capabilities`);
+    else {
+        const owner = context.domainOwner?.(domain as string);
+        if (owner !== undefined && owner !== principal.id) errors.push(`domain "${String(domain)}" is already declared by provider "${owner}"; a domain has one owner`);
+    }
 
     // Namespace: a resource path the principal may publish into.
     let namespace: ResourcePath | undefined;
@@ -159,6 +180,7 @@ export function validateDeclaration(
         for (const key of Object.keys(params.namespace)) if (key !== "resource") errors.push(`namespace: unknown key "${key}"`);
         const parsed = parseProviderResourcePath(params.namespace.resource, "namespace.resource");
         if (typeof parsed === "string") errors.push(parsed);
+        else if (parsed.segments.length === 0) errors.push('namespace.resource cannot be "/": declare the subtree this provider serves');
         else {
             const decision = providerPublishDecision(principal, parsed);
             if (!decision.allowed) errors.push(`namespace.resource "${parsed.value}" is outside this provider's allowedResources: ${decision.detail ?? decision.reason}`);

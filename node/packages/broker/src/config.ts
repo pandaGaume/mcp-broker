@@ -415,6 +415,12 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
                     if (key === "secret") problems.push(`${label}: "secret" would put a secret in clear in the file; name the environment variable that holds it in "secretEnv"`);
                     else if (!["id", "secretEnv", "subjects", "allowedResources"].includes(key)) problems.push(`${label}: unknown key "${key}"`);
                 }
+                if (typeof entry.id !== "string" || entry.id.length === 0) problems.push(`${label}: "id" must be a non-empty string`);
+                if (entry.subjects !== undefined && (!Array.isArray(entry.subjects) || entry.subjects.some((v) => typeof v !== "string")))
+                    problems.push(`${label}: "subjects" must be an array of strings`);
+                if (entry.allowedResources !== undefined && (!Array.isArray(entry.allowedResources) || entry.allowedResources.some((v) => typeof v !== "string"))) {
+                    problems.push(`${label}: "allowedResources" must be an array of strings`);
+                }
                 if (typeof entry.secretEnv !== "string" || entry.secretEnv.length === 0) {
                     problems.push(`${label}: "secretEnv" must name the environment variable holding this provider's secret`);
                     continue;
@@ -442,6 +448,16 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
             const slots = authorization.protectedSlots;
             if (slots !== undefined && (typeof slots !== "object" || slots === null || Array.isArray(slots)))
                 problems.push('"authorization.protectedSlots" must be an object keyed by slot name');
+            else if (slots) {
+                for (const [slot, entry] of Object.entries(slots)) {
+                    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+                        problems.push(`authorization.protectedSlots["${slot}"] must be { "declaredBy": "<id>", "publishedBy": "<id>" }`);
+                        continue;
+                    }
+                    for (const key of Object.keys(entry))
+                        if (key !== "declaredBy" && key !== "publishedBy") problems.push(`authorization.protectedSlots["${slot}"]: unknown key "${key}"`);
+                }
+            }
         }
     }
 

@@ -99,3 +99,27 @@ describe("the shipped example security file", () => {
         expect(() => compileAuthorizationPolicy(result.security.auth!)).not.toThrow();
     });
 });
+
+describe("security file entries", () => {
+    it("refuses a bad id, non-array subjects, and unknown keys in a protected slot", () => {
+        const dir = mkdtempSync(join(tmpdir(), "mcp-broker-security-"));
+        const file = join(dir, "s.json");
+        writeFileSync(
+            file,
+            JSON.stringify({
+                providers: [{ secretEnv: "A", subjects: "service:x" }],
+                authorization: { protectedSlots: { bench: { declaredBy: "a", publishedBy: "b", openTo: "everyone" }, other: "a" } },
+            })
+        );
+        let message = "";
+        try {
+            loadSecurityConfig({ config: {}, baseDir: dir, sourcePath: null }, { MCP_BROKER_SECURITY_FILE: file, A: "x" });
+        } catch (error) {
+            message = (error as Error).message;
+        }
+        expect(message).toContain('"id" must be a non-empty string');
+        expect(message).toContain('"subjects" must be an array of strings');
+        expect(message).toContain('unknown key "openTo"');
+        expect(message).toContain('protectedSlots["other"] must be');
+    });
+});

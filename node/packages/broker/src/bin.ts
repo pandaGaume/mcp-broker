@@ -566,18 +566,18 @@ async function main(): Promise<void> {
         builder.withProviderSecret(providerSecret);
     }
 
-    // ── Security file: one identity per provider, protected slots ────────────
-    if (security) {
-        if (security.credentials.length > 0) builder.withProviderPrincipals(security.credentials);
-        const protectedSlots = security.security.authorization?.protectedSlots;
-        if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
-        builder.withSecurityVersion(security.version);
-    }
-
-    // `build()` refuses a security setup it could not enforce (a protected slot
-    // with no provider identities, say): say so and stop, rather than crash.
+    // `withProviderPrincipals()` and `build()` refuse a security setup they
+    // could not enforce (two providers sharing a secret, a protected slot with
+    // no provider identities, ...): say so and stop, rather than crash.
     let tunnel: ReturnType<typeof builder.build>;
     try {
+        // ── Security file: one identity per provider, protected slots ────────
+        if (security) {
+            if (security.credentials.length > 0) builder.withProviderPrincipals(security.credentials);
+            const protectedSlots = security.security.authorization?.protectedSlots;
+            if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
+            builder.withSecurityVersion(security.version);
+        }
         tunnel = builder.build();
     } catch (error) {
         console.error(`[mcp-broker] ${(error as Error).message}`);
