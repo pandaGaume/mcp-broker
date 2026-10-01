@@ -301,6 +301,12 @@ export class WsTunnel implements IBrokerContext {
     private readonly _unmatchedIdWarnedProviders = new Set<string>();
 
     /**
+     * Slots already warned about for opening requests of their own, so a
+     * provider that keeps asking warns once.
+     */
+    private readonly _providerRequestWarnedProviders = new Set<string>();
+
+    /**
      * Slots already warned about for emitting a frame that is not JSON-RPC.
      * A provider that speaks a non-JSON dialect emits one on every message, so
      * the warning fires once per slot instead of flooding the log.
@@ -2468,9 +2474,14 @@ export class WsTunnel implements IBrokerContext {
 
     private _routeFromProvider(state: IProviderState, providerName: string, data: string): void {
         try {
-            const msg = JSON.parse(data) as { id?: string | number };
+            const msg = JSON.parse(data) as { id?: string | number; method?: unknown };
 
-            if (msg.id != null) {
+            if (msg.id != null && typeof msg.method === "string") {
+                // A request the provider opened itself: a response never
+                // carries `method`. Answered here, at once, because nothing
+                // downstream will: see `_answerProviderRequest`.
+                this._answerProviderRequest(state, providerName, msg.id, msg.method);
+            } else if (msg.id != null) {
                 // Response: route to the specific sink that made the request, and
                 // put the client's own id back in place of the broker's before it
                 // is delivered (see `_trackRequest`).
@@ -2511,16 +2522,51 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
-     * Reports a frame carrying an id nothing is waiting for.
+     * Answers, immediately, a request the provider opened itself.
      *
-     * Two very different causes, so the message names both. Either the provider
-     * did not echo the id it was given (the frame is then unroutable and the
-     * real client hangs until the request deadline), or the provider is opening
-     * a **server-to-client** request of its own (`sampling/createMessage`,
-     * `roots/list`, `elicitation/create`), which this broker does not relay: the
-     * frame is dropped and the provider waits for an answer that never comes.
-     * Both used to be silent, which is what made the second one impossible to
-     * diagnose from either end.
+     * The broker relays no **server-to-client** request (`sampling/createMessage`,
+     * `roots/list`, `elicitation/create`): it cannot tell which of the slot's
+     * clients should answer. These frames used to be taken for responses, found
+     * no pending entry, and were dropped, so the provider waited for an answer
+     * that never came, at best until its own timeout. A provider that has to
+     * time out to learn "no" holds the request, and whatever it guards, for the
+     * whole timeout; under load that is what stops a provider from scaling. So
+     * the answer is a JSON-RPC error, sent back on the socket (or envelope, or
+     * loopback, or upstream) the request came from, with its id unchanged.
+     *
+     * `ping` is the one exception: it checks the link to the next hop, and the
+     * broker is that hop, so it answers `{}` itself.
+     */
+    private _answerProviderRequest(state: IProviderState, providerName: string, id: string | number, method: string): void {
+        if (method === "ping") {
+            this._sendToProvider(state, providerName, JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
+            return;
+        }
+
+        this._sendToProvider(
+            state,
+            providerName,
+            JSON.stringify({
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32601, message: `Method not found: the broker does not relay requests opened by a provider (${method})` },
+            })
+        );
+
+        if (this._providerRequestWarnedProviders.has(providerName)) return;
+        this._providerRequestWarnedProviders.add(providerName);
+        console.warn(
+            `[broker] provider "${providerName}" opened a request of its own (${method}); the broker does not relay provider-initiated requests to clients, ` +
+                `and answered -32601 at once. Further such requests from this slot are answered the same way without being logged.`
+        );
+    }
+
+    /**
+     * Reports a response carrying an id nothing is waiting for: the provider did
+     * not echo the id it was given, or answered after the request deadline. The
+     * frame is unroutable and dropped; the real client hangs until the deadline.
+     * Requests the provider opens itself carry `method` and never get here
+     * (see {@link _answerProviderRequest}).
      *
      * Once per slot: a provider doing this does it on every frame.
      */
@@ -2528,9 +2574,9 @@ export class WsTunnel implements IBrokerContext {
         if (this._unmatchedIdWarnedProviders.has(providerName)) return;
         this._unmatchedIdWarnedProviders.add(providerName);
         console.warn(
-            `[broker] provider "${providerName}" sent a frame with id ${JSON.stringify(id)}, which matches no request the broker is waiting on; it was dropped. ` +
+            `[broker] provider "${providerName}" sent a response with id ${JSON.stringify(id)}, which matches no request the broker is waiting on; it was dropped. ` +
                 `Either the provider answered with a different id than the one it received (JSON-RPC requires echoing it verbatim, including its type: 1 and "1" are not the same id), ` +
-                `or it is initiating a request of its own (sampling/createMessage, roots/list, elicitation/create), which the broker does not relay to clients. ` +
+                `or it answered after the request deadline (providerRequestTimeoutMs). ` +
                 `Further unmatched ids from this slot are not logged.`
         );
     }

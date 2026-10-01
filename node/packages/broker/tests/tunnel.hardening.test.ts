@@ -456,3 +456,86 @@ describe("the aggregate opt-in has one shape on both paths", () => {
         expect(await aggregatedTools(base)).toEqual([]);
     });
 });
+
+describe("a request a provider opens itself is answered at once", () => {
+    // The broker relays no server-to-client request. These frames used to be
+    // taken for responses and dropped, so the provider waited until its own
+    // timeout to learn "no". The answer must come back immediately, in the
+    // framing the provider sent, with its id untouched.
+
+    it("answers -32601 on the slot-scoped path, keeping the id and its type", async () => {
+        const base = await start();
+        const provider = await open(`${base}/provider/asker`);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/register" }));
+
+        const answer = nextMessage(provider);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "sampling/createMessage", params: {} }));
+        const reply = await answer;
+
+        expect(reply.id).toBe(7);
+        expect(reply.error?.code).toBe(-32601);
+        expect(reply.error?.message).toContain("sampling/createMessage");
+    });
+
+    it("answers -32601 on the multiplexed path, inside the envelope", async () => {
+        const base = await start();
+        const provider = await open(`${base}/providers`);
+        provider.send(JSON.stringify({ provider: "muxed-asker", payload: { jsonrpc: "2.0", method: "notifications/register" } }));
+
+        const answer = new Promise<{ provider: string; payload: IJsonRpc }>((resolve) => {
+            provider.once("message", (raw: Buffer) => resolve(JSON.parse(raw.toString()) as { provider: string; payload: IJsonRpc }));
+        });
+        provider.send(JSON.stringify({ provider: "muxed-asker", payload: { jsonrpc: "2.0", id: "r-1", method: "roots/list" } }));
+        const reply = await answer;
+
+        expect(reply.provider).toBe("muxed-asker");
+        expect(reply.payload.id).toBe("r-1");
+        expect(reply.payload.error?.code).toBe(-32601);
+    });
+
+    it("answers a loopback provider through its own transport", async () => {
+        await start();
+        const sent: IJsonRpc[] = [];
+        const transport = {
+            isOpen: true,
+            onMessage: null as ((data: string) => void) | null,
+            onOpen: null,
+            onClose: null,
+            onError: null,
+            send: (data: string) => sent.push(JSON.parse(data) as IJsonRpc),
+            close: () => {},
+        };
+        tunnel!.registerLoopbackProvider("in-process", transport);
+
+        transport.onMessage?.(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "elicitation/create", params: {} }));
+
+        expect(sent).toEqual([expect.objectContaining({ id: 1, error: expect.objectContaining({ code: -32601 }) })]);
+    });
+
+    it("answers ping itself, since the broker is the next hop", async () => {
+        const base = await start();
+        const provider = await open(`${base}/provider/pinger`);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/register" }));
+
+        const answer = nextMessage(provider);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping" }));
+
+        expect(await answer).toEqual({ jsonrpc: "2.0", id: 3, result: {} });
+    });
+
+    it("never shows the request to the slot's clients", async () => {
+        const base = await start();
+        const provider = await open(`${base}/provider/quiet`);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/register" }));
+        const client = await open(`${base}/quiet`);
+        const seen: string[] = [];
+        client.on("message", (raw: Buffer) => seen.push(raw.toString()));
+
+        const answer = nextMessage(provider);
+        provider.send(JSON.stringify({ jsonrpc: "2.0", id: 9, method: "sampling/createMessage" }));
+        await answer;
+        await delay(100);
+
+        expect(seen).toEqual([]);
+    });
+});

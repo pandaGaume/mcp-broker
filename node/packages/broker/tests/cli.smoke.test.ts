@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -96,5 +96,26 @@ describe.skipIf(!built)("published CLI", () => {
         // would otherwise leave the process happily running and the test green.
         const log = output.join("");
         expect(log).not.toMatch(/failed to start|Error:/);
+    }, 30_000);
+
+    it("refuses to start on a config file it cannot parse", async () => {
+        // Fail closed: before 1.4.1 the CLI logged the parse error and started
+        // with an empty config, i.e. with authentication and policy switched off.
+        const cwd = mkdtempSync(join(tmpdir(), "mcp-broker-smoke-"));
+        mkdirSync(join(cwd, ".mcp-broker"));
+        writeFileSync(join(cwd, ".mcp-broker", "config.json"), '{ "auth": { "enabled": true, } }');
+
+        const port = await freePort();
+        const output: string[] = [];
+        const child = spawn(process.execPath, [BIN], {
+            cwd,
+            env: { ...process.env, MCP_BROKER_CONFIG: "", MCP_BROKER_PORT: String(port), MCP_BROKER_HOST: "127.0.0.1", MCP_BROKER_OPEN: "" },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+        const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+
+        expect(code).toBe(1);
+        expect(output.join("")).toContain("refuses to start");
     }, 30_000);
 });

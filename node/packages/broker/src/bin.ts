@@ -62,7 +62,7 @@ import * as fs from "fs";
 import * as path from "path";
 import open from "open";
 import { WsTunnelBuilder, VERSION, PACKAGE_NAME, BROKER_PROVIDER_NAME, BROKER_AGGREGATE_NAME, type ProviderTakeoverMode } from "./index";
-import { loadBrokerConfig, resolveOpenTarget } from "./config";
+import { BrokerConfigError, loadBrokerConfig, resolveOpenTarget, type ILoadedBrokerConfig } from "./config";
 import { loadMcpbBundle } from "./mcpb/mcpb.loader";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,23 @@ function printHelp(): void {
 // Configuration
 // ---------------------------------------------------------------------------
 
-const { config, baseDir } = loadBrokerConfig();
+/**
+ * A config file that was designated or found but cannot be used stops the
+ * process here, before anything listens. Carrying on with an empty config
+ * would start a broker with no authentication and no authorization.
+ */
+function loadConfigOrExit(): ILoadedBrokerConfig {
+    try {
+        return loadBrokerConfig();
+    } catch (error) {
+        if (!(error instanceof BrokerConfigError)) throw error;
+        process.stderr.write(`${error.message}
+`);
+        process.exit(1);
+    }
+}
+
+const { config, baseDir } = loadConfigOrExit();
 const cwd = process.cwd();
 
 /**

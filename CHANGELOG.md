@@ -20,6 +20,23 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+### Fixed
+
+- **broker** Config loading fails closed. A config file that is designated
+  (`MCP_BROKER_CONFIG`, or the path given to `loadBrokerConfig()`) but missing,
+  or a config file that cannot be read, is not valid JSON, or is not a JSON
+  object, now stops the CLI with exit code 1 and a message naming the file;
+  `loadBrokerConfig()` throws the new `BrokerConfigError`. It used to log the
+  error and start with an empty config, that is with authentication and
+  authorization switched off. Finding no config file at all is unchanged.
+- **broker** A request opened by a provider (a frame with both `id` and
+  `method`: `sampling/createMessage`, `roots/list`, `elicitation/create`, ...)
+  is answered at once with `-32601`, on the socket, envelope, loopback or
+  upstream it came from, with its id unchanged. It used to be taken for a
+  response, dropped, and left the provider waiting until its own timeout.
+  `ping` is answered `{}`, the broker being the next hop. A response with an
+  unknown id is still dropped and logged once per slot.
+
 ## [1.4.0] - 2026-09-30
 
 ### Added

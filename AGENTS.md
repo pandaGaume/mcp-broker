@@ -211,6 +211,8 @@ this._forwardResourceContentChanged("plant://gauge");
 | `-32601 Method not found` on `_all` | `_all` covers tools and prompts only | use the provider's own slot |
 | `-32602 Unknown aggregated tool` | you built the prefixed name yourself | re-run `tools/list`, pass the name back verbatim |
 | Request errors with `did not respond within 60000ms` | the provider never answered | raise `providerRequestTimeoutMs`, or fix the provider |
+| Provider gets `-32601` back for `sampling/createMessage`, `roots/list`, `elicitation/create` | the broker relays no request opened by a provider and answers it at once (1.4.1; earlier brokers dropped it silently). `ping` is answered `{}` | do not depend on server-to-client requests behind the broker |
+| Broker exits at start with `Cannot use the config file` | the config file is missing (when designated), not valid JSON, or not an object; since 1.4.1 the broker fails closed instead of starting with no security settings | fix the file the message names |
 | Subscribed, `notifications/resources/updated` never arrives | the update names another URI (matching is exact), has no `params.uri` (dropped, logged once), or the read grant was revoked (unsubscribed) | compare URIs byte for byte; read the broker log |
 | `resources/subscribe` answers `-32601` on a provider slot | the provider does not implement it (mcp-core before 1.3.0 did not) | upgrade the provider to mcp-core 1.3.0 or implement the method |
 | `-32000 Subscription limit reached` | `maxSubscriptionsPerClient` / `maxSubscriptionsPerSlot` | unsubscribe what you no longer watch, or raise `resourceSubscriptions` |
