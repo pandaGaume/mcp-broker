@@ -16,6 +16,9 @@ export const BROKER_DECLARE_METHOD = "broker/authorization/declare";
 /** A provider asks for one or more decisions. */
 export const BROKER_AUTHORIZE_METHOD = "broker/authorize";
 
+/** A provider reports what happened after a decision (a notification). */
+export const BROKER_AUDIT_RESULT_METHOD = "broker/audit/result";
+
 /**
  * The `params._meta` key under which the broker hands a declaring provider a
  * reference to the caller of the request it is serving. Removed from every
@@ -50,6 +53,25 @@ interface ICallerRef {
     readonly issuedAt: number;
 }
 
+/** A decision kept until its result is reported, or until it ages out. */
+interface IDecisionRecord {
+    readonly event: IAuthorizationAuditEvent;
+    readonly providerPrincipalId: string;
+    /** The provider promised a result for this one (`resultsRequired`). */
+    readonly awaited: boolean;
+    readonly issuedAt: number;
+}
+
+/** A decision whose result was promised and has not come. */
+export interface IOverdueDecision {
+    readonly decisionId: string;
+    readonly slot: string;
+    readonly capability?: string;
+    readonly resource?: string;
+    readonly correlationId?: string;
+    readonly ageMs: number;
+}
+
 /** What `getAuthorityInfo` reports, for `broker_diagnose` and `broker_info`. */
 export interface IBrokerAuthorityInfo {
     readonly policyVersion: string;
@@ -67,6 +89,20 @@ export interface IBrokerAuthorityInfo {
     /** Domain-prefixed capabilities the policy grants that no accepted declaration covers. */
     readonly undeclaredCapabilities: readonly string[];
     readonly liveCallerRefs: number;
+    /** `broker/audit/result` bookkeeping. */
+    readonly results: {
+        readonly resultTimeoutMs: number;
+        /** Results received and linked to their decision. */
+        readonly reported: number;
+        /** Results naming no decision this broker still holds for that provider. */
+        readonly unmatched: number;
+        /** Decisions dropped from tracking before any result: too old, or past the tracking bound. */
+        readonly expired: number;
+        /** Promised results still awaited, overdue or not. */
+        readonly awaited: number;
+        /** The oldest overdue ones, at most 20. */
+        readonly overdue: readonly IOverdueDecision[];
+    };
 }
 
 export interface IBrokerAuthorityOptions {
@@ -80,7 +116,16 @@ export interface IBrokerAuthorityOptions {
     readonly knownPrincipals?: readonly IProviderPrincipal[];
     /** Longest a caller reference stays usable, even while its request is pending. @default 600000 */
     readonly callerRefMaxAgeMs?: number;
+    /** A promised `broker/audit/result` not received within this delay is reported as overdue. @default 60000 */
+    readonly resultTimeoutMs?: number;
+    /** How long a decision is kept to receive its result. @default 600000 */
+    readonly decisionRetentionMs?: number;
+    /** Upper bound on decisions kept for their result; the oldest go first. @default 10000 */
+    readonly maxTrackedDecisions?: number;
 }
+
+/** What a client may send as `X-Correlation-Id` and see reused in the audit. Anything else is replaced. */
+export const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /** Keys of an attribute map that are masked in the audit, whatever their value. */
 const SENSITIVE_KEY = /secret|password|passwd|token|credential|authorization|api[-_]?key|private/i;
@@ -130,6 +175,14 @@ export class BrokerAuthority {
     private readonly _securityVersion: string;
     private readonly _batchLimit: number;
     private readonly _refMaxAgeMs: number;
+    private readonly _resultTimeoutMs: number;
+    private readonly _decisionRetentionMs: number;
+    private readonly _maxTrackedDecisions: number;
+    private readonly _decisionRecords = new Map<string, IDecisionRecord>();
+    private readonly _unmatchedResultWarned = new Set<string>();
+    private _resultsReported = 0;
+    private _resultsUnmatched = 0;
+    private _decisionsExpired = 0;
 
     private readonly _declarations = new Map<string, IProviderDeclaration>();
     private readonly _refs = new Map<string, ICallerRef>();
@@ -143,6 +196,9 @@ export class BrokerAuthority {
         this._securityVersion = options.securityVersion ?? "config";
         this._batchLimit = Math.max(1, options.authorizeBatchLimit ?? DEFAULT_AUTHORIZE_BATCH_LIMIT);
         this._refMaxAgeMs = Math.max(1, options.callerRefMaxAgeMs ?? 600_000);
+        this._resultTimeoutMs = Math.max(1, options.resultTimeoutMs ?? 60_000);
+        this._decisionRetentionMs = Math.max(this._resultTimeoutMs, options.decisionRetentionMs ?? 600_000);
+        this._maxTrackedDecisions = Math.max(1, options.maxTrackedDecisions ?? 10_000);
         for (const principal of options.knownPrincipals ?? []) this._principals.set(principal.id, principal);
     }
 
@@ -247,10 +303,13 @@ export class BrokerAuthority {
         brokerId: string,
         providerPrincipalId: string,
         subject: IAuthorizationSubject,
-        traceId: string
+        traceId: string,
+        clientCorrelationId?: string
     ): { readonly ref: string; readonly correlationId: string; readonly traceId: string } {
         const ref = randomId("cr_");
-        const correlationId = randomId("corr_", 9);
+        // The client's own id when it sent a usable one (`X-Correlation-Id`),
+        // so its logs and the broker audit share a key; otherwise the broker's.
+        const correlationId = clientCorrelationId !== undefined && CORRELATION_ID_PATTERN.test(clientCorrelationId) ? clientCorrelationId : randomId("corr_", 9);
         this._refs.set(ref, { slot, brokerId, providerPrincipalId, subject, correlationId, traceId, issuedAt: Date.now() });
         return { ref, correlationId, traceId };
     }
@@ -392,6 +451,14 @@ export class BrokerAuthority {
             }
         }
 
+        // Engineering limits declared on the resource travel with every allow.
+        // The provider applies them; `allowed` stays true only for an
+        // unconditional allow, so a provider that reads `allowed` alone and
+        // ignores obligations refuses rather than oversteps.
+        const limits = decision.allowed ? declaration.resources.get(nativeResource)?.limits : undefined;
+        const effect: "allow" | "deny" | "allow-with-constraints" = !decision.allowed ? "deny" : limits ? "allow-with-constraints" : "allow";
+        const obligations = limits ? { constraints: limits } : undefined;
+
         const event: IAuthorizationAuditEvent = {
             timestamp: new Date().toISOString(),
             allowed: decision.allowed,
@@ -409,16 +476,92 @@ export class BrokerAuthority {
             onBehalfOf,
             nativeResource,
             ...(check.attributes !== undefined ? { attributes: maskAttributes(check.attributes) as Record<string, unknown> } : {}),
+            phase: "decision",
+            effect,
+            ...(obligations ? { obligations } : {}),
         };
         writeAuthorizationAuditEvent(event);
+        this._trackDecision(event, declaration, decision.allowed && declaration.resultsRequired.has(capability));
 
         return {
             decisionId,
-            effect: decision.allowed ? "allow" : "deny",
-            allowed: decision.allowed,
+            effect,
+            allowed: effect === "allow",
             reason: decision.reason,
             ...(decision.matchedPolicies ? { policies: decision.matchedPolicies } : {}),
+            ...(obligations ? { obligations } : {}),
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // broker/audit/result
+    // -------------------------------------------------------------------------
+
+    /** Keeps a decision so its result can be linked to it. Bounded in age and count. */
+    private _trackDecision(event: IAuthorizationAuditEvent, declaration: IProviderDeclaration, awaited: boolean): void {
+        this._expireDecisions();
+        while (this._decisionRecords.size >= this._maxTrackedDecisions) {
+            const oldest = this._decisionRecords.keys().next().value as string;
+            this._decisionRecords.delete(oldest);
+            this._decisionsExpired += 1;
+        }
+        this._decisionRecords.set(event.decisionId!, { event, providerPrincipalId: declaration.principalId, awaited, issuedAt: Date.now() });
+    }
+
+    private _expireDecisions(): void {
+        const oldest = Date.now() - this._decisionRetentionMs;
+        // Insertion order is issue order: stop at the first one still young.
+        for (const [id, record] of this._decisionRecords) {
+            if (record.issuedAt >= oldest) break;
+            this._decisionRecords.delete(id);
+            this._decisionsExpired += 1;
+        }
+    }
+
+    /**
+     * Handles the `broker/audit/result` notification: links what the provider
+     * says happened to the decision the broker made, in the same audit stream.
+     *
+     * A notification gets no answer, so a malformed or unmatched report is
+     * counted and logged once per slot, never answered. A provider can only
+     * report on decisions it was given: another provider's `decisionId` is
+     * unmatched, exactly like a made-up one.
+     */
+    recordResult(params: unknown, origin: IBrokerMethodOrigin): void {
+        const unmatched = (why: string): void => {
+            this._resultsUnmatched += 1;
+            if (this._unmatchedResultWarned.has(origin.slot)) return;
+            this._unmatchedResultWarned.add(origin.slot);
+            console.warn(`[broker] ${BROKER_AUDIT_RESULT_METHOD} from slot "${origin.slot}" ignored: ${why}. Further ones from this slot are counted, not logged.`);
+        };
+        if (typeof params !== "object" || params === null || Array.isArray(params)) return unmatched("params must be an object");
+        const p = params as Record<string, unknown>;
+        for (const key of Object.keys(p)) {
+            if (key !== "decisionId" && key !== "result" && key !== "nativeStatus" && key !== "errorCode") return unmatched(`unknown key "${key}"`);
+        }
+        if (p.result !== "success" && p.result !== "failure" && p.result !== "refused") return unmatched('result must be "success", "failure" or "refused"');
+        for (const key of ["nativeStatus", "errorCode"] as const) {
+            const value = p[key];
+            if (value !== undefined && (typeof value !== "string" || value.length === 0 || value.length > 256)) {
+                return unmatched(`${key} must be a non-empty string of at most 256 characters`);
+            }
+        }
+        this._expireDecisions();
+        const record = typeof p.decisionId === "string" ? this._decisionRecords.get(p.decisionId) : undefined;
+        if (!record || !origin.principal || record.providerPrincipalId !== origin.principal.id) {
+            return unmatched("decisionId names no decision this broker still holds for this provider");
+        }
+        // One result per decision: a second report would rewrite history.
+        this._decisionRecords.delete(p.decisionId as string);
+        this._resultsReported += 1;
+        writeAuthorizationAuditEvent({
+            ...record.event,
+            timestamp: new Date().toISOString(),
+            phase: "result",
+            result: p.result,
+            ...(typeof p.nativeStatus === "string" ? { nativeStatus: p.nativeStatus } : {}),
+            ...(typeof p.errorCode === "string" ? { errorCode: p.errorCode } : {}),
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -462,6 +605,37 @@ export class BrokerAuthority {
             })),
             undeclaredCapabilities: undeclared,
             liveCallerRefs: this._refs.size,
+            results: this._resultsInfo(),
+        };
+    }
+
+    private _resultsInfo(): IBrokerAuthorityInfo["results"] {
+        this._expireDecisions();
+        const now = Date.now();
+        let awaited = 0;
+        const overdue: IOverdueDecision[] = [];
+        for (const [decisionId, record] of this._decisionRecords) {
+            if (!record.awaited) continue;
+            awaited += 1;
+            const ageMs = now - record.issuedAt;
+            if (ageMs > this._resultTimeoutMs && overdue.length < 20) {
+                overdue.push({
+                    decisionId,
+                    slot: record.event.slot,
+                    ...(record.event.capability ? { capability: record.event.capability } : {}),
+                    ...(record.event.resource ? { resource: record.event.resource } : {}),
+                    ...(record.event.correlationId ? { correlationId: record.event.correlationId } : {}),
+                    ageMs,
+                });
+            }
+        }
+        return {
+            resultTimeoutMs: this._resultTimeoutMs,
+            reported: this._resultsReported,
+            unmatched: this._resultsUnmatched,
+            expired: this._decisionsExpired,
+            awaited,
+            overdue,
         };
     }
 }

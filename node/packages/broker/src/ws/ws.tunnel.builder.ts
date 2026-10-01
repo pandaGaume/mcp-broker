@@ -72,6 +72,7 @@ export class WsTunnelBuilder {
     private _protectedSlots: Readonly<Record<string, IProtectedSlot>> | undefined = undefined;
     private _securityVersion: string | undefined = undefined;
     private _authorizeBatchLimit: number | undefined = undefined;
+    private _authorizationResultTimeoutMs: number | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -424,6 +425,12 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /** How long an awaited `broker/audit/result` may take before `broker_diagnose` reports it overdue. */
+    withAuthorizationResultTimeout(ms: number): this {
+        this._authorizationResultTimeoutMs = ms;
+        return this;
+    }
+
     /**
      * Requires every provider connecting to `/provider/<slot>` or `/providers` to
      * present the given shared secret (via `X-Provider-Token` or `Authorization:
@@ -473,6 +480,7 @@ export class WsTunnelBuilder {
             })),
             securityVersion: this._securityVersion,
             authorizeBatchLimit: this._authorizeBatchLimit,
+            authorizationResultTimeoutMs: this._authorizationResultTimeoutMs,
         };
         return new WsTunnel(options);
     }

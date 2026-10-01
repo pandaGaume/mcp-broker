@@ -644,6 +644,21 @@ describe("transport.broker", () => {
         await expect(pending).rejects.toThrow(/did not answer broker\/authorization\/declare within 500ms/);
     });
 
+    it("reports a result as a notification, and refuses one the broker could not match", () => {
+        const transport = new DirectTransport(slotUrl());
+        transport.connect();
+        lastSocket().accept();
+        transport.broker.reportResult({ decisionId: "dec_1", result: "success", nativeStatus: "Good" });
+        expect(JSON.parse(lastSocket().sent[lastSocket().sent.length - 1])).toEqual({
+            jsonrpc: "2.0",
+            method: "broker/audit/result",
+            params: { decisionId: "dec_1", result: "success", nativeStatus: "Good" },
+        });
+        expect(transport.broker.pendingCount).toBe(0);
+        expect(() => transport.broker.reportResult({ decisionId: "", result: "success" })).toThrow(/decisionId/);
+        expect(() => transport.broker.reportResult({ decisionId: "dec_1", result: "done" as never })).toThrow(/result must be/);
+    });
+
     it("reads the caller reference out of a request's _meta", () => {
         expect(callerReferenceOf({ [CALLER_META_KEY]: { ref: "cr_x", correlationId: "c", traceId: "0123456789abcdef0123456789abcdef" } })).toEqual({
             ref: "cr_x",

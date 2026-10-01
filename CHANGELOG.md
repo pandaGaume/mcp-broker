@@ -57,6 +57,28 @@ repository; the changes it needed for this release are listed under
   every client frame on every slot; calls through `_all` carry the caller of
   `_all`. New reasons: `undeclared-resource`, `undeclared-capability`,
   `no-policy`.
+- **broker** Declared engineering limits are enforced through the decision.
+  A resource's `limits` (`minValue`, `maxValue`, `allowedValues`,
+  `destinations`; any other key, a wrong type, or `minValue > maxValue` refuses
+  the declaration) come back with every allow on it: `effect:
+  "allow-with-constraints"`, `obligations: { constraints }`, and `allowed:
+  false`, so a provider reading `allowed` alone refuses rather than ignores
+  them. The decision audit event carries `phase`, `effect` and `obligations`.
+- **broker**, **provider** `broker/audit/result`: a provider reports the
+  outcome of a decision (`decisionId`, `result`, `nativeStatus?`,
+  `errorCode?`), and the broker writes it next to the decision in its audit
+  (`phase: "result"`). Only the provider the decision was given to can report
+  it, once; anything else is counted as unmatched. A declaration may list
+  `resultsRequired` capabilities: their allowed decisions still unreported after
+  `withAuthorizationResultTimeout()` (60 s) are reported by `broker_diagnose` as
+  `decision-result-overdue`. `transport.broker.reportResult()` on the
+  transports, `reportResult()` on the loopback handle, and `results` counters in
+  `getAuthorityInfo()`.
+- **broker** The caller reference's `correlationId` is the client's
+  `X-Correlation-Id` when a Streamable HTTP or SSE client sent a usable one
+  (`[A-Za-z0-9._:-]{1,128}`), so its logs and the broker audit share a key;
+  otherwise the broker generates one, as before. Concurrent requests on one
+  session each keep their own.
 - **broker** Protected slots (`authorization.protectedSlots`): only the
   declarer's client identity may call one, only the configured principal may
   publish it, it never joins `_all`, and it is closed from startup.

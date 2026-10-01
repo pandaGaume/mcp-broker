@@ -11,6 +11,7 @@ export { DirectTransport, type IDirectTransportOptions } from "./direct.transpor
 export { MultiplexTransport, type IMultiplexTransportOptions } from "./multiplex.transport";
 export {
     BrokerClient,
+    AUDIT_RESULT_NOTIFICATION_METHOD,
     BrokerRequestError,
     CALLER_META_KEY,
     TELEMETRY_NOTIFICATION_METHOD,
@@ -24,12 +25,15 @@ export {
     type IAuthorizationAnswer,
     type IAuthorizationCheck,
     type IAuthorizationDeclaration,
+    type IAuditResult,
     type IAuthorizationDecision,
+    type IAuthorizationObligations,
     type IAuthorizationQuery,
     type IBrokerClientOptions,
     type ICallerReference,
     type IDeclarationAccepted,
     type IDeclaredResource,
+    type IResourceLimits,
     type ITelemetryEvent,
     type ITelemetrySpan,
     type ITraceParent,

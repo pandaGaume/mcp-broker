@@ -26,8 +26,26 @@ export interface IDeclaredResource {
     readonly resourcePath: ResourcePath;
     /** What acting on it does, e.g. `"physical-action"`. Descriptive only. */
     readonly effect?: string;
-    /** Engineering limits; they can only narrow a decision, never widen it. */
-    readonly limits?: Readonly<Record<string, unknown>>;
+    /**
+     * Engineering limits, returned with every allow on this resource as
+     * `obligations.constraints`. They can only narrow a decision, never widen it.
+     */
+    readonly limits?: IResourceLimits;
+}
+
+/**
+ * Engineering limits of one resource: the process range of a setpoint, the
+ * values a mode accepts, the levels a value may be written to. They hold for
+ * every caller, which is what separates them from a policy: they describe the
+ * equipment, not who may act on it.
+ */
+export interface IResourceLimits {
+    readonly minValue?: number;
+    readonly maxValue?: number;
+    /** JSON scalars the value must be one of. */
+    readonly allowedValues?: readonly (string | number | boolean | null)[];
+    /** Provider-defined levels the operation may target (`device`, `source`, ...). */
+    readonly destinations?: readonly string[];
 }
 
 /** An accepted declaration, as the broker holds it. */
@@ -45,6 +63,12 @@ export interface IProviderDeclaration {
     readonly resources: ReadonlyMap<string, IDeclaredResource>;
     /** Slots this declaration confirms as protected. */
     readonly protects: readonly string[];
+    /**
+     * Capabilities whose allowed decisions the provider promises to report
+     * with `broker/audit/result`. One still waiting past the result timeout is
+     * shown by `broker_diagnose`.
+     */
+    readonly resultsRequired: ReadonlySet<string>;
     /** Policy version produced by accepting it. */
     readonly policyVersion: string;
     /** When the broker accepted it. */
@@ -65,12 +89,14 @@ export interface IDeclarationContext {
 const RESERVED_DOMAINS: ReadonlySet<string> = new Set(["mcp", "broker"]);
 
 /** Keys a declaration may carry. Anything else refuses it. */
-const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects"]);
+const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects", "resultsRequired"]);
 
 /** Keys that would grant rights. Named in the refusal, since that is the whole point of refusing them. */
 const RIGHTS_KEYS = new Set(["assignments", "roles", "denies"]);
 
 const RESOURCE_KEYS = new Set(["resource", "resourcePath", "effect", "limits"]);
+
+const LIMIT_KEYS = new Set(["minValue", "maxValue", "allowedValues", "destinations"]);
 
 /** Upper bounds, so one frame cannot make the broker hold an unbounded amount of state. */
 export const DECLARATION_LIMITS = Object.freeze({
@@ -84,6 +110,63 @@ const DOMAIN_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 
 /** The principal id the legacy shared secret yields: it names no one in particular. */
 const SHARED_SECRET_PRINCIPAL = "shared-secret";
+
+const LIMITS_MAX_LIST = 256;
+
+/**
+ * Reads the engineering limits of one resource. Strict on purpose: the broker
+ * now returns them as constraints, so a key it does not know, or a value of
+ * the wrong type, would be a limit silently not enforced.
+ */
+function parseLimits(raw: unknown, label: string, errors: string[]): IResourceLimits | undefined {
+    if (!isObject(raw)) {
+        errors.push(`${label} must be an object`);
+        return undefined;
+    }
+    const before = errors.length;
+    for (const key of Object.keys(raw)) {
+        if (!LIMIT_KEYS.has(key)) errors.push(`${label}: unknown limit "${key}"; the broker enforces minValue, maxValue, allowedValues and destinations`);
+    }
+    const number = (key: "minValue" | "maxValue"): number | undefined => {
+        const value = raw[key];
+        if (value === undefined) return undefined;
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+            errors.push(`${label}.${key} must be a finite number`);
+            return undefined;
+        }
+        return value;
+    };
+    const minValue = number("minValue");
+    const maxValue = number("maxValue");
+    if (minValue !== undefined && maxValue !== undefined && minValue > maxValue) errors.push(`${label}: minValue ${minValue} is greater than maxValue ${maxValue}`);
+
+    let allowedValues: (string | number | boolean | null)[] | undefined;
+    if (raw.allowedValues !== undefined) {
+        const list = raw.allowedValues;
+        if (!Array.isArray(list) || list.length === 0 || list.length > LIMITS_MAX_LIST)
+            errors.push(`${label}.allowedValues must be a non-empty array of at most ${LIMITS_MAX_LIST} values`);
+        else if (!list.every((v) => v === null || typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))))
+            errors.push(`${label}.allowedValues may only hold strings, finite numbers, booleans and null`);
+        else allowedValues = [...list];
+    }
+
+    let destinations: string[] | undefined;
+    if (raw.destinations !== undefined) {
+        const list = raw.destinations;
+        if (!Array.isArray(list) || list.length === 0 || list.length > LIMITS_MAX_LIST || !list.every((d) => typeof d === "string" && d.length > 0 && d.length <= 64))
+            errors.push(`${label}.destinations must be a non-empty array of short strings`);
+        else destinations = [...list];
+    }
+
+    if (errors.length > before) return undefined;
+    const limits: IResourceLimits = {
+        ...(minValue !== undefined ? { minValue } : {}),
+        ...(maxValue !== undefined ? { maxValue } : {}),
+        ...(allowedValues ? { allowedValues: Object.freeze(allowedValues) } : {}),
+        ...(destinations ? { destinations: Object.freeze(destinations) } : {}),
+    };
+    return Object.keys(limits).length > 0 ? Object.freeze(limits) : undefined;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -243,7 +326,7 @@ export function validateDeclaration(
                     continue;
                 }
                 if (raw.effect !== undefined && (typeof raw.effect !== "string" || raw.effect.length === 0)) errors.push(`${label}.effect must be a non-empty string`);
-                if (raw.limits !== undefined && !isObject(raw.limits)) errors.push(`${label}.limits must be an object`);
+                const limits = raw.limits === undefined ? undefined : parseLimits(raw.limits, `${label}.limits`, errors);
                 if (resources.has(native)) {
                     errors.push(`${label}.resource "${native}" is declared twice`);
                     continue;
@@ -252,7 +335,7 @@ export function validateDeclaration(
                     resource: native,
                     resourcePath: path,
                     ...(typeof raw.effect === "string" ? { effect: raw.effect } : {}),
-                    ...(isObject(raw.limits) ? { limits: Object.freeze({ ...raw.limits }) } : {}),
+                    ...(limits ? { limits } : {}),
                 });
             }
         }
@@ -296,6 +379,21 @@ export function validateDeclaration(
         }
     }
 
+    // Results the provider promises to report: a subset of what it declared.
+    const resultsRequired = new Set<string>();
+    if (params.resultsRequired !== undefined) {
+        if (!Array.isArray(params.resultsRequired)) errors.push("resultsRequired must be an array of declared capabilities");
+        else {
+            for (const capability of params.resultsRequired) {
+                if (typeof capability !== "string" || !capabilities.has(capability)) {
+                    errors.push(`resultsRequired: ${JSON.stringify(capability)} is not one of the declared capabilities`);
+                    continue;
+                }
+                resultsRequired.add(capability);
+            }
+        }
+    }
+
     if (errors.length > 0 || !namespace) return { ok: false, errors: errors.length > 0 ? errors : ["namespace is missing"] };
 
     return {
@@ -308,6 +406,7 @@ export function validateDeclaration(
             capabilities,
             resources,
             protects: Object.freeze(protects),
+            resultsRequired: Object.freeze(resultsRequired),
             policyVersion,
             acceptedAt: new Date().toISOString(),
         }),
