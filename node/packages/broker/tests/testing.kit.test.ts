@@ -109,4 +109,23 @@ describe("startTestBroker", () => {
         expect(() => broker!.bearer("b")).toThrow(/no caller named "b". Declared callers: a/);
         expect(() => broker!.providerSecret("x")).toThrow(/no provider identity "x"/);
     });
+
+    it("captures provider spans in memory when telemetry is enabled", async () => {
+        broker = await startTestBroker({ telemetry: true });
+        const transport = new DirectTransport(broker.providerUrl("modbus"));
+        const opened = new Promise<void>((resolve) => (transport.onOpen = resolve));
+        transport.connect();
+        await opened;
+        transport.broker.span({
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            name: "modbus.read",
+            startTimeUnixNano: "1",
+            endTimeUnixNano: "2",
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        expect(broker.spans).toHaveLength(1);
+        expect(broker.spans[0]).toMatchObject({ slot: "modbus", span: { name: "modbus.read" } });
+        transport.close();
+    });
 });

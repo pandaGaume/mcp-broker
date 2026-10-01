@@ -1,5 +1,5 @@
 /** JSON-RPC notification consumed by the broker telemetry extension. */
-export const TELEMETRY_NOTIFICATION_METHOD = "notifications/telemetry";
+export const TELEMETRY_NOTIFICATION_METHOD = "broker/telemetry";
 
 /** Attribute values intentionally match the scalar subset shared by MCP JSON and OTLP. */
 export type TelemetryAttributeValue = string | number | boolean;
@@ -35,6 +35,8 @@ export interface ITelemetrySpan {
 /** One validated span enriched with broker-side slot identity and receipt time. */
 export interface IProviderTelemetryRecord {
     slot: string;
+    /** Authenticated provider identity. Absent for anonymous providers and upstreams. */
+    principal?: string;
     receivedAtUnixNano: string;
     span: ITelemetrySpan;
 }
@@ -60,6 +62,8 @@ export interface IProviderTelemetryOptions {
     maxEvents?: number;
     /** Called after an exporter failure. The failed batch is dropped. */
     onExportError?: (error: unknown) => void;
+    /** Called after a batch was exported successfully. */
+    onExportSuccess?: (recordCount: number) => void;
 }
 
 export interface IProviderTelemetryStats {

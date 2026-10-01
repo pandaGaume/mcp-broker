@@ -398,8 +398,9 @@ current total. Programmatically: `withResourceSubscriptionLimits({ ... })`.
 
 Provider telemetry is disabled when this object and
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` are both absent. When enabled, the broker
-consumes `notifications/telemetry`, validates each compact span, enriches it
-with the provider slot, and sends OTLP/HTTP JSON to the configured collector.
+consumes `broker/telemetry`, validates each compact span, enriches it
+with the provider slot and authenticated principal, and sends OTLP/HTTP JSON to
+the configured collector.
 Telemetry is never relayed to MCP clients.
 
 ```json

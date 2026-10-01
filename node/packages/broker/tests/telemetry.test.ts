@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
-import { OtlpHttpTraceExporter, ProviderTelemetryDispatcher, WsTunnelBuilder, type IProviderTelemetryExporter, type IProviderTelemetryRecord } from "../src/index";
+import { OtlpHttpTraceExporter, ProviderTelemetryDispatcher, WsTunnelBuilder, diagnoseBroker, type IProviderTelemetryExporter, type IProviderTelemetryRecord } from "../src/index";
 import type { WsTunnel } from "../src/ws/ws.tunnel";
 
 const span = {
@@ -18,7 +18,7 @@ const span = {
 
 const notification = {
     jsonrpc: "2.0",
-    method: "notifications/telemetry",
+    method: "broker/telemetry",
     params: { version: 1, signal: "traces", span },
 };
 
@@ -98,6 +98,34 @@ describe("provider telemetry routing", () => {
 
         expect(dispatcher.stats).toMatchObject({ accepted: 1, exported: 1, droppedQueueFull: 1 });
     });
+
+    it("surfaces exporter failures through broker_diagnose", async () => {
+        let attempted!: () => void;
+        const attempt = new Promise<void>((resolve) => {
+            attempted = resolve;
+        });
+        tunnel = new WsTunnelBuilder()
+            .withPort(0)
+            .withHost("127.0.0.1")
+            .withTelemetry({
+                exporter: {
+                    export() {
+                        attempted();
+                        throw new Error("collector unavailable");
+                    },
+                },
+            })
+            .build();
+        await tunnel.start();
+        const address = (tunnel as unknown as { _httpServer: { address(): AddressInfo } })._httpServer.address();
+        const provider = await open(`ws://127.0.0.1:${address.port}/provider/motor1`);
+        provider.send(JSON.stringify(notification));
+        await attempt;
+
+        const diagnosis = diagnoseBroker(tunnel)!;
+        expect(diagnosis.telemetry).toMatchObject({ exportErrors: 1, droppedExporter: 1 });
+        expect(diagnosis.problems).toContainEqual(expect.objectContaining({ id: "telemetry-export-failures" }));
+    });
 });
 
 describe("OTLP/HTTP exporter", () => {
@@ -105,7 +133,7 @@ describe("OTLP/HTTP exporter", () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
         const exporter = new OtlpHttpTraceExporter({ endpoint: "http://collector:4318/v1/traces", fetch: fetchMock });
 
-        await exporter.export([{ slot: "spoony01", receivedAtUnixNano: "1720000000002000000", span }]);
+        await exporter.export([{ slot: "spoony01", principal: "mcp-modbus", receivedAtUnixNano: "1720000000002000000", span }]);
 
         expect(fetchMock).toHaveBeenCalledOnce();
         const [url, init] = fetchMock.mock.calls[0]!;
@@ -114,6 +142,12 @@ describe("OTLP/HTTP exporter", () => {
             resourceSpans: Array<{ resource: { attributes: Array<{ key: string; value: { stringValue: string } }> }; scopeSpans: Array<{ spans: unknown[] }> }>;
         };
         expect(body.resourceSpans[0]?.resource.attributes).toContainEqual({ key: "mcp.provider.slot", value: { stringValue: "spoony01" } });
+        expect(body.resourceSpans[0]?.resource.attributes).toContainEqual({ key: "service.name", value: { stringValue: "mcp-modbus" } });
+        expect(body.resourceSpans[0]?.resource.attributes).toContainEqual({ key: "mcp.provider.principal", value: { stringValue: "mcp-modbus" } });
+        expect((body.resourceSpans[0]?.scopeSpans[0] as { spans: Array<{ attributes: unknown[] }> }).spans[0]?.attributes).toContainEqual({
+            key: "modbus.function_code",
+            value: { intValue: "3" },
+        });
         expect(body.resourceSpans[0]?.scopeSpans[0]?.spans).toHaveLength(1);
     });
 });

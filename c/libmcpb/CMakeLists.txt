@@ -30,6 +30,7 @@ set(MCPB_SRCS
     src/mcpb_sha1.c
     src/mcpb_ws.c
     src/mcpb_provider.c
+    src/mcpb_trace_context.c
     src/mcpb_telemetry.c)
 if(MCPB_MUX)
     list(APPEND MCPB_SRCS src/mcpb_envelope.c src/mcpb_mux.c)

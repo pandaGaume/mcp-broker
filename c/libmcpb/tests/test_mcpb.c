@@ -10,6 +10,7 @@
 #include "mcpb/mcpb_port.h"
 #include "mcpb/mcpb_provider.h"
 #include "mcpb/mcpb_telemetry.h"
+#include "mcpb/mcpb_trace_context.h"
 #include "mcpb/mcpb_ws.h"
 #include "../src/mcpb_internal.h"
 #if defined(MCPB_ENABLE_MUX) && MCPB_ENABLE_MUX
@@ -324,7 +325,7 @@ int main(void)
         const int n = mcpb_telemetry_encode(span, sizeof(span) - 1u,
                                              frame, sizeof(frame));
         static const char expected_prefix[] =
-            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/telemetry\","
+            "{\"jsonrpc\":\"2.0\",\"method\":\"broker/telemetry\","
             "\"params\":{\"version\":1,\"signal\":\"traces\",\"span\":";
         check(n > 0 && strncmp(frame, expected_prefix,
                                sizeof(expected_prefix) - 1u) == 0,
@@ -337,6 +338,27 @@ int main(void)
         check(mcpb_telemetry_encode("[]", 2u, frame,
                                     sizeof(frame)) == MCPB_ERR_ARG,
               "a span that is not a JSON object is refused");
+    }
+
+    printf("== W3C trace context ==\n");
+    {
+        static const char text[] =
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+        mcpb_trace_context_t context;
+        char encoded[MCPB_TRACEPARENT_BUFFER_SIZE];
+        check(mcpb_traceparent_parse(text, sizeof(text) - 1u, &context) == MCPB_OK,
+              "a valid version 00 traceparent is parsed");
+        check(mcpb_traceparent_format(&context, encoded, sizeof(encoded)) ==
+                  (int)MCPB_TRACEPARENT_TEXT_SIZE &&
+                  strcmp(encoded, text) == 0,
+              "traceparent formatting round-trips without allocation");
+        check(mcpb_traceparent_parse(
+                  "00-00000000000000000000000000000000-0123456789abcdef-01",
+                  MCPB_TRACEPARENT_TEXT_SIZE, &context) == MCPB_ERR_PROTOCOL,
+              "an all-zero trace id is refused");
+        check(mcpb_traceparent_format(&context, encoded, 8u) ==
+                  MCPB_ERR_TOO_LARGE,
+              "a short traceparent buffer is refused");
     }
 
     printf("== handshake ==\n");

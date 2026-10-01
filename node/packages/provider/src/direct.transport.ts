@@ -91,7 +91,15 @@ export class DirectTransport implements IMessageTransport {
         this._aggregate = options?.aggregate;
         this._headers = handshakeHeaders(options);
         this._pending = new PendingFrames(`DirectTransport ${wsUrl}`);
-        this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
+        this.broker = new BrokerClient(
+            (frame) => this.send(frame),
+            { requestTimeoutMs: options?.brokerRequestTimeoutMs },
+            (frame) => {
+                if (this._ws?.readyState !== WebSocket.OPEN) return false;
+                this._ws.send(frame);
+                return true;
+            }
+        );
     }
 
     get isOpen(): boolean {

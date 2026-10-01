@@ -44,6 +44,7 @@ startTestBroker({
     providers?,       // provider identities: id -> { subjects?, allowedResources? }
     policy?,          // roles, assignments, denies, slotResources
     protectedSlots?,  // slot -> { declaredBy, publishedBy }
+    telemetry?,       // true: capture provider spans in memory
     configure?,       // (builder) => void, last word on WsTunnelBuilder
 })
 ```
@@ -130,6 +131,7 @@ Both ids must be in `providers`. Closed from startup, as in production.
 | `providersUrl` | shared provider socket (`MultiplexTransport`) |
 | `bearer(caller)` | `{ authorization: "Bearer <caller>" }`; throws for an undeclared caller |
 | `providerSecret(id)` | the secret of a provider identity; throws for an undeclared id |
+| `spans` | immutable snapshot of spans exported in memory when `telemetry: true` |
 | `tunnel` | the `WsTunnel`, for `getAuthorityInfo()`, `getProviderInfo()`, `registerLoopbackProvider()` |
 | `stop()` | call it in your teardown |
 
@@ -144,6 +146,10 @@ gets `allow` for one and `deny` for the other. Copy it as a starting point.
 On the provider side, the caller reference is read with
 `callerReferenceOf(params._meta)` from `@cyanmycelium/mcp-broker-provider`
 (with mcp-core 1.4.0, an adapter gets the same object as `request?.meta`).
+
+For end-to-end trace tests, pass `telemetry: true`, emit with
+`transport.broker.span(span)`, then assert on `broker.spans`. No collector or
+network exporter is involved.
 
 ## When something does not work
 

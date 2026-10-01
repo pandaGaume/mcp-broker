@@ -31,6 +31,7 @@ import type { IAuthorizationPolicyConfig } from "../authorization/policy.types";
 import type { IProtectedSlot } from "../authority/declaration";
 import { WsTunnelBuilder } from "../ws/ws.tunnel.builder";
 import type { WsTunnel } from "../ws/ws.tunnel";
+import type { IProviderTelemetryRecord } from "../telemetry/telemetry.types";
 
 /** Issuer written into every test token. `.invalid` is reserved and resolves nowhere. */
 export const TEST_ISSUER = "https://test-broker.invalid";
@@ -82,6 +83,9 @@ export interface ITestBrokerOptions {
     /** Protected slots, as in the security file. Needs `providers`. */
     readonly protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
 
+    /** Enables a bounded in-memory telemetry exporter for end-to-end trace assertions. */
+    readonly telemetry?: boolean;
+
     /** Last word on the builder, for anything the options above do not cover. */
     readonly configure?: (builder: WsTunnelBuilder) => void;
 }
@@ -103,6 +107,8 @@ export interface ITestBroker {
     bearer(caller: string): { authorization: string };
     /** The secret of a provider identity, for the transport's `secret` option. */
     providerSecret(id: string): string;
+    /** Snapshot of spans accepted by the in-memory exporter. Empty when telemetry is disabled. */
+    readonly spans: readonly IProviderTelemetryRecord[];
     stop(): Promise<void>;
 }
 
@@ -177,7 +183,17 @@ export async function startTestBroker(options: ITestBrokerOptions = {}): Promise
         ...(p.allowedResources ? { allowedResources: [...p.allowedResources] } : {}),
     }));
 
+    const spans: IProviderTelemetryRecord[] = [];
     const builder = new WsTunnelBuilder().withPort(0).withHost("127.0.0.1").withAuth(auth);
+    if (options.telemetry) {
+        builder.withTelemetry({
+            exporter: {
+                export: (records) => {
+                    spans.push(...records);
+                },
+            },
+        });
+    }
     if (credentials.length > 0) builder.withProviderPrincipals(credentials);
     if (options.protectedSlots) builder.withProtectedSlots(options.protectedSlots);
     options.configure?.(builder);
@@ -205,6 +221,9 @@ export async function startTestBroker(options: ITestBrokerOptions = {}): Promise
             const secret = secrets.get(id);
             if (!secret) throw new Error(`startTestBroker: no provider identity "${id}". Declared providers: ${[...secrets.keys()].join(", ") || "(none)"}.`);
             return secret;
+        },
+        get spans() {
+            return [...spans];
         },
         stop: () => tunnel.stop(),
     };
