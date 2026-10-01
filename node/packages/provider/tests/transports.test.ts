@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CALLER_META_KEY, DirectTransport, MultiplexTransport, callerReferenceOf } from "../src/index";
+import { CALLER_META_KEY, DirectTransport, MultiplexTransport, callerReferenceOf, childTraceparent, parseTraceparent, traceparentOf, withTraceparent } from "../src/index";
 import { decodeEnvelope, encodeEnvelopeMessage, encodeErrorEnvelope, TUNNEL_REGISTER_METHOD, TunnelErrorCodes } from "../src/protocol/index";
 import { PENDING_FRAME_LIMIT } from "../src/transport.support";
 
@@ -645,8 +645,63 @@ describe("transport.broker", () => {
     });
 
     it("reads the caller reference out of a request's _meta", () => {
-        expect(callerReferenceOf({ [CALLER_META_KEY]: { ref: "cr_x", correlationId: "c" } })).toEqual({ ref: "cr_x", correlationId: "c" });
+        expect(callerReferenceOf({ [CALLER_META_KEY]: { ref: "cr_x", correlationId: "c", traceId: "0123456789abcdef0123456789abcdef" } })).toEqual({
+            ref: "cr_x",
+            correlationId: "c",
+            traceId: "0123456789abcdef0123456789abcdef",
+        });
         expect(callerReferenceOf({})).toBeUndefined();
         expect(callerReferenceOf(undefined)).toBeUndefined();
+    });
+
+    it("emits a validated broker telemetry notification", () => {
+        const transport = new DirectTransport(slotUrl());
+        transport.connect();
+        lastSocket().accept();
+        expect(
+            transport.broker.span({
+                traceId: "0123456789abcdef0123456789abcdef",
+                spanId: "0123456789abcdef",
+                name: "modbus.read",
+                kind: 3,
+                startTimeUnixNano: "1",
+                endTimeUnixNano: "2",
+            })
+        ).toBe(true);
+        expect(JSON.parse(lastSocket().sent.at(-1)!)).toMatchObject({ method: "broker/telemetry", params: { version: 1, signal: "traces" } });
+        expect(() =>
+            transport.broker.span({
+                traceId: "bad",
+                spanId: "0123456789abcdef",
+                name: "bad",
+                startTimeUnixNano: "1",
+                endTimeUnixNano: "2",
+            })
+        ).toThrow(/valid broker telemetry span/);
+    });
+
+    it("drops telemetry while disconnected instead of queueing it ahead of control traffic", () => {
+        const transport = new DirectTransport(slotUrl());
+        transport.connect();
+        expect(
+            transport.broker.span({
+                traceId: "0123456789abcdef0123456789abcdef",
+                spanId: "0123456789abcdef",
+                name: "modbus.read",
+                startTimeUnixNano: "1",
+                endTimeUnixNano: "2",
+            })
+        ).toBe(false);
+        lastSocket().accept();
+        expect(lastSocket().sent).toEqual([]);
+    });
+
+    it("reads, writes and continues W3C traceparent metadata", () => {
+        const parent = parseTraceparent("00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")!;
+        const child = childTraceparent(parent, "fedcba9876543210");
+        const meta = withTraceparent({ local: true }, child);
+        expect(traceparentOf(meta)).toEqual(child);
+        expect(meta.local).toBe(true);
+        expect(parseTraceparent("00-00000000000000000000000000000000-0123456789abcdef-01")).toBeUndefined();
     });
 });

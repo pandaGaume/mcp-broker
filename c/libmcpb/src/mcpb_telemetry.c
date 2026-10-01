@@ -3,7 +3,7 @@
 #include <string.h>
 
 static const char prefix[] =
-    "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/telemetry\","
+    "{\"jsonrpc\":\"2.0\",\"method\":\"broker/telemetry\","
     "\"params\":{\"version\":1,\"signal\":\"traces\",\"span\":";
 static const char suffix[] = "}}";
 

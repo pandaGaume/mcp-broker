@@ -53,7 +53,7 @@ import {
     type IBrokerAuthorityInfo,
 } from "../authority/broker.authority";
 import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
-import { ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD, type IProviderTelemetryStats } from "../telemetry/index";
+import { ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD, ensureTraceparent, type IProviderTelemetryStats } from "../telemetry/index";
 import type {
     AllowedOrigins,
     IHttpSession,
@@ -199,13 +199,13 @@ function stripCallerMeta(message: unknown): boolean {
 }
 
 /** Writes the caller reference into a request's `params._meta`. A request with positional params gets none. */
-function injectCallerMeta(message: Record<string, unknown>, caller: { readonly ref: string; readonly correlationId: string }): void {
+function injectCallerMeta(message: Record<string, unknown>, caller: { readonly ref: string; readonly correlationId: string; readonly traceId: string }): void {
     if (message.params === undefined) message.params = {};
     const params = message.params;
     if (typeof params !== "object" || params === null || Array.isArray(params)) return;
     const record = params as Record<string, unknown>;
     const meta = typeof record._meta === "object" && record._meta !== null && !Array.isArray(record._meta) ? (record._meta as Record<string, unknown>) : {};
-    record._meta = { ...meta, [CALLER_META_KEY]: { ref: caller.ref, correlationId: caller.correlationId } };
+    record._meta = { ...meta, [CALLER_META_KEY]: { ref: caller.ref, correlationId: caller.correlationId, traceId: caller.traceId } };
 }
 
 /**
@@ -1414,7 +1414,11 @@ export class WsTunnel implements IBrokerContext {
             // item like that is never renumbered, so it could pass for the
             // broker's answer to one of the provider's own `broker/*` requests.
             const kept = parsed.filter((item) => typeof item === "object" && item !== null && typeof (item as { method?: unknown }).method === "string");
-            for (const item of kept) stripCallerMeta(item);
+            for (const item of kept) {
+                stripCallerMeta(item);
+                const request = item as Record<string, unknown>;
+                if (typeof request.id === "string" || typeof request.id === "number") ensureTraceparent(request);
+            }
             return JSON.stringify(kept);
         }
         if (typeof parsed !== "object" || parsed === null) return frame;
@@ -1423,6 +1427,11 @@ export class WsTunnel implements IBrokerContext {
 
         const clientId = message.id;
         if (typeof clientId !== "string" && typeof clientId !== "number") return JSON.stringify(message);
+
+        // Every addressed MCP request carries a valid W3C context. A provider
+        // can continue it directly, and an intermediary can replace parent-id
+        // with its CLIENT span id before calling the next slot.
+        const trace = ensureTraceparent(message);
 
         const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._nextRequestId++}`;
         const timeout = this._requestTimeoutMs();
@@ -1434,7 +1443,7 @@ export class WsTunnel implements IBrokerContext {
         if (sink.type !== "broker") {
             const providerPrincipal = this._providerPrincipalOfSlot(providerName, state);
             if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id)) {
-                const issued = this._authority.issueRef(providerName, brokerId, providerPrincipal.id, this._authorizationSubject(principal));
+                const issued = this._authority.issueRef(providerName, brokerId, providerPrincipal.id, this._authorizationSubject(principal), trace.traceId);
                 injectCallerMeta(message, issued);
                 callerRef = issued.ref;
             }
@@ -2830,15 +2839,15 @@ export class WsTunnel implements IBrokerContext {
         try {
             const msg = JSON.parse(data) as { id?: string | number; method?: unknown; params?: unknown };
 
-            if (typeof msg.method === "string" && msg.method.startsWith(BROKER_METHOD_PREFIX)) {
+            if (msg.id == null && msg.method === TELEMETRY_NOTIFICATION_METHOD) {
+                // A provider trace is broker infrastructure, not an MCP
+                // notification. Disabled telemetry is deliberately dropped.
+                this._telemetry?.enqueue(providerName, msg.params, Buffer.byteLength(data), origin.principal?.id);
+            } else if (typeof msg.method === "string" && msg.method.startsWith(BROKER_METHOD_PREFIX)) {
                 // Addressed to the broker itself, never relayed. Checked before
                 // the id lookup: a `broker/*` request carries an id of the
                 // provider's choosing, which must not be taken for a response.
                 this._answerBrokerMethod(state, providerName, msg.id, msg.method, msg.params, origin);
-            } else if (msg.id == null && msg.method === TELEMETRY_NOTIFICATION_METHOD) {
-                // A provider trace is broker infrastructure, not an MCP
-                // notification. Disabled telemetry is deliberately dropped.
-                this._telemetry?.enqueue(providerName, msg.params, Buffer.byteLength(data));
             } else if (msg.id != null && typeof msg.method === "string") {
                 // A request the provider opened itself: a response never
                 // carries `method`. Answered here, at once, because nothing

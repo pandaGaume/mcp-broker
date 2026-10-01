@@ -24,6 +24,7 @@ import type { IBrokerAuthorityInfo } from "../authority/broker.authority";
  */
 
 import type { IBrokerContext, IBrokerProviderInfo } from "./broker.context";
+import type { IProviderTelemetryStats } from "../telemetry/telemetry.types";
 import { BROKER_AGGREGATE_NAME, BROKER_PROVIDER_NAME, isReservedBrokerSlot } from "./broker.slots";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,9 @@ export type BrokerDiagnosisRuleId =
     | "stdio-bridge-target-unreachable"
     | "self-served-page-blocked"
     | "protected-slot-unconfirmed"
-    | "undeclared-capability";
+    | "undeclared-capability"
+    | "telemetry-export-failures"
+    | "telemetry-spans-dropped";
 
 /** One detected problem: what is wrong, what proves it, and what to do. */
 export interface IBrokerDiagnosisProblem {
@@ -129,6 +132,9 @@ export interface IBrokerDiagnosis {
 
     /** Declarations and protected slots, when the host can report them. */
     authority?: IBrokerAuthorityInfo;
+
+    /** Provider telemetry queue and export counters, when supported. */
+    telemetry?: IProviderTelemetryStats;
 
     /** Detected problems, most severe first. Empty means nothing was provable. */
     problems: IBrokerDiagnosisProblem[];
@@ -205,6 +211,7 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
     const aggregate = context.getAggregateInfo?.();
     const security = context.getSecurityInfo?.();
     const bridgeTarget = context.getStdioBridgeTarget?.();
+    const telemetry = context.getTelemetryStats?.();
 
     const aggregateMembers = aggregate ? new Set(aggregate.providers) : null;
     const slots: IBrokerDiagnosisSlot[] = all.map((info) => ({
@@ -470,6 +477,37 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
         }
     }
 
+    // -- Provider telemetry -------------------------------------------------
+    if (!telemetry) {
+        checksSkipped.push({
+            id: "telemetry-export-failures",
+            reason: "This broker context does not implement getTelemetryStats(), so telemetry export health cannot be read.",
+        });
+        checksSkipped.push({
+            id: "telemetry-spans-dropped",
+            reason: "This broker context does not implement getTelemetryStats(), so dropped provider spans cannot be read.",
+        });
+    } else if (telemetry.enabled) {
+        if (telemetry.exportErrors > 0 || telemetry.droppedExporter > 0) {
+            problems.push({
+                id: "telemetry-export-failures",
+                severity: "warning",
+                symptom: `Provider telemetry export failed ${telemetry.exportErrors} time(s), dropping ${telemetry.droppedExporter} span(s). Modbus and MCP traffic remain isolated from this failure.`,
+                evidence: { exportErrors: telemetry.exportErrors, droppedExporter: telemetry.droppedExporter, exported: telemetry.exported },
+                fix: "Check the configured OTLP/HTTP traces endpoint, its TLS and authentication headers, then verify the collector accepts POST /v1/traces. Failed batches are deliberately not retried.",
+            });
+        }
+        if (telemetry.droppedQueueFull > 0) {
+            problems.push({
+                id: "telemetry-spans-dropped",
+                severity: "warning",
+                symptom: `${telemetry.droppedQueueFull} provider span(s) were dropped because the bounded telemetry queue was full.`,
+                evidence: { droppedQueueFull: telemetry.droppedQueueFull, queued: telemetry.queued, accepted: telemetry.accepted, exported: telemetry.exported },
+                fix: "Reduce provider trace volume or collector latency, or raise telemetry.queueCapacity and telemetry.batchSize within the broker's memory budget.",
+            });
+        }
+    }
+
     // -- Notes: true, actionable, but not a fault ---------------------------
     const notes: string[] = [];
     if (security?.providerAuthEnabled) {
@@ -518,6 +556,7 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
         },
         ...(aggregate ? { aggregate: { enabled: aggregate.enabled, providers: aggregate.providers } } : {}),
         ...(authorityInfo ? { authority: authorityInfo } : {}),
+        ...(telemetry ? { telemetry } : {}),
         problems,
         checksSkipped,
         notes,

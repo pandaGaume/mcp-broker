@@ -45,7 +45,7 @@ Underneath, the multiplexed link is the same `mcpb_provider_t` on a fixed path: 
 ## Optional telemetry notification
 
 `mcpb_telemetry.h` wraps a pre-serialized compact trace span in the broker's
-`notifications/telemetry` wire format. It allocates nothing, does not parse the
+`broker/telemetry` wire format. It allocates nothing, does not parse the
 span, and does not link an OpenTelemetry SDK into the firmware. The same encoded
 notification works with a dedicated provider or a multiplexed slot:
 
@@ -69,6 +69,11 @@ For `mcpb_mux_t`, pass the same buffer to `mcpb_mux_send`. The broker validates
 IDs, timestamps, counts, and sizes before queueing the span. Telemetry is
 optional and lower priority than MCP traffic. Firmware should keep its own
 trace enable flag and call the codec only while tracing is requested.
+
+`mcpb_trace_context.h` parses and formats the fixed-size W3C version 00
+`traceparent` carried in MCP `params._meta`. It allocates nothing. The
+application creates trace and span IDs with its platform random source, then
+uses `mcpb_traceparent_format()` when it calls a downstream MCP service.
 
 ## Standalone
 
@@ -237,7 +242,7 @@ gcc -std=c99 -Wall -Wextra -Iinclude -DMCPB_ENABLE_MUX=1 -o test_mcpb \
     tests/test_mcpb.c src/*.c && ./test_mcpb
 ```
 
-157 checks, no network (120 without the multiplexed endpoint): the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
+161 checks, no network (124 without the multiplexed endpoint): the port is filled in by a fake whose incoming bytes are written by hand. That is what lets us feed the client a frame masked by the server, a reserved bit set or a forged length, and check that it refuses. A client tested against a real server would only cover the nominal path.
 
 Also checked along the way: the SHA-1 vectors from FIPS 180-1, the base64 vectors from RFC 4648, and the normative handshake example from RFC 6455 section 1.3.
 

@@ -37,13 +37,23 @@ export type {
 } from "./subscriptions/resource.subscription.registry";
 
 // Optional provider telemetry pipeline and OTLP/HTTP exporter.
-export { OtlpHttpTraceExporter, ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD } from "./telemetry/index";
+export {
+    OtlpHttpTraceExporter,
+    ProviderTelemetryDispatcher,
+    TELEMETRY_NOTIFICATION_METHOD,
+    TRACEPARENT_META_KEY,
+    createTraceparent,
+    ensureTraceparent,
+    formatTraceparent,
+    parseTraceparent,
+} from "./telemetry/index";
 export type {
     IOtlpHttpTraceExporterOptions,
     IProviderTelemetryExporter,
     IProviderTelemetryOptions,
     IProviderTelemetryRecord,
     IProviderTelemetryStats,
+    ITraceParent,
     ITelemetryEvent,
     ITelemetrySpan,
     TelemetryAttributeValue,

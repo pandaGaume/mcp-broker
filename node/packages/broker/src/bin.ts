@@ -414,6 +414,40 @@ function warnIfStdioTargetUnknown(target: string): void {
     );
 }
 
+/** Keeps a collector outage from producing one CLI line per failed batch. */
+function telemetryExportLogger(intervalMs = 60_000): {
+    readonly error: (error: unknown) => void;
+    readonly success: (recordCount: number) => void;
+} {
+    let failures = 0;
+    let suppressed = 0;
+    let lastReport = 0;
+    return {
+        error(error: unknown): void {
+            failures++;
+            const now = Date.now();
+            if (lastReport === 0 || now - lastReport >= intervalMs) {
+                const suffix = suppressed > 0 ? ` (${suppressed} repeated failure(s) suppressed)` : "";
+                console.error(`[mcp-broker] telemetry export failed: ${(error as Error).message}${suffix}`);
+                lastReport = now;
+                suppressed = 0;
+            } else {
+                suppressed++;
+            }
+        },
+        success(recordCount: number): void {
+            if (failures === 0) return;
+            console.info(
+                `[mcp-broker] telemetry export recovered after ${failures} failed batch(es)` +
+                    `${suppressed > 0 ? `, ${suppressed} repeated log line(s) suppressed` : ""}; exported ${recordCount} span(s).`
+            );
+            failures = 0;
+            suppressed = 0;
+            lastReport = 0;
+        },
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Server bootstrap
 // ---------------------------------------------------------------------------
@@ -452,6 +486,7 @@ async function main(): Promise<void> {
         builder.withProviderTakeover(providerTakeover);
     }
     if (otlpTracesEndpoint) {
+        const exportLog = telemetryExportLogger();
         builder.withOtlpHttpTelemetry(
             {
                 endpoint: otlpTracesEndpoint,
@@ -465,7 +500,8 @@ async function main(): Promise<void> {
                 batchSize: config.telemetry?.batchSize,
                 maxAttributes: config.telemetry?.maxAttributes,
                 maxEvents: config.telemetry?.maxEvents,
-                onExportError: (error) => console.error(`[mcp-broker] telemetry export failed: ${(error as Error).message}`),
+                onExportError: exportLog.error,
+                onExportSuccess: exportLog.success,
             }
         );
     }

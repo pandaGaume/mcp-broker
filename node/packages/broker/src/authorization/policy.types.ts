@@ -119,6 +119,8 @@ export interface IAuthorizationAuditEvent {
     readonly decisionId?: string;
     /** Only for a `broker/authorize` decision: ties it to the client request it served. */
     readonly correlationId?: string;
+    /** W3C trace id of the request, kept distinct from the audit correlation id. */
+    readonly traceId?: string;
     /** Only for a `broker/authorize` decision: the policy version that produced it. */
     readonly policyVersion?: string;
     /**

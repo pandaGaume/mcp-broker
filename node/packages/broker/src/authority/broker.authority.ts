@@ -44,6 +44,8 @@ interface ICallerRef {
     readonly providerPrincipalId: string;
     readonly subject: IAuthorizationSubject;
     readonly correlationId: string;
+    /** W3C trace id propagated with the client request. */
+    readonly traceId: string;
     /** `Date.now()` at issue; a reference older than the maximum age is refused. */
     readonly issuedAt: number;
 }
@@ -240,11 +242,17 @@ export class BrokerAuthority {
     // -------------------------------------------------------------------------
 
     /** Issues a reference to the caller of one pending request. */
-    issueRef(slot: string, brokerId: string, providerPrincipalId: string, subject: IAuthorizationSubject): { readonly ref: string; readonly correlationId: string } {
+    issueRef(
+        slot: string,
+        brokerId: string,
+        providerPrincipalId: string,
+        subject: IAuthorizationSubject,
+        traceId: string
+    ): { readonly ref: string; readonly correlationId: string; readonly traceId: string } {
         const ref = randomId("cr_");
         const correlationId = randomId("corr_", 9);
-        this._refs.set(ref, { slot, brokerId, providerPrincipalId, subject, correlationId, issuedAt: Date.now() });
-        return { ref, correlationId };
+        this._refs.set(ref, { slot, brokerId, providerPrincipalId, subject, correlationId, traceId, issuedAt: Date.now() });
+        return { ref, correlationId, traceId };
     }
 
     /** Forgets a reference; its request was answered or abandoned. */
@@ -282,7 +290,7 @@ export class BrokerAuthority {
         }
         if (typeof params !== "object" || params === null || Array.isArray(params)) return invalidParams("params must be an object");
         const p = params as Record<string, unknown>;
-        for (const key of Object.keys(p)) if (key !== "principal" && key !== "correlationId" && key !== "checks") return invalidParams(`unknown key "${key}"`);
+        for (const key of Object.keys(p)) if (key !== "principal" && key !== "correlationId" && key !== "traceId" && key !== "checks") return invalidParams(`unknown key "${key}"`);
 
         // On whose behalf. Two forms, nothing else, and never an identity.
         const asked = p.principal;
@@ -292,6 +300,7 @@ export class BrokerAuthority {
         let subject: IAuthorizationSubject;
         let onBehalfOf: "caller" | "provider";
         let correlationId: string;
+        let traceId: string | undefined;
         if (a.type === "caller-ref") {
             if (Object.keys(a).some((key) => key !== "type" && key !== "ref")) {
                 return invalidParams(
@@ -312,11 +321,13 @@ export class BrokerAuthority {
             subject = entry.subject;
             onBehalfOf = "caller";
             correlationId = entry.correlationId;
+            traceId = entry.traceId;
         } else if (a.type === "provider") {
             if (Object.keys(a).some((key) => key !== "type")) return invalidParams('principal of type "provider" carries nothing else');
             subject = { ids: [...(principal.subjects ?? [])] };
             onBehalfOf = "provider";
             correlationId = typeof p.correlationId === "string" && p.correlationId.length > 0 && p.correlationId.length <= 128 ? p.correlationId : randomId("corr_", 9);
+            traceId = typeof p.traceId === "string" && /^[0-9a-f]{32}$/.test(p.traceId) && !/^0+$/.test(p.traceId) ? p.traceId : undefined;
         } else {
             return invalidParams('principal.type must be "caller-ref" or "provider"');
         }
@@ -337,7 +348,7 @@ export class BrokerAuthority {
             if (check.attributes !== undefined && (typeof check.attributes !== "object" || check.attributes === null || Array.isArray(check.attributes))) {
                 return invalidParams(`checks[${index}].attributes must be an object`);
             }
-            decisions.push(this._decide(check, subject, onBehalfOf, correlationId, declaration, origin.slot));
+            decisions.push(this._decide(check, subject, onBehalfOf, correlationId, traceId, declaration, origin.slot));
         }
         return { result: { policyVersion: this.policyVersion, decisions } };
     }
@@ -348,6 +359,7 @@ export class BrokerAuthority {
         subject: IAuthorizationSubject,
         onBehalfOf: "caller" | "provider",
         correlationId: string,
+        traceId: string | undefined,
         declaration: IProviderDeclaration,
         slot: string
     ): unknown {
@@ -392,6 +404,7 @@ export class BrokerAuthority {
             matchedPolicies: decision.matchedPolicies,
             decisionId,
             correlationId,
+            ...(traceId ? { traceId } : {}),
             policyVersion,
             onBehalfOf,
             nativeResource,

@@ -1,5 +1,6 @@
 import type { IBrokerAuthorityInfo } from "../authority/broker.authority";
 import type { IEventSource } from "@cyanmycelium/mcp-core";
+import type { IProviderTelemetryStats } from "../telemetry/telemetry.types";
 
 /**
  * Read-only view of the broker's runtime state, exposed to broker behaviors.
@@ -86,6 +87,9 @@ export interface IBrokerContext {
      * nobody confirmed and a policy granting capabilities nobody declared.
      */
     getAuthorityInfo?(): IBrokerAuthorityInfo | undefined;
+
+    /** Bounded provider telemetry counters, or `undefined` when unsupported. */
+    getTelemetryStats?(): IProviderTelemetryStats | undefined;
 
     /**
      * Fires with the names of the slots whose *state* changed: a slot

@@ -208,6 +208,16 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 - **In tests**: `startTestBroker({ callers, providers, policy, protectedSlots })` from `@cyanmycelium/mcp-broker/testing` does all of the above with no authorization server; see [docs/testing.md](node/packages/broker/docs/testing.md).
 - **Security file**: `securityFile` in `config.json` or `MCP_BROKER_SECURITY_FILE`. Holds `auth`, `providers`, `authorization`. Fails closed; no secret in clear; `auth` in both files refuses the start. Its hash starts every `policyVersion` (`broker_info`).
 
+### Provider telemetry and trace propagation (1.5.0)
+
+- Provider telemetry uses the private JSON-RPC notification `broker/telemetry`, never `notifications/telemetry`. The broker consumes it and never broadcasts it to MCP clients.
+- Every addressed MCP request routed to a provider carries a valid W3C version 00 context in `params._meta.traceparent`. A valid caller value is preserved; an absent or malformed one is replaced.
+- TypeScript providers use `traceparentOf`, `withTraceparent`, `childTraceparent` and `transport.broker.span(span)` from `@cyanmycelium/mcp-broker-provider`.
+- C and MCU providers use `mcpb_traceparent_parse`, `mcpb_traceparent_format` and `mcpb_telemetry_encode`. All are allocation-free and caller-buffered.
+- The audit `correlationId` and W3C `traceId` are deliberately distinct but linked in caller references and authorization audit events.
+- `broker_diagnose` reports the telemetry counters and warns on exporter failures or queue-full drops. Tests use `startTestBroker({ telemetry: true })` and inspect the snapshot at `broker.spans`.
+- Do not attach process values by default. Raw PDU bytes are only for an authorized, duration-bounded and count-bounded capture session. The detailed contract is `docs/telemetry.md`.
+
 ## 6. Symptom to fix
 
 | symptom | cause | fix |

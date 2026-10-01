@@ -202,8 +202,8 @@ class Client {
     }
 }
 
-function callerOf(request: IJsonRpc): { ref: string; correlationId: string } | undefined {
-    return (request.params?._meta as Record<string, { ref: string; correlationId: string }> | undefined)?.[CALLER_META_KEY];
+function callerOf(request: IJsonRpc): { ref: string; correlationId: string; traceId?: string } | undefined {
+    return (request.params?._meta as Record<string, { ref: string; correlationId: string; traceId?: string }> | undefined)?.[CALLER_META_KEY];
 }
 
 describe("broker/authorization/declare", () => {
@@ -266,7 +266,10 @@ describe("caller references", () => {
         await client.request("tools/call", { name: "write", arguments: {}, _meta: { [CALLER_META_KEY]: { ref: "cr_forgedforgedforged" }, progressToken: 1 } });
         const call = plain.received.find((m) => m.method === "tools/call")!;
         expect(callerOf(call)).toBeUndefined();
-        expect(call.params?._meta).toEqual({ progressToken: 1 });
+        expect(call.params?._meta).toEqual({
+            progressToken: 1,
+            traceparent: expect.stringMatching(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/),
+        });
     });
 
     it("replaces a forged reference with the broker's own on a declared slot, and decides on it", async () => {
@@ -294,11 +297,18 @@ describe("caller references", () => {
         };
 
         const client = await Client.open(base, "scada", "operator");
-        await client.request("tools/call", { name: "write", arguments: {}, _meta: { [CALLER_META_KEY]: { ref: "cr_forgedforgedforged", correlationId: "x" } } });
+        const traceparent = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+        await client.request("tools/call", {
+            name: "write",
+            arguments: {},
+            _meta: { [CALLER_META_KEY]: { ref: "cr_forgedforgedforged", correlationId: "x" }, traceparent },
+        });
 
         const caller = callerOf(scada.received.find((m) => m.method === "tools/call")!)!;
         expect(caller.ref).toMatch(/^cr_/);
         expect(caller.ref).not.toBe("cr_forgedforgedforged");
+        expect(caller.traceId).toBe("0123456789abcdef0123456789abcdef");
+        expect(scada.received.find((m) => m.method === "tools/call")!.params?._meta).toMatchObject({ traceparent });
         expect(decisions).toEqual([
             expect.objectContaining({ effect: "allow", reason: "role-grant", policies: ["line1-operators"], decisionId: expect.stringMatching(/^dec_/) }),
             expect.objectContaining({ effect: "deny", reason: "explicit-deny", policies: ["no-line2-control"] }),
@@ -505,13 +515,17 @@ describe("broker_diagnose", () => {
 });
 
 describe("without any declaration", () => {
-    it("T8: adds no _meta and changes nothing in the frames", async () => {
+    it("T8: adds only the W3C trace context when no caller reference applies", async () => {
         const base = await start();
         const plain = await FakeProvider.open(base, "plain", "s-intruder");
         const client = await Client.open(base, "plain", "operator");
         await client.request("tools/call", { name: "write", arguments: { a: 1 } });
         const call = plain.received.find((m) => m.method === "tools/call")!;
-        expect(call.params).toEqual({ name: "write", arguments: { a: 1 } });
+        expect(call.params).toEqual({
+            name: "write",
+            arguments: { a: 1 },
+            _meta: { traceparent: expect.stringMatching(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/) },
+        });
     });
 });
 

@@ -134,6 +134,46 @@ const { decisions } = await transport.broker.authorize({
   `brokerRequestTimeoutMs` only to talk to an older one, which drops methods it
   does not know.
 
+## Distributed traces (broker 1.5.0)
+
+Every addressed request arriving from broker 1.5 carries W3C Trace Context in
+`params._meta.traceparent`. Read it from the request metadata, create a SERVER
+span, then propagate a child context when this provider calls another slot:
+
+```ts
+import {
+    childTraceparent,
+    traceparentOf,
+    withTraceparent,
+} from "@cyanmycelium/mcp-broker-provider";
+
+const incoming = traceparentOf(request?.meta);
+const downstreamMeta = incoming
+    ? withTraceparent(undefined, childTraceparent(incoming, clientSpanId))
+    : undefined;
+```
+
+Completed spans are validated before emission:
+
+```ts
+const emitted = transport.broker.span({
+    traceId,
+    spanId,
+    parentSpanId,
+    name: "modbus.read",
+    kind: 3,
+    startTimeUnixNano,
+    endTimeUnixNano,
+    attributes: { "modbus.unit_id": 1 },
+});
+```
+
+The call is a notification and never waits for an answer. The broker consumes
+`broker/telemetry`, sends it through its bounded exporter queue, and never
+broadcasts it to MCP clients. It returns `false` and drops the span when the
+provider link is down, so telemetry never occupies the transport queue ahead
+of MCP control traffic. See [the complete telemetry contract](../../../docs/telemetry.md).
+
 ## Diagnostics
 
 This stack used to fail quietly. The transports now name what went wrong, on the console, because a browser-hosted provider has nowhere else to report:

@@ -14,11 +14,11 @@
 extern "C" {
 #endif
 
-#define MCPB_TELEMETRY_METHOD "notifications/telemetry"
+#define MCPB_TELEMETRY_METHOD "broker/telemetry"
 
 /* Writes a JSON-RPC telemetry notification and a trailing NUL into out:
  *
- * {"jsonrpc":"2.0","method":"notifications/telemetry","params":
+ * {"jsonrpc":"2.0","method":"broker/telemetry","params":
  *   {"version":1,"signal":"traces","span":<span_json>}}
  *
  * span_json must be one JSON object. It is copied verbatim and is not parsed.

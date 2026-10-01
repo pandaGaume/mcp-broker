@@ -16,12 +16,13 @@ interface IOtlpAnyValue {
     stringValue?: string;
     boolValue?: boolean;
     doubleValue?: number;
+    intValue?: string;
 }
 
 function anyValue(value: TelemetryAttributeValue): IOtlpAnyValue {
     if (typeof value === "string") return { stringValue: value };
     if (typeof value === "boolean") return { boolValue: value };
-    return { doubleValue: value };
+    return Number.isInteger(value) ? { intValue: String(value) } : { doubleValue: value };
 }
 
 function keyValues(attributes: Readonly<Record<string, TelemetryAttributeValue>> | undefined): Array<{ key: string; value: IOtlpAnyValue }> {
@@ -66,28 +67,34 @@ export class OtlpHttpTraceExporter implements IProviderTelemetryExporter {
 
     async export(records: readonly IProviderTelemetryRecord[]): Promise<void> {
         if (records.length === 0) return;
-        const bySlot = new Map<string, IProviderTelemetryRecord[]>();
+        const byResource = new Map<string, IProviderTelemetryRecord[]>();
         for (const record of records) {
-            const group = bySlot.get(record.slot) ?? [];
+            const key = `${record.principal ?? ""}\u0000${record.slot}`;
+            const group = byResource.get(key) ?? [];
             group.push(record);
-            bySlot.set(record.slot, group);
+            byResource.set(key, group);
         }
         const body = {
-            resourceSpans: [...bySlot].map(([slot, spans]) => ({
-                resource: {
-                    attributes: [
-                        { key: "service.name", value: { stringValue: slot } },
-                        { key: "service.namespace", value: { stringValue: this._serviceNamespace } },
-                        { key: "mcp.provider.slot", value: { stringValue: slot } },
-                    ],
-                },
-                scopeSpans: [
-                    {
-                        scope: { name: "@cyanmycelium/mcp-broker.telemetry" },
-                        spans: spans.map((record) => otlpSpan(record.span)),
+            resourceSpans: [...byResource.values()].map((spans) => {
+                const first = spans[0]!;
+                return {
+                    resource: {
+                        attributes: [
+                            { key: "service.name", value: { stringValue: first.principal ?? first.slot } },
+                            { key: "service.namespace", value: { stringValue: this._serviceNamespace } },
+                            { key: "service.instance.id", value: { stringValue: first.slot } },
+                            { key: "mcp.provider.slot", value: { stringValue: first.slot } },
+                            ...(first.principal ? [{ key: "mcp.provider.principal", value: { stringValue: first.principal } }] : []),
+                        ],
                     },
-                ],
-            })),
+                    scopeSpans: [
+                        {
+                            scope: { name: "@cyanmycelium/mcp-broker.telemetry" },
+                            spans: spans.map((record) => otlpSpan(record.span)),
+                        },
+                    ],
+                };
+            }),
         };
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this._timeoutMs);

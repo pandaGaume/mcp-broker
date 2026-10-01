@@ -23,7 +23,7 @@ repository; the changes it needed for this release are listed under
 ### Added
 
 - **broker** Optional bounded provider telemetry pipeline. The broker consumes
-  `notifications/telemetry` without broadcasting it to MCP clients, validates
+  `broker/telemetry` without broadcasting it to MCP clients, validates
   compact W3C-correlated spans, enriches them with the provider slot, queues
   them outside the control path, and exports OTLP/HTTP JSON in bounded batches.
   `WsTunnelBuilder.withTelemetry()` accepts a custom sink,
@@ -31,6 +31,16 @@ repository; the changes it needed for this release are listed under
   `getTelemetryStats()` exposes accepted, exported and dropped counts. The CLI
   supports a `telemetry` config block plus
   `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS`.
+- **broker**, **provider**, **libmcpb** W3C version 00 trace context propagation
+  through `params._meta.traceparent`, with allocation-free C parse and format
+  helpers and TypeScript read, write and child-context helpers. Caller
+  references and authorization audit events link the trace id while keeping
+  their correlation id distinct.
+- **provider** `transport.broker.span(span)` validates and emits one complete
+  `broker/telemetry` notification.
+- **broker** `startTestBroker({ telemetry: true })` captures exported spans in
+  memory as `broker.spans`; `broker_diagnose` now reports telemetry counters,
+  exporter failures and queue-full drops.
 - **libmcpb** Allocation-free `mcpb_telemetry_encode()` wraps a caller-owned,
   pre-serialized span for dedicated or multiplexed provider transport. The
   complete wire, MCU, OTLP, backpressure and PDU security contract is in

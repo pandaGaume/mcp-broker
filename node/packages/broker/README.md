@@ -372,7 +372,7 @@ class GaugeAdapter extends McpAdapterBase {
 The complete protocol and deployment contract is in
 [docs/telemetry.md](https://github.com/pandaGaume/mcp-broker/blob/main/docs/telemetry.md).
 
-The optional telemetry extension accepts `notifications/telemetry` from any
+The optional telemetry extension accepts `broker/telemetry` from any
 provider slot. The broker consumes these notifications itself. It never sends
 them to MCP clients, and it never waits for the exporter while routing requests
 or responses.
@@ -431,7 +431,7 @@ Provider wire format:
 ```json
 {
     "jsonrpc": "2.0",
-    "method": "notifications/telemetry",
+    "method": "broker/telemetry",
     "params": {
         "version": 1,
         "signal": "traces",
@@ -461,10 +461,15 @@ Provider wire format:
 ```
 
 Trace IDs and parent relationships follow W3C Trace Context representation.
-The exporter produces an OTLP `ExportTraceServiceRequest` and enriches each
-resource with `service.name` and `mcp.provider.slot`. Raw protocol payloads are
-not required by the schema. A provider should emit them only when its own
-runtime trace policy explicitly enables that level of detail.
+Every routed request carries the context in `params._meta.traceparent`.
+TypeScript providers can continue it with `traceparentOf()`,
+`childTraceparent()` and `withTraceparent()`, then emit with
+`transport.broker.span(span)`. The exporter produces an OTLP
+`ExportTraceServiceRequest`. `service.name` is the authenticated provider
+principal when available, otherwise the slot. `mcp.provider.slot` always keeps
+the slot, and `mcp.provider.principal` records the authenticated identity. Raw
+protocol payloads are not required by the schema. A provider should emit them
+only when its own runtime trace policy explicitly enables that level of detail.
 
 ## Authorization (OAuth 2.1)
 

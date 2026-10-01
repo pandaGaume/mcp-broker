@@ -134,7 +134,7 @@ export class ProviderTelemetryDispatcher {
         };
     }
 
-    enqueue(slot: string, params: unknown, frameBytes: number): EnqueueResult {
+    enqueue(slot: string, params: unknown, frameBytes: number, principal?: string): EnqueueResult {
         if (this._closed) return "closed";
         if (frameBytes > this._limits.maxFrameBytes) {
             this._stats.droppedOversize++;
@@ -151,6 +151,7 @@ export class ProviderTelemetryDispatcher {
         }
         this._queue.push({
             slot,
+            ...(principal === undefined ? {} : { principal }),
             receivedAtUnixNano: (BigInt(Date.now()) * 1_000_000n).toString(),
             span,
         });
@@ -207,6 +208,11 @@ export class ProviderTelemetryDispatcher {
             try {
                 await this._options.exporter.export(batch);
                 this._stats.exported += batch.length;
+                try {
+                    this._options.onExportSuccess?.(batch.length);
+                } catch {
+                    // Observability callbacks must never break the broker lifecycle.
+                }
             } catch (error) {
                 this._stats.droppedExporter += batch.length;
                 this._reportExportError(error);

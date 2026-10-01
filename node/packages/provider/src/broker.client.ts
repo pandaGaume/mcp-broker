@@ -11,12 +11,118 @@
 /** The `params._meta` key under which the broker passes the caller reference with each request. */
 export const CALLER_META_KEY = "io.cyanmycelium/caller";
 
+/** W3C Trace Context carrier used by MCP requests. */
+export const TRACEPARENT_META_KEY = "traceparent";
+
+/** Provider-to-broker telemetry notification. */
+export const TELEMETRY_NOTIFICATION_METHOD = "broker/telemetry";
+
+const TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
+const TRACE_ID = /^[0-9a-f]{32}$/;
+const SPAN_ID = /^[0-9a-f]{16}$/;
+const UNIX_NANO = /^(0|[1-9][0-9]{0,19})$/;
+
+export interface ITraceParent {
+    readonly version: "00";
+    readonly traceId: string;
+    readonly parentId: string;
+    readonly traceFlags: string;
+}
+
+export type TelemetryAttributeValue = string | number | boolean;
+
+export interface ITelemetryEvent {
+    readonly name: string;
+    readonly timeUnixNano: string;
+    readonly attributes?: Readonly<Record<string, TelemetryAttributeValue>>;
+}
+
+export interface ITelemetrySpan {
+    readonly traceId: string;
+    readonly spanId: string;
+    readonly parentSpanId?: string;
+    readonly name: string;
+    readonly kind?: number;
+    readonly startTimeUnixNano: string;
+    readonly endTimeUnixNano: string;
+    readonly attributes?: Readonly<Record<string, TelemetryAttributeValue>>;
+    readonly events?: readonly ITelemetryEvent[];
+    readonly status?: { readonly code: number; readonly message?: string };
+}
+
+/** Parses the W3C version 00 traceparent representation used in MCP metadata. */
+export function parseTraceparent(value: unknown): ITraceParent | undefined {
+    if (typeof value !== "string") return undefined;
+    const match = TRACEPARENT.exec(value);
+    if (!match || /^0+$/.test(match[1]!) || /^0+$/.test(match[2]!)) return undefined;
+    return { version: "00", traceId: match[1]!, parentId: match[2]!, traceFlags: match[3]! };
+}
+
+export function formatTraceparent(context: ITraceParent): string {
+    return `${context.version}-${context.traceId}-${context.parentId}-${context.traceFlags}`;
+}
+
+/** Reads `params._meta.traceparent`, returning `undefined` when it is malformed. */
+export function traceparentOf(meta: Readonly<Record<string, unknown>> | undefined): ITraceParent | undefined {
+    return parseTraceparent(meta?.[TRACEPARENT_META_KEY]);
+}
+
+/** Returns a metadata copy carrying the supplied validated trace context. */
+export function withTraceparent(meta: Readonly<Record<string, unknown>> | undefined, context: ITraceParent): Readonly<Record<string, unknown>> {
+    const encoded = formatTraceparent(context);
+    if (!parseTraceparent(encoded)) throw new TypeError("traceparent must be a valid W3C version 00 context");
+    return { ...(meta ?? {}), [TRACEPARENT_META_KEY]: encoded };
+}
+
+/** Continues a trace using the caller's span as the new W3C parent id. */
+export function childTraceparent(parent: ITraceParent, spanId: string): ITraceParent {
+    if (!SPAN_ID.test(spanId) || /^0+$/.test(spanId)) throw new TypeError("spanId must be 16 lowercase hexadecimal characters and not all zero");
+    return { ...parent, parentId: spanId };
+}
+
+function validAttributes(attributes: Readonly<Record<string, TelemetryAttributeValue>> | undefined): boolean {
+    if (attributes === undefined) return true;
+    const entries = Object.entries(attributes);
+    return (
+        entries.length <= 64 &&
+        entries.every(
+            ([key, value]) =>
+                key.length > 0 &&
+                key.length <= 128 &&
+                (typeof value === "boolean" || (typeof value === "string" && value.length <= 4096) || (typeof value === "number" && Number.isFinite(value)))
+        )
+    );
+}
+
+function validSpan(span: ITelemetrySpan): boolean {
+    return (
+        TRACE_ID.test(span.traceId) &&
+        !/^0+$/.test(span.traceId) &&
+        SPAN_ID.test(span.spanId) &&
+        !/^0+$/.test(span.spanId) &&
+        (span.parentSpanId === undefined || (SPAN_ID.test(span.parentSpanId) && !/^0+$/.test(span.parentSpanId))) &&
+        span.name.length > 0 &&
+        span.name.length <= 256 &&
+        UNIX_NANO.test(span.startTimeUnixNano) &&
+        UNIX_NANO.test(span.endTimeUnixNano) &&
+        (span.kind === undefined || (Number.isInteger(span.kind) && span.kind >= 0 && span.kind <= 5)) &&
+        validAttributes(span.attributes) &&
+        (span.events === undefined ||
+            (span.events.length <= 32 &&
+                span.events.every((event) => event.name.length > 0 && event.name.length <= 256 && UNIX_NANO.test(event.timeUnixNano) && validAttributes(event.attributes)))) &&
+        (span.status === undefined ||
+            (Number.isInteger(span.status.code) && span.status.code >= 0 && span.status.code <= 2 && (span.status.message === undefined || span.status.message.length <= 1024)))
+    );
+}
+
 /** What the broker hands a declaring provider with each request, under {@link CALLER_META_KEY}. */
 export interface ICallerReference {
     /** Opaque. Valid on this slot, while the request it came with is pending. */
     readonly ref: string;
     /** Ties the decisions and the eventual report to the client request. */
     readonly correlationId: string;
+    /** W3C trace id carried by the MCP request. */
+    readonly traceId?: string;
 }
 
 /**
@@ -28,8 +134,8 @@ export interface ICallerReference {
 export function callerReferenceOf(meta: Readonly<Record<string, unknown>> | undefined): ICallerReference | undefined {
     const value = meta?.[CALLER_META_KEY];
     if (typeof value !== "object" || value === null) return undefined;
-    const { ref, correlationId } = value as { ref?: unknown; correlationId?: unknown };
-    return typeof ref === "string" && typeof correlationId === "string" ? { ref, correlationId } : undefined;
+    const { ref, correlationId, traceId } = value as { ref?: unknown; correlationId?: unknown; traceId?: unknown };
+    return typeof ref === "string" && typeof correlationId === "string" ? { ref, correlationId, ...(typeof traceId === "string" ? { traceId } : {}) } : undefined;
 }
 
 /** One resource of a declaration: the provider's own identifier, and the path the broker evaluates. */
@@ -70,6 +176,8 @@ export interface IAuthorizationQuery {
     readonly principal: { readonly type: "caller-ref"; readonly ref: string } | { readonly type: "provider" };
     /** Only for `{ type: "provider" }`; a caller reference carries its own. */
     readonly correlationId?: string;
+    /** Optional W3C trace id for provider-initiated work. */
+    readonly traceId?: string;
     readonly checks: readonly IAuthorizationCheck[];
 }
 
@@ -127,12 +235,19 @@ const ID_PREFIX = "provider-broker-";
  */
 export class BrokerClient {
     private readonly _write: (frame: string) => void;
+    private readonly _writeTelemetry: (frame: string) => boolean;
     private readonly _timeoutMs: number;
     private readonly _waiting = new Map<string, IWaiting>();
     private _next = 1;
 
-    constructor(write: (frame: string) => void, options: IBrokerClientOptions = {}) {
+    constructor(write: (frame: string) => void, options: IBrokerClientOptions = {}, writeTelemetry?: (frame: string) => boolean) {
         this._write = write;
+        this._writeTelemetry =
+            writeTelemetry ??
+            ((frame) => {
+                write(frame);
+                return true;
+            });
         this._timeoutMs = Math.max(0, options.requestTimeoutMs ?? 0);
     }
 
@@ -149,6 +264,18 @@ export class BrokerClient {
     /** Asks for one decision per check. */
     authorize(query: IAuthorizationQuery): Promise<IAuthorizationAnswer> {
         return this._request("broker/authorize", query) as Promise<IAuthorizationAnswer>;
+    }
+
+    /** Emits one complete provider span, or returns false when the link is down. */
+    span(span: ITelemetrySpan): boolean {
+        if (!validSpan(span)) throw new TypeError("span is not a valid broker telemetry span");
+        return this._writeTelemetry(
+            JSON.stringify({
+                jsonrpc: "2.0",
+                method: TELEMETRY_NOTIFICATION_METHOD,
+                params: { version: 1, signal: "traces", span },
+            })
+        );
     }
 
     /** Number of requests still waiting for the broker. */

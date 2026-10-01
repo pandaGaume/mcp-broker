@@ -194,6 +194,13 @@ class MultiplexSocket {
         this._pending.push(frame);
     }
 
+    /** Sends low-priority telemetry only while the shared link is open. */
+    sendTelemetry(provider: string, data: string): boolean {
+        if (this._ws?.readyState !== WebSocket.OPEN) return false;
+        this._ws.send(encodeEnvelope(provider, data));
+        return true;
+    }
+
     // ── Connection lifecycle ────────────────────────────────────────────────
 
     private _connect(): void {
@@ -439,7 +446,11 @@ export class MultiplexTransport implements IMessageTransport {
         this._name = name;
         this._socket = socket;
         this._aggregate = options?.aggregate;
-        this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
+        this.broker = new BrokerClient(
+            (frame) => this.send(frame),
+            { requestTimeoutMs: options?.brokerRequestTimeoutMs },
+            (frame) => this._socket.sendTelemetry(this._name, frame)
+        );
     }
 
     /**
