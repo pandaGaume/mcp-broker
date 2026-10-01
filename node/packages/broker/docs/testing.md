@@ -78,7 +78,16 @@ providers: { "mcp-scada": { subjects: ["service:mcp-scada"], allowedResources: [
 
 Provider identities, as the security file's `providers` table would declare
 them. The kit makes up each secret; pass `broker.providerSecret(id)` to the
-transport's `secret` option (Node 22+ only: a browser cannot send it).
+transport's `secret` option. A browser cannot send it.
+
+The provider transports use the global `WebSocket`, which Node has from 22 on.
+On Node 20, put `ws` in its place once, at the top of the test file (it
+accepts the same handshake headers):
+
+```ts
+import { WebSocket } from "ws";
+if (typeof globalThis.WebSocket === "undefined") globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+```
 
 A provider that declares an authorization domain must have explicit
 `allowedResources`, without `"**"`.

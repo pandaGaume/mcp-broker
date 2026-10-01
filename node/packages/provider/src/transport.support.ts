@@ -280,6 +280,14 @@ export function handshakeHeaders(options: { readonly secret?: string; readonly h
  * Node's `WebSocket` (22+); a browser cannot send them, and is told so.
  */
 export function openWebSocket(url: string, headers: Record<string, string> | undefined): WebSocket {
+    // Node 20 has no global WebSocket. Said plainly, rather than surfacing as
+    // a ReferenceError or as a claim that headers are unsupported.
+    if (typeof WebSocket === "undefined") {
+        throw new Error(
+            `Cannot open ${url}: this runtime has no global WebSocket (Node before 22). ` +
+                `Assign one before connecting: import { WebSocket } from "ws"; globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;`
+        );
+    }
     if (!headers) return new WebSocket(url);
     try {
         return new (WebSocket as unknown as new (url: string, init: { headers: Record<string, string> }) => WebSocket)(url, { headers });
