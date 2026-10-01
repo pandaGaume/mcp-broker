@@ -1,6 +1,26 @@
 export { WsTunnel } from "./ws/ws.tunnel";
 export { WsTunnelBuilder } from "./ws/ws.tunnel.builder";
-export type { AllowedOrigins, IInternalClient, IWsTunnelOptions, IStaticMount, InternalClient, ProviderTakeoverMode, WsTunnelOptions, StaticMount } from "./ws/ws.interfaces";
+export type {
+    AllowedOrigins,
+    IInternalClient,
+    ILoopbackProviderHandle,
+    IWsTunnelOptions,
+    IStaticMount,
+    InternalClient,
+    ProviderTakeoverMode,
+    WsTunnelOptions,
+    StaticMount,
+} from "./ws/ws.interfaces";
+export {
+    BrokerAuthority,
+    BROKER_AUTHORIZE_METHOD,
+    BROKER_DECLARE_METHOD,
+    BROKER_METHOD_PREFIX,
+    CALLER_META_KEY,
+    DEFAULT_AUTHORIZE_BATCH_LIMIT,
+} from "./authority/broker.authority";
+export type { BrokerMethodOutcome, IBrokerAuthorityInfo, IBrokerAuthorityOptions, IBrokerMethodOrigin } from "./authority/broker.authority";
+export type { IDeclaredResource, IProtectedSlot, IProviderDeclaration } from "./authority/declaration";
 export { StdioUpstream } from "./stdio.upstream";
 export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream";
 export { RemoteUpstream } from "./remote.upstream";
@@ -82,6 +102,7 @@ export {
     normalizeProviderAuthentication,
     providerMayPublish,
     providerPublishDecision,
+    ProviderTableAuthenticator,
     SharedSecretProviderAuthenticator,
 } from "./auth/index";
 export type {
@@ -93,6 +114,7 @@ export type {
     IProtectedResourceMetadata,
     IJwtAuthOptions,
     IProviderAuthenticator,
+    IProviderCredential,
     IProviderPrincipal,
     IProviderPublishDecision,
     ProviderPublishDenialReason,

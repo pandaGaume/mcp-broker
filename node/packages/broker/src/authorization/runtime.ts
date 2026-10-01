@@ -10,6 +10,11 @@ export interface IPolicyAuthorization {
     readonly slotResourceResolver: ISlotResourceResolver;
     readonly capabilityClassifier: ICapabilityClassifier;
     readonly audit: Readonly<Required<IAuthorizationAuditConfig>>;
+    /**
+     * Every capability the policy's roles and denies name. `broker_diagnose`
+     * compares it with what providers declared. Absent for a custom engine.
+     */
+    readonly capabilities?: ReadonlySet<string>;
 }
 
 export function hasAuthorizationPolicies(config: IAuthorizationPolicyConfig): boolean {
@@ -31,6 +36,9 @@ export function compileAuthorizationPolicy(config: IAuthorizationPolicyConfig): 
         slotResourceResolver,
         capabilityClassifier,
         audit: Object.freeze({ logAllowed: config.audit?.logAllowed ?? false }),
+        capabilities: Object.freeze(
+            new Set([...Object.values(config.roles ?? {}).flatMap((role) => role.capabilities ?? []), ...(config.denies ?? []).flatMap((deny) => deny.capabilities ?? [])])
+        ),
     };
 }
 

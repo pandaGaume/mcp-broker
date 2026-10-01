@@ -1,4 +1,5 @@
 import type { IInternalClient } from "../../ws/ws.interfaces";
+import type { IPrincipal } from "../../auth/index";
 import type { ICatalogTool, ICatalogPrompt } from "./aggregate.catalog";
 
 /** MCP protocol version the aggregate sessions negotiate with sub-providers. */
@@ -110,14 +111,21 @@ export class ProviderClientSession {
         await this._refresh();
     }
 
-    /** Forwards a `tools/call` to the provider, relaying the raw outcome. */
-    callTool(name: string, args: Record<string, unknown>): Promise<IRpcOutcome> {
-        return this._request("tools/call", { name, arguments: args });
+    /**
+     * Forwards a `tools/call` to the provider, relaying the raw outcome.
+     *
+     * `caller` is the client the aggregate is serving. It travels with the
+     * frame so the broker can hand a declaring provider a reference to that
+     * client: the one session this class holds per provider is shared by every
+     * caller of `_all`, so the frame alone would not say who is asking.
+     */
+    callTool(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
+        return this._request("tools/call", { name, arguments: args }, caller);
     }
 
-    /** Forwards a `prompts/get` to the provider, relaying the raw outcome. */
-    getPrompt(name: string, args: Record<string, unknown>): Promise<IRpcOutcome> {
-        return this._request("prompts/get", { name, arguments: args });
+    /** Forwards a `prompts/get` to the provider, relaying the raw outcome. See {@link callTool} for `caller`. */
+    getPrompt(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
+        return this._request("prompts/get", { name, arguments: args }, caller);
     }
 
     /** Detaches the session and its internal client. */
@@ -192,7 +200,7 @@ export class ProviderClientSession {
      * made every caller treat a dead provider as a provider that answered, which
      * is how a hung `initialize` ended up registered in `_all` with no trace.
      */
-    private _request(method: string, params: unknown): Promise<IRpcOutcome> {
+    private _request(method: string, params: unknown, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
         return new Promise<IRpcOutcome>((resolve, reject) => {
             if (this._closed) {
                 resolve({ error: { code: -32000, message: "session closed" } });
@@ -211,7 +219,7 @@ export class ProviderClientSession {
                 );
             }, REQUEST_TIMEOUT_MS);
             this._pending.set(id, { resolve, timer });
-            this._client.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+            this._client.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }), caller);
         });
     }
 

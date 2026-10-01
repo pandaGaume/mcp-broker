@@ -74,6 +74,13 @@ export class AggregateServer implements IMessageTransport {
      */
     onMembershipChanged: ((name: string) => void) | null = null;
 
+    /**
+     * Refuses membership to a slot, whatever the provider asked for. The
+     * broker keeps protected slots out this way: `_all` would otherwise be a
+     * second door into a slot only one caller may reach.
+     */
+    membershipGuard: ((name: string) => boolean) | null = null;
+
     constructor(openClient: InternalClientFactory) {
         this._openClient = openClient;
     }
@@ -142,6 +149,12 @@ export class AggregateServer implements IMessageTransport {
      */
     async addProvider(name: string): Promise<void> {
         if (name === AggregateServer.SLOT || this._sessions.has(name)) return;
+        if (this.membershipGuard && !this.membershipGuard(name)) {
+            console.warn(
+                `[broker] aggregate: slot "${name}" asked to join "${AggregateServer.SLOT}" but it is a protected slot, which never joins the aggregate. It stays reachable on its own slot, to its declaring provider only.`
+            );
+            return;
+        }
 
         const session = new ProviderClientSession(name, this._openClient(name));
         this._sessions.set(name, session);
@@ -370,7 +383,7 @@ export class AggregateServer implements IMessageTransport {
         }
         const args = p.arguments ?? {};
         try {
-            const outcome = kind === "tool" ? await session.callTool(route.original, args) : await session.getPrompt(route.original, args);
+            const outcome = kind === "tool" ? await session.callTool(route.original, args, principal) : await session.getPrompt(route.original, args, principal);
             this._reply(id, outcome.error !== undefined ? { error: outcome.error } : { result: outcome.result });
         } catch (error) {
             // The session rejects rather than resolves on a timeout, so the caller
