@@ -83,3 +83,19 @@ describe("loadSecurityConfig", () => {
         expect(() => loadSecurityConfig(loaded({ securityFile: "unset.json" }), {})).toThrow(/NOT_SET is not set/);
     });
 });
+
+describe("the shipped example security file", () => {
+    it("loads, and compiles into a policy", async () => {
+        const { dirname, join: joinPath } = await import("node:path");
+        const { fileURLToPath } = await import("node:url");
+        const { compileAuthorizationPolicy } = await import("../src/index");
+        const here = dirname(fileURLToPath(import.meta.url));
+        const example = joinPath(here, "..", ".mcp-broker.example", "security.example.json");
+        const result = loadSecurityConfig(
+            { config: {}, baseDir: here, sourcePath: null },
+            { MCP_BROKER_SECURITY_FILE: example, SCADA_PROVIDER_SECRET: "a", MODBUS_PROVIDER_SECRET: "b" }
+        )!;
+        expect(result.credentials.map((c) => c.id)).toEqual(["mcp-scada", "modbus-bench"]);
+        expect(() => compileAuthorizationPolicy(result.security.auth!)).not.toThrow();
+    });
+});

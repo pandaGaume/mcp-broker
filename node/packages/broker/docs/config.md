@@ -73,6 +73,24 @@ file. Before 1.4.1 it logged the parse error and started with an empty config,
 which is a broker with authentication and authorization switched off.
 `loadBrokerConfig()` throws a `BrokerConfigError` in the same cases.
 
+### Security file
+
+`securityFile` (resolved against the config file's directory) or
+`MCP_BROKER_SECURITY_FILE` (resolved against the working directory, wins) names
+a JSON file holding what decides who may do what:
+
+| key | what |
+|---|---|
+| `auth` | the same block as `auth` above, minus `providerSecret` |
+| `providers` | `[{ "id", "secretEnv", "subjects"?, "allowedResources"? }]`, one identity and secret per provider; `secretEnv` names the environment variable holding the secret |
+| `authorization.protectedSlots` | `{ "<slot>": { "declaredBy", "publishedBy" } }`, slots only the declarer's client identity may call and only `publishedBy` may publish |
+
+It fails closed: a named file that is missing, unreadable or not a JSON object,
+an unset `secretEnv` variable, a secret written in clear, `auth` in both files,
+or `providers` / `authorization` left in `config.json` stop the broker. The
+first 12 hex digits of its SHA-256 start every `policyVersion`. See
+`.mcp-broker.example/security.example.json`.
+
 ### Path resolution
 
 | Source | Relative to |

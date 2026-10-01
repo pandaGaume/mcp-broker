@@ -23,6 +23,14 @@ factory deployment. Two consequences.
    use. A missing directory is skipped with a warning; a missing TLS file stops
    startup, with a message naming the two files and the three ways out.
 
+3. **`security.example.json` is the other way to hold `auth`** (broker 1.5.0):
+   a separate security file with one identity and secret per provider and the
+   protected slots, apart from the topology. To use it, rename it
+   `security.json`, add `"securityFile": "security.json"` to `config.json`, and
+   **delete the `auth` block from `config.json`**: the broker refuses to start
+   with `auth` in both files. Each provider's secret comes from the environment
+   variable its entry names, never from the file.
+
 So a straight `cp -r` does not run yet. Do one of these first:
 
 ```sh

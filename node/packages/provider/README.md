@@ -95,6 +95,41 @@ Either form sends the registration notification with `params: { aggregate: true 
 
 **Wire the message handler before you connect.** The broker runs `initialize` against a newly aggregated provider immediately, and a provider that does not answer is dropped from `_all` silently. Handing the transport to an MCP server does this for you, since the server assigns `onMessage` before calling `connect()`. Assigning it yourself, after connecting, loses the handshake and the provider never appears in the aggregate.
 
+## Letting the broker decide (broker 1.5.0)
+
+A provider that serves its own kind of resource can declare an authorization
+domain and ask the broker for decisions, instead of carrying a policy of its
+own. Both transports expose the broker's methods as `transport.broker`:
+
+```ts
+import { DirectTransport, callerReferenceOf } from "@cyanmycelium/mcp-broker-provider";
+
+const transport = new DirectTransport("ws://broker:3000/provider/scada");
+// ... start the MCP server on it, then:
+await transport.broker.declare({
+    version: "2026-10-01.1",
+    domain: "scada",
+    namespace: { resource: "/production/site1" },
+    capabilities: ["scada.observe", "scada.control"],
+});
+
+// In a tool handler (mcp-core 1.4.0 hands the adapter the request's _meta):
+const caller = callerReferenceOf(request?.meta);
+const { decisions } = await transport.broker.authorize({
+    principal: { type: "caller-ref", ref: caller!.ref },
+    checks: [{ capability: "scada.control", resource: "uns://production/site1/line1/motor01/speed", resourcePath: "/production/site1/line1/motor01/speed" }],
+});
+```
+
+- The provider needs its own identity on the broker (an entry in the security
+  file's `providers` table), which means presenting a secret, which a browser
+  cannot do: this is for Node and native providers.
+- The broker's answers are taken off the socket before the MCP server sees
+  them. A refused request rejects with `BrokerRequestError` (`code`, `data`).
+- There is no timeout by default: a broker from 1.4.1 on answers at once. Set
+  `brokerRequestTimeoutMs` only to talk to an older one, which drops methods it
+  does not know.
+
 ## Diagnostics
 
 This stack used to fail quietly. The transports now name what went wrong, on the console, because a browser-hosted provider has nowhere else to report:
