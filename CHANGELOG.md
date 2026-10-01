@@ -90,6 +90,20 @@ repository; the changes it needed for this release are listed under
   `ping` is answered `{}`, the broker being the next hop. A response with an
   unknown id is still dropped and logged once per slot.
 
+### Changed
+
+- **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.0`. The
+  provider's peer range is unchanged.
+
+### Coordinated releases
+
+- `@cyanmycelium/mcp-core` 1.4.0: every runtime operation of an adapter or a
+  behavior (`readResourceAsync`, `executeToolAsync`, `getPromptAsync`,
+  `completeAsync`) receives the request it serves as an optional last
+  argument, `IMcpRequestContext` (`requestId`, `method`, `params._meta`
+  frozen). This is how a provider reads the broker's caller reference
+  (`request?.meta`). Adapters written without it are unchanged.
+
 ## [1.4.0] - 2026-09-30
 
 ### Added
