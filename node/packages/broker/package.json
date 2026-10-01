@@ -80,7 +80,7 @@
         "ws": "^8.18.0"
     },
     "devDependencies": {
-        "@cyanmycelium/mcp-broker-provider": "^0.2.0",
+        "@cyanmycelium/mcp-broker-provider": "^0.3.0",
         "@types/node": "^20.11.0",
         "@types/ws": "^8.5.0",
         "@typescript-eslint/eslint-plugin": "^7.0.0",
