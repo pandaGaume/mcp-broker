@@ -4,7 +4,9 @@ import type { GrammarResolverOptions, IMessageTransport } from "@cyanmycelium/mc
 import type { StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
-import type { IResolvedAuth, IProviderAuthenticator, IPrincipal } from "../auth/index";
+import type { IResolvedAuth, IProviderAuthenticator, IPrincipal, IProviderPrincipal } from "../auth/index";
+import type { IProtectedSlot } from "../authority/declaration";
+import type { BrokerMethodOutcome } from "../authority/broker.authority";
 import type { IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
 import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
 
@@ -163,6 +165,13 @@ export interface IPendingRequest {
      * the entry may wait indefinitely.
      */
     readonly expiresAt: number;
+
+    /**
+     * The caller reference handed to a declaring provider with this request,
+     * released when the answer comes back. Absent for a slot whose provider
+     * declared nothing.
+     */
+    readonly callerRef?: string;
 }
 
 /**
@@ -235,7 +244,7 @@ export interface IInternalClient {
      * `id`, the matching response is delivered to {@link onMessage}. When the
      * provider is not connected, a JSON-RPC error is delivered synchronously.
      */
-    send(message: string): void;
+    send(message: string, principal?: IPrincipal | null): void;
     /** Receives responses to this client's requests and the provider's notifications. */
     onMessage: ((data: string) => void) | null;
     /** Fires when the provider slot loses its connection. */
@@ -520,6 +529,45 @@ export interface IWsTunnelOptions {
 
     /** Slot-to-resource resolver also used for provider namespace restrictions. */
     slotResourceResolver?: ISlotResourceResolver;
+
+    /**
+     * Slots only one provider may call and only one may publish into, keyed by
+     * slot name. Enforced from startup. Requires {@link providerAuth}: without
+     * provider identities there is nobody to restrict them to.
+     */
+    protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
+
+    /**
+     * Provider principals known from configuration (without their secrets).
+     * Their `subjects` admit callers to the slots they protect even before
+     * they connect.
+     */
+    knownProviderPrincipals?: readonly IProviderPrincipal[];
+
+    /**
+     * Identifies the security configuration in every `policyVersion`
+     * (typically a hash of the security file).
+     * @default "config"
+     */
+    securityVersion?: string;
+
+    /**
+     * Most checks one `broker/authorize` request may carry.
+     * @default 256
+     */
+    authorizeBatchLimit?: number;
+}
+
+/**
+ * What {@link WsTunnel.registerLoopbackProvider} returns: the `broker/*`
+ * methods, called in process instead of as frames on the transport. Each
+ * resolves with the JSON-RPC `result` or `error` the frame would have got.
+ */
+export interface ILoopbackProviderHandle {
+    /** `broker/authorization/declare`. */
+    declare(params: unknown): Promise<BrokerMethodOutcome>;
+    /** `broker/authorize`. */
+    authorize(params: unknown): Promise<BrokerMethodOutcome>;
 }
 
 /** @deprecated Use {@link IStaticMount}. */

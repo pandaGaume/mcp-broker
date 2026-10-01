@@ -4,7 +4,16 @@ import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMo
 import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
-import { buildJwtAuth, SharedSecretProviderAuthenticator, type IJwtAuthOptions, type IResolvedAuth, type IProviderAuthenticator } from "../auth/index";
+import {
+    buildJwtAuth,
+    ProviderTableAuthenticator,
+    SharedSecretProviderAuthenticator,
+    type IJwtAuthOptions,
+    type IResolvedAuth,
+    type IProviderAuthenticator,
+    type IProviderCredential,
+} from "../auth/index";
+import type { IProtectedSlot } from "../authority/declaration";
 import {
     authorizationWithEngine,
     compileAuthorizationPolicy,
@@ -56,6 +65,11 @@ export class WsTunnelBuilder {
     private _providerAuth: IProviderAuthenticator | undefined = undefined;
     private _authorization: IPolicyAuthorization | undefined = undefined;
     private _slotResourceResolver: ISlotResourceResolver | undefined = undefined;
+    private _providerSecret: string | undefined = undefined;
+    private _providerCredentials: readonly IProviderCredential[] | undefined = undefined;
+    private _protectedSlots: Readonly<Record<string, IProtectedSlot>> | undefined = undefined;
+    private _securityVersion: string | undefined = undefined;
+    private _authorizeBatchLimit: number | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -354,6 +368,45 @@ export class WsTunnelBuilder {
      */
     withProviderAuth(authenticator: IProviderAuthenticator): this {
         this._providerAuth = authenticator;
+        this._providerSecret = undefined;
+        this._providerCredentials = undefined;
+        return this;
+    }
+
+    /**
+     * Gives every provider its own secret and identity: id, the subjects it
+     * holds when it calls the broker as a client, and the resources it may
+     * publish into. Combines with {@link withProviderSecret}, which keeps
+     * yielding the legacy `"shared-secret"` principal.
+     *
+     * Needed for anything that must tell providers apart: declaring an
+     * authorization domain, protecting a slot, restricting who publishes it.
+     */
+    withProviderPrincipals(credentials: readonly IProviderCredential[]): this {
+        this._providerCredentials = [...credentials];
+        this._providerAuth = new ProviderTableAuthenticator(this._providerCredentials, this._providerSecret);
+        return this;
+    }
+
+    /**
+     * Protects slots: only the subjects of `declaredBy` may call one, only
+     * `publishedBy` may publish into it, and it never joins `_all`. Enforced
+     * from startup; the declaring provider confirms it with its declaration.
+     */
+    withProtectedSlots(slots: Readonly<Record<string, IProtectedSlot>>): this {
+        this._protectedSlots = { ...slots };
+        return this;
+    }
+
+    /** Stamps every `policyVersion` with this identifier of the security configuration. */
+    withSecurityVersion(version: string): this {
+        this._securityVersion = version;
+        return this;
+    }
+
+    /** Caps the number of checks in one `broker/authorize` request. */
+    withAuthorizeBatchLimit(limit: number): this {
+        this._authorizeBatchLimit = limit;
         return this;
     }
 
@@ -363,7 +416,8 @@ export class WsTunnelBuilder {
      * Bearer`). Closes off slot occupation by strangers.
      */
     withProviderSecret(secret: string): this {
-        this._providerAuth = new SharedSecretProviderAuthenticator(secret);
+        this._providerSecret = secret;
+        this._providerAuth = this._providerCredentials ? new ProviderTableAuthenticator(this._providerCredentials, secret) : new SharedSecretProviderAuthenticator(secret);
         return this;
     }
 
@@ -396,6 +450,14 @@ export class WsTunnelBuilder {
             providerAuth: this._providerAuth,
             authorization,
             slotResourceResolver: this._slotResourceResolver ?? authorization?.slotResourceResolver ?? this._auth?.slotResourceResolver,
+            protectedSlots: this._protectedSlots,
+            knownProviderPrincipals: this._providerCredentials?.map((c) => ({
+                id: c.id,
+                ...(c.subjects ? { subjects: [...c.subjects] } : {}),
+                ...(c.allowedResources ? { allowedResources: [...c.allowedResources] } : {}),
+            })),
+            securityVersion: this._securityVersion,
+            authorizeBatchLimit: this._authorizeBatchLimit,
         };
         return new WsTunnel(options);
     }

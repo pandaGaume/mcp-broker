@@ -22,10 +22,11 @@ export type { IProtectedResourceMetadata, ProtectedResourceMetadata } from "./re
 export { HttpAuthGuard } from "./http.auth";
 export { buildJwtAuth } from "./auth.config";
 export type { IJwtAuthOptions, JwtAuthOptions } from "./auth.config";
-export { SharedSecretProviderAuthenticator } from "./provider.auth";
+export { ProviderTableAuthenticator, SharedSecretProviderAuthenticator } from "./provider.auth";
 export { compileProviderAllowedResources, normalizeProviderAuthentication, providerMayPublish, providerPublishDecision } from "./provider.auth";
 export type {
     IProviderAuthenticator,
+    IProviderCredential,
     IProviderPrincipal,
     IProviderPublishDecision,
     ProviderAuthenticationResult,

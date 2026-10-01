@@ -43,11 +43,21 @@ import {
     type ISlotResourceResolver,
 } from "../authorization/index";
 import { VERSION, PACKAGE_NAME } from "../version";
+import {
+    BrokerAuthority,
+    BROKER_AUTHORIZE_METHOD,
+    BROKER_DECLARE_METHOD,
+    BROKER_METHOD_PREFIX,
+    CALLER_META_KEY,
+    type BrokerMethodOutcome,
+    type IBrokerAuthorityInfo,
+} from "../authority/broker.authority";
 import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
 import type {
     AllowedOrigins,
     IHttpSession,
     IInternalClient,
+    ILoopbackProviderHandle,
     IProviderState,
     IWsTunnelOptions,
     McpEndpointKind,
@@ -113,6 +123,13 @@ const STDIO_CLIENT_KEY: ClientKey = "stdio";
 /** Default heartbeat period, in ms, for `providerHeartbeatIntervalMs`. */
 const DEFAULT_PROVIDER_HEARTBEAT_MS = 30_000;
 
+/**
+ * Longest a caller reference lives when requests have no deadline
+ * (`providerRequestTimeoutMs: 0`): a request a client gave up on must not
+ * leave a usable reference behind forever.
+ */
+const DEFAULT_CALLER_REF_MAX_AGE_MS = 10 * 60_000;
+
 /** Default per-request deadline, in ms, for `providerRequestTimeoutMs`. */
 const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -159,6 +176,57 @@ function parseObjectFrame(text: string): Record<string, unknown> | undefined {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
     return parsed as Record<string, unknown>;
 }
+
+/**
+ * Removes the broker's caller reference from one client message, wherever it
+ * came from. Returns `true` when something was removed.
+ *
+ * Only the broker writes `params._meta["io.cyanmycelium/caller"]`. A client
+ * that sends one is trying to make a provider act on another caller's
+ * behalf, so the key goes before anything else looks at the frame, on every
+ * slot, declared or not.
+ */
+function stripCallerMeta(message: unknown): boolean {
+    if (typeof message !== "object" || message === null || Array.isArray(message)) return false;
+    const params = (message as { params?: unknown }).params;
+    if (typeof params !== "object" || params === null || Array.isArray(params)) return false;
+    const meta = (params as { _meta?: unknown })._meta;
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta) || !Object.prototype.hasOwnProperty.call(meta, CALLER_META_KEY)) return false;
+    delete (meta as Record<string, unknown>)[CALLER_META_KEY];
+    if (Object.keys(meta).length === 0) delete (params as { _meta?: unknown })._meta;
+    return true;
+}
+
+/** Writes the caller reference into a request's `params._meta`. A request with positional params gets none. */
+function injectCallerMeta(message: Record<string, unknown>, caller: { readonly ref: string; readonly correlationId: string }): void {
+    if (message.params === undefined) message.params = {};
+    const params = message.params;
+    if (typeof params !== "object" || params === null || Array.isArray(params)) return;
+    const record = params as Record<string, unknown>;
+    const meta = typeof record._meta === "object" && record._meta !== null && !Array.isArray(record._meta) ? (record._meta as Record<string, unknown>) : {};
+    record._meta = { ...meta, [CALLER_META_KEY]: { ref: caller.ref, correlationId: caller.correlationId } };
+}
+
+/**
+ * Where a provider frame came from: who sent it, and how to answer that
+ * sender. A `broker/*` request is attributed to, and answered on, the channel
+ * it arrived on, never to whoever holds the slot at that moment, which may be
+ * someone else (a stale socket still open, a loopback registered over it).
+ */
+interface IProviderFrameOrigin {
+    readonly kind: "ws" | "loopback" | "upstream";
+    readonly principal: IProviderPrincipal | null;
+    reply(frame: string): void;
+}
+
+/** Identifies the caller behind a validated token: issuer and subject. */
+function principalKey(principal: IPrincipal): string {
+    const claims = principal.claims as { iss?: unknown; sub?: unknown; client_id?: unknown };
+    return JSON.stringify([claims.iss ?? null, claims.sub ?? null, claims.sub === undefined ? (claims.client_id ?? null) : null]);
+}
+
+/** Slots the broker owns and that no configuration may protect. */
+const RESERVED_SLOTS: ReadonlySet<string> = new Set(["_broker", "_all"]);
 
 /**
  * `true` when the frame is the tunnel registration notification asking to join
@@ -306,6 +374,9 @@ export class WsTunnel implements IBrokerContext {
      */
     private readonly _providerRequestWarnedProviders = new Set<string>();
 
+    /** Slots already warned about for a `broker/*` notification the broker does not handle. */
+    private readonly _brokerNotificationWarnedProviders = new Set<string>();
+
     /**
      * Slots already warned about for emitting a frame that is not JSON-RPC.
      * A provider that speaks a non-JSON dialect emits one on every message, so
@@ -390,6 +461,15 @@ export class WsTunnel implements IBrokerContext {
     /** Slots already warned about for a malformed `notifications/resources/updated`. */
     private readonly _invalidUpdateWarnedProviders = new Set<string>();
 
+    /** Declarations, caller references and protected slots: the broker as decision point. */
+    private readonly _authority: BrokerAuthority;
+
+    /** Provider principal of each in-process loopback provider that was given one. */
+    private readonly _loopbackPrincipals = new Map<string, IProviderPrincipal>();
+
+    /** Periodic cleanup of caller references whose request went away without an answer. */
+    private _callerRefSweepTimer: NodeJS.Timeout | null = null;
+
     constructor(options: IWsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
@@ -408,6 +488,56 @@ export class WsTunnel implements IBrokerContext {
             },
             options.resourceSubscriptions
         );
+        this._validateProtectedSlots();
+        this._authority = new BrokerAuthority({
+            protectedSlots: options.protectedSlots,
+            slotResources: this._slotResourceResolver,
+            authorization: this._authorization,
+            securityVersion: options.securityVersion,
+            authorizeBatchLimit: options.authorizeBatchLimit,
+            knownPrincipals: options.knownProviderPrincipals,
+            callerRefMaxAgeMs: (options.providerRequestTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS) || DEFAULT_CALLER_REF_MAX_AGE_MS,
+        });
+    }
+
+    /**
+     * Refuses, at construction, a protected-slot configuration that could not
+     * be enforced. Each of these would otherwise start a broker that looks
+     * protected and is not.
+     */
+    private _validateProtectedSlots(): void {
+        const slots = this._options.protectedSlots ?? {};
+        const names = Object.keys(slots);
+        if (names.length === 0) return;
+        const problems: string[] = [];
+        if (!this._options.providerAuth) {
+            problems.push(
+                "provider authentication is off, so the broker cannot tell which provider is publishing or declaring. Configure the providers table (or withProviderAuth)"
+            );
+        }
+        const upstreams = new Set([...(this._options.stdioUpstreams ?? []), ...(this._options.remoteUpstreams ?? [])].map((u) => u.name));
+        // Checked only when the identities come from a table; a custom
+        // authenticator may mint principals no configuration lists.
+        const known = this._options.knownProviderPrincipals ? new Set(this._options.knownProviderPrincipals.map((p) => p.id)) : null;
+        for (const name of names) {
+            const entry = slots[name];
+            if (!name) problems.push("a protected slot has an empty name");
+            if (RESERVED_SLOTS.has(name)) problems.push(`"${name}" is reserved by the broker and cannot be protected`);
+            if (upstreams.has(name)) problems.push(`"${name}" is served by a configured upstream, which has no provider identity to match publishedBy`);
+            if (typeof entry?.declaredBy !== "string" || entry.declaredBy.length === 0) problems.push(`"${name}": declaredBy must name a provider principal`);
+            if (typeof entry?.publishedBy !== "string" || entry.publishedBy.length === 0) problems.push(`"${name}": publishedBy must name a provider principal`);
+            for (const role of ["declaredBy", "publishedBy"] as const) {
+                const id = entry?.[role];
+                if (id === "shared-secret") problems.push(`"${name}": ${role} cannot be "shared-secret", which every holder of the legacy secret shares`);
+                else if (typeof id === "string" && known && !known.has(id)) problems.push(`"${name}": ${role} "${id}" is not in the providers table`);
+            }
+        }
+        if (problems.length > 0) throw new Error(`protectedSlots cannot be enforced: ${problems.join("; ")}.`);
+    }
+
+    /** The authorization state providers declared, for `broker_diagnose`. */
+    public getAuthorityInfo(): IBrokerAuthorityInfo {
+        return this._authority.info(this._authorization?.capabilities);
     }
 
     // -------------------------------------------------------------------------
@@ -559,25 +689,60 @@ export class WsTunnel implements IBrokerContext {
      * broker server and may be used by application code that wants to host an
      * MCP server inside the same process without opening a real WebSocket.
      *
-     * @throws if the name is already used by a stdio upstream or another loopback.
+     * `options.principal` gives the provider an identity, which is what lets it
+     * declare an authorization domain and publish into a protected slot. The
+     * returned handle exposes the `broker/*` methods in process; the same
+     * methods also work as frames on the transport.
+     *
+     * @throws if the name is already used by a stdio upstream or another
+     * loopback, or if the slot is protected and the principal is not the one
+     * allowed to publish into it.
      */
-    public registerLoopbackProvider(name: string, transport: IMessageTransport): void {
+    public registerLoopbackProvider(name: string, transport: IMessageTransport, options: { readonly principal?: IProviderPrincipal } = {}): ILoopbackProviderHandle {
         if (this._loopbackProviders.has(name)) {
             throw new Error(`Loopback provider "${name}" is already registered.`);
         }
         if (this._upstreams.has(name)) {
             throw new Error(`Cannot register loopback "${name}": a stdio upstream with the same name already exists.`);
         }
+        if (this._providers.get(name)?.ws?.readyState === WebSocket.OPEN) {
+            throw new Error(`Cannot register loopback "${name}": a WebSocket provider currently holds the slot.`);
+        }
+        const principal = options.principal ?? null;
+        if (!this._authority.mayPublish(name, principal)) {
+            throw new Error(
+                `Cannot register loopback "${name}": the slot is protected and only principal "${this._authority.protectionOf(name)?.publishedBy}" may publish into it.`
+            );
+        }
 
         const state = this._getOrCreateProviderState(name);
         this._loopbackProviders.set(name, transport);
+        if (principal) {
+            this._loopbackPrincipals.set(name, principal);
+            this._authority.notePrincipal(principal);
+        }
         state.connectedSinceMs = Date.now();
         this._onProviderAttached(name);
 
-        transport.onMessage = (data: string) => this._routeFromProvider(state, name, data);
+        const origin: IProviderFrameOrigin = { kind: "loopback", principal, reply: (frame) => transport.send(frame) };
+        transport.onMessage = (data: string) => this._routeFromProvider(state, name, data, origin);
         transport.onClose = () => {
             this._loopbackProviders.delete(name);
+            this._loopbackPrincipals.delete(name);
             this._failProviderDisconnected(state, name);
+        };
+
+        // The handle speaks for this registration only: once the slot was
+        // released, or taken by another loopback, it has nobody to speak for.
+        const call = (method: string, params: unknown): Promise<BrokerMethodOutcome> =>
+            Promise.resolve(
+                this._loopbackProviders.get(name) === transport
+                    ? this._brokerMethod(state, name, method, params, principal)
+                    : { error: { code: -32000, message: `Loopback provider "${name}" is no longer registered.` } }
+            );
+        return {
+            declare: (params: unknown) => call(BROKER_DECLARE_METHOD, params),
+            authorize: (params: unknown) => call(BROKER_AUTHORIZE_METHOD, params),
         };
     }
 
@@ -597,14 +762,14 @@ export class WsTunnel implements IBrokerContext {
         const client: IInternalClient = {
             onMessage: null,
             onClose: null,
-            send: (message: string): void => {
+            send: (message: string, principal: IPrincipal | null = null): void => {
                 if (closed) return;
                 // Same subscription bookkeeping as every other client: without
                 // it the subscribe reached the provider, and the updates it
                 // produced had no registered recipient to go to.
                 if (this._interceptClientFrame(state, providerName, message, { type: "internal", client })) return;
                 if (this._isProviderConnected(providerName, state)) {
-                    this._sendToProvider(state, providerName, this._trackRequest(state, message, { type: "internal", client }));
+                    this._sendToProvider(state, providerName, this._trackRequest(state, providerName, message, { type: "internal", client }, principal));
                 } else if (requestIdOf(message) !== undefined) {
                     client.onMessage?.(this._notConnectedPayload(providerName, message));
                 }
@@ -743,6 +908,7 @@ export class WsTunnel implements IBrokerContext {
                 // alive by them.
                 this._startHeartbeat();
                 this._startRequestTimeoutSweep();
+                this._startCallerRefSweep();
 
                 // Bring the aggregate `_all` slot up before any upstream connects
                 // (a Streamable HTTP upstream opens synchronously on connect()).
@@ -752,9 +918,10 @@ export class WsTunnel implements IBrokerContext {
                 // servers). Both implement the Upstream contract, so the wiring
                 // into a provider slot is identical.
                 const wireUpstream = (cfg: { name: string; aggregate?: boolean }, upstream: IUpstream): void => {
+                    const origin: IProviderFrameOrigin = { kind: "upstream", principal: null, reply: (frame) => upstream.send(frame) };
                     upstream.onMessage = (data) => {
                         const state = this._getOrCreateProviderState(cfg.name);
-                        this._routeFromProvider(state, cfg.name, data);
+                        this._routeFromProvider(state, cfg.name, data, origin);
                     };
                     upstream.onError = (err) => {
                         console.error(`[broker] ${err.message}`);
@@ -891,6 +1058,7 @@ export class WsTunnel implements IBrokerContext {
             server.setScopeFilter(this._options.auth?.aggregateScopeFilter ?? null);
             server.setPolicyAuthorization(this._authorization);
             server.onMembershipChanged = (name) => this._emitProviderChanged(name);
+            server.membershipGuard = (name) => !this._authority.protectionOf(name);
             server.start();
             this.registerLoopbackProvider(AggregateServer.SLOT, server);
             this._aggregateServer = server;
@@ -909,6 +1077,7 @@ export class WsTunnel implements IBrokerContext {
         // open, but a test runner that checks for leaked handles counts them.
         this._stopHeartbeat();
         this._stopRequestTimeoutSweep();
+        this._stopCallerRefSweep();
         this._providerSockets.clear();
 
         // Forgotten without an upstream unsubscribe each: every provider is
@@ -1197,17 +1366,69 @@ export class WsTunnel implements IBrokerContext {
      * which has no top-level id) are returned untouched and untracked, exactly
      * as before.
      */
-    private _trackRequest(state: IProviderState, frame: string, sink: ResponseSink): string {
-        const message = parseObjectFrame(frame);
-        if (!message) return frame;
+    private _trackRequest(state: IProviderState, providerName: string, frame: string, sink: ResponseSink, principal: IPrincipal | null = null): string {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(frame);
+        } catch {
+            return frame;
+        }
+
+        // A client never gets to speak for the broker: its caller reference
+        // goes first, from every frame, batches and notifications included.
+        //
+        // Always re-serialized, never forwarded byte for byte: JSON.parse keeps
+        // the LAST of two duplicate keys, a C or C++ provider may keep the FIRST,
+        // so a frame with two `_meta` keys could hide a caller reference from
+        // the strip and show it to the provider. Re-serializing leaves exactly
+        // what the broker checked.
+        if (Array.isArray(parsed)) {
+            // A batch item without `method` is response-shaped. A client has
+            // nothing to answer (the broker relays no provider request), and an
+            // item like that is never renumbered, so it could pass for the
+            // broker's answer to one of the provider's own `broker/*` requests.
+            const kept = parsed.filter((item) => typeof item === "object" && item !== null && typeof (item as { method?: unknown }).method === "string");
+            for (const item of kept) stripCallerMeta(item);
+            return JSON.stringify(kept);
+        }
+        if (typeof parsed !== "object" || parsed === null) return frame;
+        const message = parsed as Record<string, unknown>;
+        stripCallerMeta(message);
+
         const clientId = message.id;
-        if (typeof clientId !== "string" && typeof clientId !== "number") return frame;
+        if (typeof clientId !== "string" && typeof clientId !== "number") return JSON.stringify(message);
 
         const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._nextRequestId++}`;
         const timeout = this._requestTimeoutMs();
-        state.pending.set(brokerId, { sink, clientId, expiresAt: timeout > 0 ? Date.now() + timeout : 0 });
+
+        // A provider that declared an authorization domain gets, with each
+        // request, a reference to whoever sent it: valid on this slot, for as
+        // long as this request is pending, and good for nothing else.
+        let callerRef: string | undefined;
+        if (sink.type !== "broker") {
+            const providerPrincipal = this._providerPrincipalOfSlot(providerName, state);
+            if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id)) {
+                const issued = this._authority.issueRef(providerName, brokerId, providerPrincipal.id, this._authorizationSubject(principal));
+                injectCallerMeta(message, issued);
+                callerRef = issued.ref;
+            }
+        }
+
+        state.pending.set(brokerId, { sink, clientId, expiresAt: timeout > 0 ? Date.now() + timeout : 0, ...(callerRef ? { callerRef } : {}) });
         message.id = brokerId;
         return JSON.stringify(message);
+    }
+
+    /**
+     * The identity of the provider currently serving `name`, in the order
+     * {@link _sendToProvider} picks a channel. `null` for an upstream (it has
+     * none) and for an anonymous socket.
+     */
+    private _providerPrincipalOfSlot(name: string, state: IProviderState): IProviderPrincipal | null {
+        if (this._upstreams.get(name)?.isOpen) return null;
+        if (this._loopbackProviders.get(name)?.isOpen) return this._loopbackPrincipals.get(name) ?? null;
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) return this._providerPrincipals.get(state.ws) ?? null;
+        return null;
     }
 
     /** Delivers one already-addressed frame to the sink that is waiting for it. */
@@ -1258,6 +1479,24 @@ export class WsTunnel implements IBrokerContext {
         if (!this._requestTimeoutTimer) return;
         clearInterval(this._requestTimeoutTimer);
         this._requestTimeoutTimer = null;
+    }
+
+    /**
+     * Forgets caller references whose request left the pending map without an
+     * answer (client gone, timeout, provider disconnect). They are already
+     * useless, since `broker/authorize` checks the request is still pending;
+     * this only bounds the memory they hold. Runs whether or not requests
+     * have a deadline.
+     */
+    private _startCallerRefSweep(): void {
+        this._callerRefSweepTimer = setInterval(() => this._authority.sweepRefs((slot, brokerId) => this._providers.get(slot)?.pending.has(brokerId) ?? false), 10_000);
+        this._callerRefSweepTimer.unref?.();
+    }
+
+    private _stopCallerRefSweep(): void {
+        if (!this._callerRefSweepTimer) return;
+        clearInterval(this._callerRefSweepTimer);
+        this._callerRefSweepTimer = null;
     }
 
     /**
@@ -1418,6 +1657,22 @@ export class WsTunnel implements IBrokerContext {
             }
         }
         return true;
+    }
+
+    /**
+     * Whether a client may reach `slot` at all: always for an ordinary slot,
+     * only for the declaring provider's own client identity on a protected one.
+     */
+    private _clientMayReach(slot: string, principal: IPrincipal | null): boolean {
+        if (!this._authority.protectionOf(slot)) return true;
+        return this._authority.clientMayReach(slot, this._authorizationSubject(principal));
+    }
+
+    /** Answers an HTTP request for a protected slot this caller may not reach. */
+    private _refuseProtectedSlot(res: ServerResponse, slot: string): void {
+        console.warn(`[broker] refused a client on protected slot "${slot}": its subjects are not those of the declaring provider.`);
+        res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "forbidden", error_description: `Slot "${slot}" is protected: only its declaring provider may call it.` }));
     }
 
     private _policyDeniedPayload(data: string): string {
@@ -1787,6 +2042,10 @@ export class WsTunnel implements IBrokerContext {
      * Sends an `endpoint` event so Claude knows where to POST its requests.
      */
     private _handleSseConnect(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
+        if (!this._clientMayReach(providerName, principal)) {
+            this._refuseProtectedSlot(res, providerName);
+            return;
+        }
         const sessionId = randomUUID();
         const messagesSuffix = (this._options.messagesPath ?? "/messages").replace(/^\//, "");
         const messagesUrl = `/${encodeURIComponent(providerName)}/${messagesSuffix}`;
@@ -1817,6 +2076,10 @@ export class WsTunnel implements IBrokerContext {
      * Always responds 202 Accepted; the real response arrives over SSE.
      */
     private _handleSseMessage(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
+        if (!this._clientMayReach(providerName, principal)) {
+            this._refuseProtectedSlot(res, providerName);
+            return;
+        }
         const params = new URL(req.url ?? "", "http://localhost").searchParams;
         const sessionId = params.get("sessionId") ?? "";
         const state = this._getOrCreateProviderState(providerName);
@@ -1844,7 +2107,7 @@ export class WsTunnel implements IBrokerContext {
                 // entry added before the connectivity check has nothing to
                 // answer it and would pin that id until the slot next
                 // disconnects (the raw-WS path had the same ordering bug).
-                this._sendToProvider(state, providerName, this._trackRequest(state, body, { type: "sse", sessionId }), principal);
+                this._sendToProvider(state, providerName, this._trackRequest(state, providerName, body, { type: "sse", sessionId }, principal), principal);
             } else {
                 const sseRes = state.sseSessions.get(sessionId);
                 if (sseRes) this._sendSseEvent(sseRes, this._notConnectedPayload(providerName, body));
@@ -1867,6 +2130,10 @@ export class WsTunnel implements IBrokerContext {
      * relaying frames to a provider that lives somewhere else entirely.
      */
     private _handleStreamableHttp(req: IncomingMessage, res: ServerResponse, providerName: string, principal: IPrincipal | null): void {
+        if (!this._clientMayReach(providerName, principal)) {
+            this._refuseProtectedSlot(res, providerName);
+            return;
+        }
         const state = this._getOrCreateProviderState(providerName);
 
         // The endpoint authenticates nothing: this broker has its own guard,
@@ -1876,7 +2143,21 @@ export class WsTunnel implements IBrokerContext {
         const sessionId = req.headers["mcp-session-id"];
         if (typeof sessionId === "string") {
             const session = state.httpSessions.get(sessionId);
-            if (session) session.principal = principal;
+            if (session) {
+                // A session belongs to the caller that first authenticated on
+                // it. Another token for another subject on the same session id
+                // would otherwise have its frames, and caller references,
+                // attributed to whichever request set the principal last.
+                if (session.principal && principal && principalKey(session.principal) !== principalKey(principal)) {
+                    console.warn(
+                        `[broker] refused a request on Streamable HTTP session "${sessionId}" of slot "${providerName}": it carries a token for another caller than the one the session belongs to.`
+                    );
+                    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ error: "forbidden", error_description: "This session belongs to another caller. Open a session of your own." }));
+                    return;
+                }
+                session.principal = principal;
+            }
         }
 
         void this._endpointFor(providerName, state).handleRequest(req, res);
@@ -1938,7 +2219,7 @@ export class WsTunnel implements IBrokerContext {
             return;
         }
 
-        this._sendToProvider(state, providerName, this._trackRequest(state, frame, { type: "http-session", sessionId }), session.principal);
+        this._sendToProvider(state, providerName, this._trackRequest(state, providerName, frame, { type: "http-session", sessionId }, session.principal), session.principal);
     }
 
     /** Writes one JSON-RPC message as an SSE `message` event. */
@@ -2002,6 +2283,7 @@ export class WsTunnel implements IBrokerContext {
         if (providerPrincipal) {
             this._pendingProviderPrincipals.delete(req);
             this._providerPrincipals.set(ws, providerPrincipal);
+            this._authority.notePrincipal(providerPrincipal);
         }
         if (this._upstreams.has(name)) {
             console.warn(
@@ -2014,6 +2296,15 @@ export class WsTunnel implements IBrokerContext {
         if (this._loopbackProviders.has(name)) {
             console.warn(`[broker] WARNING: WebSocket provider "${name}" rejected: the slot is held by an in-process loopback (reserved system slot).`);
             this._closeWs(ws, 1008, `Provider "${name}" is reserved by the broker`);
+            return;
+        }
+
+        if (!this._authority.mayPublish(name, providerPrincipal ?? null)) {
+            console.warn(
+                `[broker] WARNING: WebSocket provider "${name}" rejected: the slot is protected and only principal "${this._authority.protectionOf(name)?.publishedBy}" may publish into it ` +
+                    `(this one is "${providerPrincipal?.id ?? "(anonymous)"}").`
+            );
+            this._closeWs(ws, 1008, `Slot "${name}" is protected: another principal publishes it`);
             return;
         }
 
@@ -2038,6 +2329,13 @@ export class WsTunnel implements IBrokerContext {
         // including a normal MCP frame, is routed and leaves the provider
         // non-aggregated, so every pre-existing provider keeps working.
         let registrationChecked = false;
+        const origin: IProviderFrameOrigin = {
+            kind: "ws",
+            principal: providerPrincipal ?? null,
+            reply: (frame) => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+            },
+        };
         ws.on("message", (data: Buffer) => {
             const text = data.toString();
             if (!registrationChecked) {
@@ -2045,7 +2343,7 @@ export class WsTunnel implements IBrokerContext {
                 if (this._refuseEnvelopeOnSlotPath(ws, name, text)) return;
                 if (this._tryHandleRegistration(name, text)) return;
             }
-            this._routeFromProvider(state, name, text);
+            this._routeFromProvider(state, name, text, origin);
         });
 
         ws.on("close", () => {
@@ -2204,16 +2502,19 @@ export class WsTunnel implements IBrokerContext {
     }
 
     private _onClientConnect(ws: WebSocket, providerName: string, req: IncomingMessage): void {
-        const state = this._getOrCreateProviderState(providerName);
-        state.wsClients.add(ws);
-
         // Carry the principal captured at the upgrade onto the socket, so requests
         // this client makes to `_all` can be scope-filtered.
         const principal = this._pendingClientPrincipals.get(req);
-        if (principal) {
-            this._clientPrincipals.set(ws, principal);
-            this._pendingClientPrincipals.delete(req);
+        if (principal) this._pendingClientPrincipals.delete(req);
+
+        if (!this._clientMayReach(providerName, principal ?? null)) {
+            this._closeWs(ws, 1008, `Slot "${providerName}" is protected: only its declaring provider may call it`);
+            return;
         }
+
+        const state = this._getOrCreateProviderState(providerName);
+        state.wsClients.add(ws);
+        if (principal) this._clientPrincipals.set(ws, principal);
 
         ws.on("message", (data: Buffer) => this._routeFromClient(ws, state, providerName, data.toString()));
 
@@ -2247,6 +2548,7 @@ export class WsTunnel implements IBrokerContext {
         if (providerPrincipal) {
             this._pendingProviderPrincipals.delete(req);
             this._providerPrincipals.set(ws, providerPrincipal);
+            this._authority.notePrincipal(providerPrincipal);
         }
 
         // Undecodable frames used to be dropped without a word. The first one is
@@ -2302,6 +2604,12 @@ export class WsTunnel implements IBrokerContext {
                     return;
                 }
 
+                if (!this._authority.mayPublish(name, providerPrincipal ?? null)) {
+                    console.warn(`[broker] WARNING: multiplexed WebSocket provider "${name}" rejected: the slot is protected and another principal publishes it.`);
+                    ws.send(encodeErrorEnvelope(name, TunnelErrorCodes.RegistrationForbidden, `Slot "${name}" is protected: another principal publishes it`));
+                    return;
+                }
+
                 const refusal = this._claimSlot(name, ws);
                 if (refusal) {
                     // Provider already connected via another socket, reject this
@@ -2334,7 +2642,13 @@ export class WsTunnel implements IBrokerContext {
             }
 
             const state = this._providers.get(name)!;
-            this._routeFromProvider(state, name, envelopeFrame(envelope));
+            this._routeFromProvider(state, name, envelopeFrame(envelope), {
+                kind: "ws",
+                principal: providerPrincipal ?? null,
+                reply: (frame) => {
+                    if (ws.readyState === WebSocket.OPEN) ws.send(encodeEnvelope(name, frame));
+                },
+            });
         });
 
         ws.on("close", () => {
@@ -2402,9 +2716,23 @@ export class WsTunnel implements IBrokerContext {
     }
 
     private _routeFromStdioClient(state: IProviderState, data: string): void {
+        if (!this._clientMayReach(this._stdioClientProvider!, null)) {
+            // The stdio bridge is anonymous, so it never reaches a protected slot.
+            const id = requestIdOf(data);
+            if (id !== undefined) {
+                this._stdioClientTransport?.send(
+                    JSON.stringify({
+                        jsonrpc: "2.0",
+                        id,
+                        error: { code: -32001, message: `Slot "${this._stdioClientProvider}" is protected: only its declaring provider may call it.` },
+                    })
+                );
+            }
+            return;
+        }
         if (this._interceptClientFrame(state, this._stdioClientProvider!, data, { type: "stdio" })) return;
         if (this._isProviderConnected(this._stdioClientProvider!, state)) {
-            this._sendToProvider(state, this._stdioClientProvider!, this._trackRequest(state, data, { type: "stdio" }));
+            this._sendToProvider(state, this._stdioClientProvider!, this._trackRequest(state, this._stdioClientProvider!, data, { type: "stdio" }));
         } else {
             let errId: string | number | null = null;
             try {
@@ -2469,18 +2797,23 @@ export class WsTunnel implements IBrokerContext {
         // Registered only once the frame is actually on its way out: an entry
         // added before the connectivity check has nothing to answer it and would
         // pin that id until the slot next disconnects.
-        this._sendToProvider(state, providerName, this._trackRequest(state, data, { type: "ws", socket: client }), principal);
+        this._sendToProvider(state, providerName, this._trackRequest(state, providerName, data, { type: "ws", socket: client }, principal), principal);
     }
 
-    private _routeFromProvider(state: IProviderState, providerName: string, data: string): void {
+    private _routeFromProvider(state: IProviderState, providerName: string, data: string, origin: IProviderFrameOrigin): void {
         try {
-            const msg = JSON.parse(data) as { id?: string | number; method?: unknown };
+            const msg = JSON.parse(data) as { id?: string | number; method?: unknown; params?: unknown };
 
-            if (msg.id != null && typeof msg.method === "string") {
+            if (typeof msg.method === "string" && msg.method.startsWith(BROKER_METHOD_PREFIX)) {
+                // Addressed to the broker itself, never relayed. Checked before
+                // the id lookup: a `broker/*` request carries an id of the
+                // provider's choosing, which must not be taken for a response.
+                this._answerBrokerMethod(state, providerName, msg.id, msg.method, msg.params, origin);
+            } else if (msg.id != null && typeof msg.method === "string") {
                 // A request the provider opened itself: a response never
                 // carries `method`. Answered here, at once, because nothing
                 // downstream will: see `_answerProviderRequest`.
-                this._answerProviderRequest(state, providerName, msg.id, msg.method);
+                this._answerProviderRequest(providerName, msg.id, msg.method, origin);
             } else if (msg.id != null) {
                 // Response: route to the specific sink that made the request, and
                 // put the client's own id back in place of the broker's before it
@@ -2488,6 +2821,7 @@ export class WsTunnel implements IBrokerContext {
                 const entry = state.pending.get(msg.id);
                 if (entry) {
                     state.pending.delete(msg.id);
+                    this._authority.releaseRef(entry.callerRef);
                     (msg as { id: unknown }).id = entry.clientId;
                     this._deliverToSink(state, entry.sink, JSON.stringify(msg));
                 } else {
@@ -2522,6 +2856,61 @@ export class WsTunnel implements IBrokerContext {
     }
 
     /**
+     * Serves one `broker/*` frame from a provider, and answers a request on
+     * the channel it came from, at once.
+     *
+     * A notification gets no answer (there is nothing to answer it with); the
+     * ones a later release defines are dropped here with one warning.
+     */
+    private _answerBrokerMethod(state: IProviderState, providerName: string, id: string | number | undefined, method: string, params: unknown, origin: IProviderFrameOrigin): void {
+        if (id === undefined || id === null) {
+            // Keyed by slot alone: a provider inventing method names must not
+            // grow this set without bound.
+            if (!this._brokerNotificationWarnedProviders.has(providerName)) {
+                this._brokerNotificationWarnedProviders.add(providerName);
+                console.warn(
+                    `[broker] provider "${providerName}" sent the notification "${method}", which this broker does not handle; dropped. Further ones from this slot are not logged.`
+                );
+            }
+            return;
+        }
+        const outcome =
+            origin.kind === "upstream"
+                ? { error: { code: -32601, message: `Method not found: ${method} is not available to a stdio or remote upstream, which has no provider identity.` } }
+                : this._brokerMethod(state, providerName, method, params, origin.principal);
+        const reply = "result" in outcome ? { jsonrpc: "2.0", id, result: outcome.result } : { jsonrpc: "2.0", id, error: outcome.error };
+        origin.reply(JSON.stringify(reply));
+    }
+
+    /**
+     * Runs one `broker/*` method for the provider serving `providerName`.
+     *
+     * Only a provider with an identity can use them: a WebSocket provider
+     * (authenticated or not; anonymity is refused further in) or a loopback.
+     * An upstream the broker spawned or dialed has none, so it is refused.
+     */
+    private _brokerMethod(
+        state: IProviderState,
+        providerName: string,
+        method: string,
+        params: unknown,
+        principal: IProviderPrincipal | null = this._providerPrincipalOfSlot(providerName, state)
+    ): BrokerMethodOutcome {
+        if (this._upstreams.get(providerName)?.isOpen) {
+            return { error: { code: -32601, message: `Method not found: ${method} is not available to a stdio or remote upstream, which has no provider identity.` } };
+        }
+        const origin = { slot: providerName, principal };
+        switch (method) {
+            case BROKER_DECLARE_METHOD:
+                return this._authority.declare(params, origin);
+            case BROKER_AUTHORIZE_METHOD:
+                return this._authority.authorize(params, origin, (slot, brokerId) => this._providers.get(slot)?.pending.has(brokerId) ?? false);
+            default:
+                return { error: { code: -32601, message: `Method not found: ${method}. The broker answers ${BROKER_DECLARE_METHOD} and ${BROKER_AUTHORIZE_METHOD}.` } };
+        }
+    }
+
+    /**
      * Answers, immediately, a request the provider opened itself.
      *
      * The broker relays no **server-to-client** request (`sampling/createMessage`,
@@ -2537,15 +2926,13 @@ export class WsTunnel implements IBrokerContext {
      * `ping` is the one exception: it checks the link to the next hop, and the
      * broker is that hop, so it answers `{}` itself.
      */
-    private _answerProviderRequest(state: IProviderState, providerName: string, id: string | number, method: string): void {
+    private _answerProviderRequest(providerName: string, id: string | number, method: string, origin: IProviderFrameOrigin): void {
         if (method === "ping") {
-            this._sendToProvider(state, providerName, JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
+            origin.reply(JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
             return;
         }
 
-        this._sendToProvider(
-            state,
-            providerName,
+        origin.reply(
             JSON.stringify({
                 jsonrpc: "2.0",
                 id,
@@ -2798,7 +3185,7 @@ export class WsTunnel implements IBrokerContext {
                     resolve(reply ?? { error: { code: -32700, message: "Unparseable answer" } });
                 },
             };
-            this._sendToProvider(state, slot, this._trackRequest(state, JSON.stringify({ jsonrpc: "2.0", id: 0, method, params }), sink));
+            this._sendToProvider(state, slot, this._trackRequest(state, slot, JSON.stringify({ jsonrpc: "2.0", id: 0, method, params }), sink));
         });
     }
 

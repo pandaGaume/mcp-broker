@@ -9,3 +9,18 @@
 export * from "./protocol/index";
 export { DirectTransport, type IDirectTransportOptions } from "./direct.transport";
 export { MultiplexTransport, type IMultiplexTransportOptions } from "./multiplex.transport";
+export {
+    BrokerClient,
+    BrokerRequestError,
+    CALLER_META_KEY,
+    callerReferenceOf,
+    type IAuthorizationAnswer,
+    type IAuthorizationCheck,
+    type IAuthorizationDeclaration,
+    type IAuthorizationDecision,
+    type IAuthorizationQuery,
+    type IBrokerClientOptions,
+    type ICallerReference,
+    type IDeclarationAccepted,
+    type IDeclaredResource,
+} from "./broker.client";

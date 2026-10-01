@@ -62,7 +62,7 @@ import * as fs from "fs";
 import * as path from "path";
 import open from "open";
 import { WsTunnelBuilder, VERSION, PACKAGE_NAME, BROKER_PROVIDER_NAME, BROKER_AGGREGATE_NAME, type ProviderTakeoverMode } from "./index";
-import { BrokerConfigError, loadBrokerConfig, resolveOpenTarget, type ILoadedBrokerConfig } from "./config";
+import { BrokerConfigError, loadBrokerConfig, loadSecurityConfig, resolveOpenTarget, type ILoadedBrokerConfig, type ILoadedSecurityConfig } from "./config";
 import { loadMcpbBundle } from "./mcpb/mcpb.loader";
 
 // ---------------------------------------------------------------------------
@@ -153,9 +153,10 @@ function printHelp(): void {
  * process here, before anything listens. Carrying on with an empty config
  * would start a broker with no authentication and no authorization.
  */
-function loadConfigOrExit(): ILoadedBrokerConfig {
+function loadConfigOrExit(): ILoadedBrokerConfig & { readonly security: ILoadedSecurityConfig | null } {
     try {
-        return loadBrokerConfig();
+        const loaded = loadBrokerConfig();
+        return { ...loaded, security: loadSecurityConfig(loaded) };
     } catch (error) {
         if (!(error instanceof BrokerConfigError)) throw error;
         process.stderr.write(`${error.message}
@@ -164,8 +165,15 @@ function loadConfigOrExit(): ILoadedBrokerConfig {
     }
 }
 
-const { config, baseDir } = loadConfigOrExit();
+const { config, baseDir, security } = loadConfigOrExit();
 const cwd = process.cwd();
+
+/**
+ * The `auth` block in force: the security file's when there is one (the
+ * loader refused a `config.json` that carries one too), `config.json`'s
+ * otherwise, for deployments that have not moved it yet.
+ */
+const authConfig = security?.security.auth ?? config.auth;
 
 /**
  * Fills an env var from the config file when the env var is not already set.
@@ -200,11 +208,11 @@ envFromConfig("MCP_BROKER_PROVIDER_TAKEOVER", config.providerTakeover);
 // or a same-origin URL. Both travel as the env string and are resolved once,
 // by `resolveOpenTarget`, so the file and the env var cannot diverge.
 envFromConfig("MCP_BROKER_OPEN", config.www?.open === true ? "1" : typeof config.www?.open === "string" ? config.www.open : undefined);
-envFromConfig("MCP_BROKER_AUTH_ENABLED", config.auth?.enabled === true ? "1" : undefined);
-envFromConfig("MCP_BROKER_PUBLIC_BASE_URL", config.auth?.publicBaseUrl);
-envFromConfig("MCP_BROKER_JWKS", config.auth?.jwks);
-envFromConfig("MCP_BROKER_ISSUER", config.auth?.issuer);
-envFromConfig("MCP_BROKER_PROVIDER_SECRET", config.auth?.providerSecret);
+envFromConfig("MCP_BROKER_AUTH_ENABLED", authConfig?.enabled === true ? "1" : undefined);
+envFromConfig("MCP_BROKER_PUBLIC_BASE_URL", authConfig?.publicBaseUrl);
+envFromConfig("MCP_BROKER_JWKS", authConfig?.jwks);
+envFromConfig("MCP_BROKER_ISSUER", authConfig?.issuer);
+envFromConfig("MCP_BROKER_PROVIDER_SECRET", authConfig?.providerSecret);
 
 const stdioProvider = process.env["MCP_BROKER_STDIO_PROVIDER"];
 
@@ -521,7 +529,7 @@ async function main(): Promise<void> {
         const publicBaseUrl = process.env["MCP_BROKER_PUBLIC_BASE_URL"];
         const jwks = process.env["MCP_BROKER_JWKS"];
         const issuer = process.env["MCP_BROKER_ISSUER"];
-        const authorizationServers = config.auth?.authorizationServers ?? (issuer ? [issuer] : []);
+        const authorizationServers = authConfig?.authorizationServers ?? (issuer ? [issuer] : []);
         if (!publicBaseUrl || !jwks || authorizationServers.length === 0) {
             console.error(
                 "[mcp-broker] auth.enabled requires publicBaseUrl, jwks, and at least one " +
@@ -535,18 +543,18 @@ async function main(): Promise<void> {
             authorizationServers,
             jwksUri: jwks,
             issuer,
-            scopesSupported: config.auth?.scopesSupported,
-            requiredScopes: config.auth?.requiredScopes,
-            perSlotScopes: config.auth?.perSlotScopes,
-            providerScopes: config.auth?.providerScopes,
-            subjectMapping: config.auth?.subjectMapping,
-            roles: config.auth?.roles,
-            assignments: config.auth?.assignments,
-            denies: config.auth?.denies,
-            slotResources: config.auth?.slotResources,
-            toolCapabilities: config.auth?.toolCapabilities,
-            providerToolCapabilities: config.auth?.providerToolCapabilities,
-            audit: config.auth?.audit,
+            scopesSupported: authConfig?.scopesSupported,
+            requiredScopes: authConfig?.requiredScopes,
+            perSlotScopes: authConfig?.perSlotScopes,
+            providerScopes: authConfig?.providerScopes,
+            subjectMapping: authConfig?.subjectMapping,
+            roles: authConfig?.roles,
+            assignments: authConfig?.assignments,
+            denies: authConfig?.denies,
+            slotResources: authConfig?.slotResources,
+            toolCapabilities: authConfig?.toolCapabilities,
+            providerToolCapabilities: authConfig?.providerToolCapabilities,
+            audit: authConfig?.audit,
         });
     }
 
@@ -558,7 +566,23 @@ async function main(): Promise<void> {
         builder.withProviderSecret(providerSecret);
     }
 
-    const tunnel = builder.build();
+    // `withProviderPrincipals()` and `build()` refuse a security setup they
+    // could not enforce (two providers sharing a secret, a protected slot with
+    // no provider identities, ...): say so and stop, rather than crash.
+    let tunnel: ReturnType<typeof builder.build>;
+    try {
+        // ── Security file: one identity per provider, protected slots ────────
+        if (security) {
+            if (security.credentials.length > 0) builder.withProviderPrincipals(security.credentials);
+            const protectedSlots = security.security.authorization?.protectedSlots;
+            if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
+            builder.withSecurityVersion(security.version);
+        }
+        tunnel = builder.build();
+    } catch (error) {
+        console.error(`[mcp-broker] ${(error as Error).message}`);
+        process.exit(1);
+    }
     await tunnel.start();
 
     // ── Startup banner ──────────────────────────────────────────────────────
@@ -597,7 +621,14 @@ async function main(): Promise<void> {
         console.log(`🌐  Local grammars        ${localGrammarsDir}`);
     }
     console.log(`🔐  Authorization         ${authEnabled ? "OAuth 2.1 (Bearer required)" : "disabled (trusted network only)"}`);
-    console.log(`🛡️   Provider auth         ${providerSecret ? "shared secret required" : "disabled"}`);
+    const providerIdentities = security?.credentials.length ?? 0;
+    console.log(
+        `🛡️   Provider auth         ${providerIdentities > 0 ? `${providerIdentities} provider identit${providerIdentities === 1 ? "y" : "ies"}${providerSecret ? " + shared secret" : ""}` : providerSecret ? "shared secret required" : "disabled"}`
+    );
+    if (security) {
+        const protectedCount = Object.keys(security.security.authorization?.protectedSlots ?? {}).length;
+        console.log(`🔏  Security file         ${security.sourcePath} (version ${security.version}${protectedCount > 0 ? `, ${protectedCount} protected slot(s)` : ""})`);
+    }
     console.log(`🌍  Browser origins       ${describeAllowedOrigins()}`);
     console.log(`                          enforced on /<name>/${mcpSuffix}, /<name>/${sseSuffix} and /<name>/${messagesSuffix}`);
     if (!allowedOrigins) {

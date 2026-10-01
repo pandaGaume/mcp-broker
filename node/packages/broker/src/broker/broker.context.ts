@@ -1,3 +1,4 @@
+import type { IBrokerAuthorityInfo } from "../authority/broker.authority";
 import type { IEventSource } from "@cyanmycelium/mcp-core";
 
 /**
@@ -78,6 +79,13 @@ export interface IBrokerContext {
      * a slot that cannot exist at host start.
      */
     getStdioBridgeTarget?(): string | null | undefined;
+
+    /**
+     * Declarations, protected slots and live caller references, or `undefined`
+     * when the host cannot report them. Lets a diagnosis catch a protected slot
+     * nobody confirmed and a policy granting capabilities nobody declared.
+     */
+    getAuthorityInfo?(): IBrokerAuthorityInfo | undefined;
 
     /**
      * Fires with the names of the slots whose *state* changed: a slot

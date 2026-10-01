@@ -29,6 +29,15 @@ export interface IAuthorizationRequest {
  *                        grant could ever match it. A configuration fault.
  * - `evaluation-error`   evaluation threw. Nothing was decided; the request is
  *                        denied because that is the safe answer. A fault.
+ *
+ * Only `broker/authorize`, where a provider asks on behalf of a caller:
+ *
+ * - `undeclared-resource`   the resource lies outside the asking provider's
+ *                           declared namespace, or contradicts its declaration.
+ *                           A provider may not probe rights it does not serve.
+ * - `undeclared-capability` the capability is not in the provider's declared vocabulary.
+ * - `no-policy`             the broker has no policy engine, so nothing can be
+ *                           granted. A configuration fact, not a policy outcome.
  */
 export type AuthorizationDecisionReason =
     | "explicit-deny"
@@ -37,7 +46,10 @@ export type AuthorizationDecisionReason =
     | "invalid-resource"
     | "unknown-resource"
     | "invalid-capability"
-    | "evaluation-error";
+    | "evaluation-error"
+    | "undeclared-resource"
+    | "undeclared-capability"
+    | "no-policy";
 
 export interface IAuthorizationDecision {
     readonly allowed: boolean;
@@ -103,6 +115,22 @@ export interface IAuthorizationAuditEvent {
     readonly tool?: string;
     readonly reason: AuthorizationDecisionReason;
     readonly matchedPolicies?: readonly string[];
+    /** Only for a `broker/authorize` decision: the id the provider's later report refers to. */
+    readonly decisionId?: string;
+    /** Only for a `broker/authorize` decision: ties it to the client request it served. */
+    readonly correlationId?: string;
+    /** Only for a `broker/authorize` decision: the policy version that produced it. */
+    readonly policyVersion?: string;
+    /**
+     * Only for a `broker/authorize` decision: on whose behalf it was asked.
+     * `"caller"` is the client behind a caller reference, `"provider"` the
+     * provider itself, never a user.
+     */
+    readonly onBehalfOf?: "caller" | "provider";
+    /** Only for a `broker/authorize` decision: the provider's native identifier of the resource. */
+    readonly nativeResource?: string;
+    /** Only for a `broker/authorize` decision: the attributes the provider sent, sensitive keys masked. */
+    readonly attributes?: Readonly<Record<string, unknown>>;
 }
 
 /** @deprecated Use {@link IAuthorizationSubject}. */

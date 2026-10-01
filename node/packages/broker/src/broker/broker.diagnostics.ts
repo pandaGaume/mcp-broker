@@ -1,3 +1,4 @@
+import type { IBrokerAuthorityInfo } from "../authority/broker.authority";
 /**
  * The broker's self-diagnosis: live state plus the problems the broker can
  * *prove* about its own wiring, each carrying the fix.
@@ -51,7 +52,9 @@ export type BrokerDiagnosisRuleId =
     | "aggregate-empty"
     | "aggregate-missing-live-slots"
     | "stdio-bridge-target-unreachable"
-    | "self-served-page-blocked";
+    | "self-served-page-blocked"
+    | "protected-slot-unconfirmed"
+    | "undeclared-capability";
 
 /** One detected problem: what is wrong, what proves it, and what to do. */
 export interface IBrokerDiagnosisProblem {
@@ -123,6 +126,9 @@ export interface IBrokerDiagnosis {
 
     /** Membership of `_all`, when the host can report it. */
     aggregate?: { enabled: boolean; providers: readonly string[] };
+
+    /** Declarations and protected slots, when the host can report them. */
+    authority?: IBrokerAuthorityInfo;
 
     /** Detected problems, most severe first. Empty means nothing was provable. */
     problems: IBrokerDiagnosisProblem[];
@@ -425,6 +431,45 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
         });
     }
 
+    // -- Declarations and protected slots -----------------------------------
+    const authorityInfo = context.getAuthorityInfo?.();
+    if (!authorityInfo) {
+        checksSkipped.push({
+            id: "protected-slot-unconfirmed",
+            reason: "This broker context does not implement getAuthorityInfo(), so declarations and protected slots cannot be read.",
+        });
+    } else {
+        for (const p of authorityInfo.protectedSlots) {
+            if (p.confirmed || (slot !== undefined && slot !== p.slot)) continue;
+            problems.push({
+                id: "protected-slot-unconfirmed",
+                severity: "info",
+                slot: p.slot,
+                symptom:
+                    `Slot "${p.slot}" is protected but "${p.declaredBy}" has not confirmed it with a declaration yet. ` +
+                    `It is closed all the same: only "${p.declaredBy}"'s client identity may call it and only "${p.publishedBy}" may publish it.`,
+                evidence: { protectedSlot: p, declarations: authorityInfo.declarations.map((d) => d.principalId) },
+                fix:
+                    `Start the provider authenticated as "${p.declaredBy}" and have it send broker/authorization/declare with "${p.slot}" in "protects". ` +
+                    "If it did and this persists, its declaration was refused: the broker log names every problem it found.",
+            });
+        }
+        if (slot === undefined && authorityInfo.undeclaredCapabilities.length > 0) {
+            problems.push({
+                id: "undeclared-capability",
+                severity: "warning",
+                symptom:
+                    `The policy grants or denies ${authorityInfo.undeclaredCapabilities.length} domain capabilit${authorityInfo.undeclaredCapabilities.length === 1 ? "y" : "ies"} that no accepted declaration covers: ` +
+                    `${authorityInfo.undeclaredCapabilities.join(", ")}. broker/authorize answers undeclared-capability for them, so those grants have no effect yet.`,
+                evidence: {
+                    undeclaredCapabilities: authorityInfo.undeclaredCapabilities,
+                    declarations: authorityInfo.declarations.map((d) => ({ principalId: d.principalId, capabilities: d.capabilities })),
+                },
+                fix: "Start the provider that owns this domain and check its declaration was accepted, or correct the capability names in the security file's roles (they are case-sensitive).",
+            });
+        }
+    }
+
     // -- Notes: true, actionable, but not a fault ---------------------------
     const notes: string[] = [];
     if (security?.providerAuthEnabled) {
@@ -472,6 +517,7 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
             sessions: slots.reduce((n, s) => n + s.sessionCount, 0),
         },
         ...(aggregate ? { aggregate: { enabled: aggregate.enabled, providers: aggregate.providers } } : {}),
+        ...(authorityInfo ? { authority: authorityInfo } : {}),
         problems,
         checksSkipped,
         notes,

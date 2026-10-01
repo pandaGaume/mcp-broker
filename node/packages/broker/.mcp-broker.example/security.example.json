@@ -1,0 +1,42 @@
+{
+    "description": "Security settings, kept apart from config.json. Name this file from config.json with \"securityFile\": \"security.json\", or with MCP_BROKER_SECURITY_FILE. No secret is written here: each provider names the environment variable that holds its own.",
+    "auth": {
+        "enabled": true,
+        "publicBaseUrl": "https://broker.example.com",
+        "authorizationServers": ["https://login.example.com"],
+        "jwks": "https://login.example.com/.well-known/jwks.json",
+        "requiredScopes": ["mcp:call"],
+        "subjectMapping": { "userClaim": "sub", "groupClaims": ["groups"], "serviceClaims": ["service"] },
+        "slotResources": {
+            "scada": "/production/site1/scada",
+            "bench-motor01": "/production/site1/bench/motor01"
+        },
+        "roles": {
+            "mcp-caller": { "capabilities": ["mcp.tools.list", "mcp.tools.call"] },
+            "scada-observer": { "inherits": ["mcp-caller"], "capabilities": ["scada.observe"] },
+            "scada-operator": { "inherits": ["scada-observer"], "capabilities": ["scada.acquire", "scada.control"] }
+        },
+        "assignments": [
+            { "id": "line1-operators", "subject": "group:operators-line1", "role": "scada-operator", "resource": "/production/site1/line1/**" },
+            { "id": "scada-service", "subject": "service:mcp-scada", "role": "mcp-caller", "resource": "/production/site1/**" }
+        ]
+    },
+    "providers": [
+        {
+            "id": "mcp-scada",
+            "secretEnv": "SCADA_PROVIDER_SECRET",
+            "subjects": ["service:mcp-scada"],
+            "allowedResources": ["/production/site1/**"]
+        },
+        {
+            "id": "modbus-bench",
+            "secretEnv": "MODBUS_PROVIDER_SECRET",
+            "allowedResources": ["/production/site1/bench/**"]
+        }
+    ],
+    "authorization": {
+        "protectedSlots": {
+            "bench-motor01": { "declaredBy": "mcp-scada", "publishedBy": "modbus-bench" }
+        }
+    }
+}

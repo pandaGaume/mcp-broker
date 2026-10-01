@@ -20,6 +20,46 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+### Added
+
+- **broker** Providers can declare an authorization domain and have the broker
+  decide for them. `broker/authorization/declare` (namespace, capabilities,
+  resources with their native id and path, protected slots to confirm) is
+  accepted only from a provider with its own identity, and refused whole when
+  it would grant anything. Toward a declaring provider each request carries an
+  opaque caller reference in `params._meta["io.cyanmycelium/caller"]`, valid on
+  that slot while the request is pending; `broker/authorize` resolves it to
+  the subjects the broker derived itself and returns one audited decision per
+  check (`decisionId`, `effect`, `reason`, `policies`). The key is stripped from
+  every client frame on every slot; calls through `_all` carry the caller of
+  `_all`. New reasons: `undeclared-resource`, `undeclared-capability`,
+  `no-policy`.
+- **broker** Protected slots (`authorization.protectedSlots`): only the
+  declarer's client identity may call one, only the configured principal may
+  publish it, it never joins `_all`, and it is closed from startup.
+- **broker** A security file (`securityFile`, `MCP_BROKER_SECURITY_FILE`)
+  holding `auth`, a `providers` table and `authorization`, apart from the
+  topology. Fails closed, never holds a secret in clear (`secretEnv`), refuses
+  `auth` in both files. Its hash starts every `policyVersion`, shown by
+  `broker_info`.
+- **broker** `ProviderTableAuthenticator` and `WsTunnelBuilder.withProviderPrincipals()`:
+  one secret and identity per provider. `withProtectedSlots()`,
+  `withSecurityVersion()`, `withAuthorizeBatchLimit()`.
+- **broker** `registerLoopbackProvider(name, transport, { principal })` returns
+  a handle with `declare()` and `authorize()`.
+- **broker** `broker_diagnose` reports an unconfirmed protected slot and domain
+  capabilities no declaration covers.
+- **broker** `@cyanmycelium/mcp-broker/testing`: `startTestBroker()` starts a
+  real broker for tests in one call, with callers whose token is their name
+  (`TestTokenValidator`), provider identities with generated secrets, a policy
+  and protected slots. See `docs/testing.md`.
+- **provider** `secret` (sent as `X-Provider-Token`) and `headers` options on
+  `DirectTransport` and `MultiplexTransport`, for Node 22+. Until now a
+  provider using these transports could not authenticate at all.
+- **provider** `transport.broker.declare()` / `.authorize()` on
+  `DirectTransport` and `MultiplexTransport`, `callerReferenceOf()`,
+  `BrokerRequestError`, and `brokerRequestTimeoutMs` (off by default).
+
 ### Fixed
 
 - **broker** Config loading fails closed. A config file that is designated

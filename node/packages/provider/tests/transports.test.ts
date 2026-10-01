@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DirectTransport, MultiplexTransport } from "../src/index";
+import { CALLER_META_KEY, DirectTransport, MultiplexTransport, callerReferenceOf } from "../src/index";
 import { decodeEnvelope, encodeEnvelopeMessage, encodeErrorEnvelope, TUNNEL_REGISTER_METHOD, TunnelErrorCodes } from "../src/protocol/index";
 import { PENDING_FRAME_LIMIT } from "../src/transport.support";
 
@@ -562,5 +562,91 @@ describe("DirectTransport", () => {
         lastSocket().deliver('{"jsonrpc":"2.0","id":1,"result":{}}');
 
         expect(received).toEqual(['{"jsonrpc":"2.0","id":1,"result":{}}']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// transport.broker: the broker's own methods
+// ---------------------------------------------------------------------------
+
+describe("transport.broker", () => {
+    const declaration = { version: "1", domain: "scada", namespace: { resource: "/p" }, capabilities: ["scada.observe"] };
+
+    it("sends a declaration on a DirectTransport and resolves with the answer, which never reaches the server", async () => {
+        const transport = new DirectTransport(slotUrl());
+        const seen: string[] = [];
+        transport.onMessage = (frame) => seen.push(frame);
+        transport.connect();
+        lastSocket().accept();
+
+        const accepted = transport.broker.declare(declaration);
+        const request = JSON.parse(lastSocket().sent[lastSocket().sent.length - 1]) as { id: string; method: string; params: unknown };
+        expect(request.method).toBe("broker/authorization/declare");
+        expect(request.params).toEqual(declaration);
+
+        lastSocket().deliver(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { accepted: true, version: "1", policyVersion: "abc.1" } }));
+        await expect(accepted).resolves.toEqual({ accepted: true, version: "1", policyVersion: "abc.1" });
+        expect(seen).toEqual([]);
+
+        // Ordinary traffic still reaches the server.
+        lastSocket().deliver(JSON.stringify({ jsonrpc: "2.0", id: "brk-1", method: "tools/list" }));
+        expect(seen).toHaveLength(1);
+    });
+
+    it("rejects with the broker's errors when the declaration is refused", async () => {
+        const transport = new DirectTransport(slotUrl());
+        transport.connect();
+        lastSocket().accept();
+        const refused = transport.broker.declare(declaration);
+        const { id } = JSON.parse(lastSocket().sent[lastSocket().sent.length - 1]) as { id: string };
+        lastSocket().deliver(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32602, message: "Declaration refused", data: { errors: ["namespace"] } } }));
+        await expect(refused).rejects.toMatchObject({ name: "BrokerRequestError", code: -32602, data: { errors: ["namespace"] } });
+    });
+
+    it("routes answers per slot on a MultiplexTransport, inside the envelope", async () => {
+        const url = tunnelUrl();
+        const a = MultiplexTransport.create("a", url);
+        const b = MultiplexTransport.create("b", url);
+        const seenB: string[] = [];
+        b.onMessage = (frame) => seenB.push(frame);
+        a.connect();
+        b.connect();
+        lastSocket().accept();
+
+        const answer = a.broker.authorize({ principal: { type: "provider" }, checks: [{ capability: "scada.observe", resource: "uns://x", resourcePath: "/p/x" }] });
+        const envelope = lastSocket().envelopes[lastSocket().envelopes.length - 1]!;
+        expect(envelope.provider).toBe("a");
+        const id = (envelope.payload as { id: string }).id;
+        lastSocket().deliver(encodeEnvelopeMessage("a", { jsonrpc: "2.0", id, result: { policyVersion: "v", decisions: [] } }));
+        await expect(answer).resolves.toEqual({ policyVersion: "v", decisions: [] });
+        expect(seenB).toEqual([]);
+    });
+
+    it("fails waiting requests when the socket closes, and never times out unless asked", async () => {
+        vi.useFakeTimers();
+        const transport = new DirectTransport(slotUrl());
+        transport.connect();
+        lastSocket().accept();
+        const pending = transport.broker.declare(declaration);
+        vi.advanceTimersByTime(600_000);
+        expect(transport.broker.pendingCount).toBe(1);
+        lastSocket().closedByPeer(1006);
+        await expect(pending).rejects.toThrow(/closed before the broker answered/);
+    });
+
+    it("times out when a timeout was configured, for brokers that drop what they do not know", async () => {
+        vi.useFakeTimers();
+        const transport = new DirectTransport(slotUrl(), { brokerRequestTimeoutMs: 500 });
+        transport.connect();
+        lastSocket().accept();
+        const pending = transport.broker.declare(declaration);
+        vi.advanceTimersByTime(501);
+        await expect(pending).rejects.toThrow(/did not answer broker\/authorization\/declare within 500ms/);
+    });
+
+    it("reads the caller reference out of a request's _meta", () => {
+        expect(callerReferenceOf({ [CALLER_META_KEY]: { ref: "cr_x", correlationId: "c" } })).toEqual({ ref: "cr_x", correlationId: "c" });
+        expect(callerReferenceOf({})).toBeUndefined();
+        expect(callerReferenceOf(undefined)).toBeUndefined();
     });
 });

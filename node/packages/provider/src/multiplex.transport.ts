@@ -1,6 +1,7 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import { decodeEnvelope, encodeEnvelope, encodeRegisterEnvelope, envelopeFrame, tunnelErrorOf } from "./protocol/index";
-import { describeFrame, PendingFrames, ThrottledNotice, truncate, warnIfSlotScopedPath } from "./transport.support";
+import { describeFrame, handshakeHeaders, openWebSocket, PendingFrames, ThrottledNotice, truncate, warnIfSlotScopedPath } from "./transport.support";
+import { BrokerClient } from "./broker.client";
 
 /** The diagnostics one socket may repeat, counted per socket so each is said once in full. */
 interface ISocketNotices {
@@ -31,6 +32,9 @@ class MultiplexSocket {
     private static readonly _instances = new Map<string, MultiplexSocket>();
 
     private readonly _wsUrl: string;
+    /** Cache key: the URL, and the handshake headers, since two secrets are two identities and need two sockets. */
+    private readonly _key: string;
+    private readonly _headers: Record<string, string> | undefined;
     private readonly _transports = new Map<string, MultiplexTransport>();
 
     /** Aggregate opt-in per slot, absent when the caller did not express one. */
@@ -53,17 +57,20 @@ class MultiplexSocket {
     /** Throttles the "wrote to a closed tunnel" line, which repeats per frame. */
     private readonly _afterStopNotice = new ThrottledNotice();
 
-    private constructor(wsUrl: string) {
+    private constructor(wsUrl: string, key: string, headers: Record<string, string> | undefined) {
         this._wsUrl = wsUrl;
+        this._key = key;
+        this._headers = headers;
         this._pending = new PendingFrames(`MultiplexSocket ${wsUrl}`);
     }
 
-    /** Returns (or creates) the singleton socket for a given tunnel URL. */
-    static getOrCreate(wsUrl: string): MultiplexSocket {
-        let instance = MultiplexSocket._instances.get(wsUrl);
+    /** Returns (or creates) the singleton socket for a given tunnel URL and handshake headers. */
+    static getOrCreate(wsUrl: string, headers?: Record<string, string>): MultiplexSocket {
+        const key = headers ? `${wsUrl}\u0000${JSON.stringify(Object.entries(headers).sort())}` : wsUrl;
+        let instance = MultiplexSocket._instances.get(key);
         if (!instance) {
-            instance = new MultiplexSocket(wsUrl);
-            MultiplexSocket._instances.set(wsUrl, instance);
+            instance = new MultiplexSocket(wsUrl, key, headers);
+            MultiplexSocket._instances.set(key, instance);
         }
         return instance;
     }
@@ -114,7 +121,7 @@ class MultiplexSocket {
             // silently opens a second socket to the same URL, and the broker
             // refuses whichever of the two loses the race.
             this._dead = true;
-            MultiplexSocket._instances.delete(this._wsUrl);
+            MultiplexSocket._instances.delete(this._key);
         }
     }
 
@@ -130,9 +137,9 @@ class MultiplexSocket {
         this._dead = false;
         this._stopped = false;
 
-        const live = MultiplexSocket._instances.get(this._wsUrl);
+        const live = MultiplexSocket._instances.get(this._key);
         if (!live) {
-            MultiplexSocket._instances.set(this._wsUrl, this);
+            MultiplexSocket._instances.set(this._key, this);
             return;
         }
         if (live !== this) {
@@ -195,7 +202,7 @@ class MultiplexSocket {
             warnIfSlotScopedPath(this._wsUrl);
         }
 
-        const ws = new WebSocket(this._wsUrl);
+        const ws = openWebSocket(this._wsUrl, this._headers);
 
         // Counted per socket so a mismatch reports itself once in full rather
         // than once per frame for the life of the page.
@@ -249,6 +256,7 @@ class MultiplexSocket {
 
             this._ws = null;
             for (const transport of this._transports.values()) {
+                transport.broker.rejectAll(`MultiplexTransport: the shared socket to ${this._wsUrl} closed before the broker answered`);
                 transport.onClose?.();
             }
             if (!this._stopped) {
@@ -322,7 +330,7 @@ class MultiplexSocket {
             }
         }
 
-        transport.onMessage?.(envelopeFrame(envelope));
+        transport._receive(envelopeFrame(envelope));
     }
 
     private _scheduleReconnect(): void {
@@ -374,6 +382,28 @@ export interface IMultiplexTransportOptions {
      * appears in `_all`.
      */
     aggregate?: boolean;
+
+    /**
+     * Rejects a `broker.declare()` / `broker.authorize()` the broker did not
+     * answer within this many ms. Off by default: a broker from 1.4.1 on answers
+     * at once. Only for an older broker, which drops methods it does not know.
+     */
+    brokerRequestTimeoutMs?: number;
+
+    /**
+     * The provider secret, sent as the `X-Provider-Token` header of the
+     * WebSocket handshake. Required by a broker that authenticates providers
+     * (`providerSecret`, or the security file's `providers` table, where it is
+     * what gives this provider its own identity).
+     *
+     * **Node only.** Node's `WebSocket` (22 and later) accepts handshake
+     * headers; a browser's does not, and a browser provider cannot
+     * authenticate (terminate provider auth in a reverse proxy instead).
+     */
+    secret?: string;
+
+    /** Extra handshake headers, Node only, like {@link secret}. */
+    headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -398,10 +428,28 @@ export class MultiplexTransport implements IMessageTransport {
     onClose: (() => void) | null = null;
     onError: ((error: Error) => void) | null = null;
 
+    /**
+     * The broker's own methods for this slot: declaring an authorization
+     * domain, asking for decisions. Its answers are taken off the socket
+     * before {@link onMessage} sees anything.
+     */
+    readonly broker: BrokerClient;
+
     constructor(name: string, socket: MultiplexSocket, options?: IMultiplexTransportOptions) {
         this._name = name;
         this._socket = socket;
         this._aggregate = options?.aggregate;
+        this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
+    }
+
+    /**
+     * One frame from the broker for this slot: the broker's answer to one of
+     * {@link broker}'s requests, or MCP traffic for the server.
+     * @internal Called by the shared socket.
+     */
+    _receive(frame: string): void {
+        if (this.broker.handleIncoming(frame)) return;
+        this.onMessage?.(frame);
     }
 
     /**
@@ -415,7 +463,7 @@ export class MultiplexTransport implements IMessageTransport {
      *              {@link DirectTransport} and is warned about on connect.
      */
     static create(name: string, wsUrl: string, options?: IMultiplexTransportOptions): MultiplexTransport {
-        return new MultiplexTransport(name, MultiplexSocket.getOrCreate(wsUrl), options);
+        return new MultiplexTransport(name, MultiplexSocket.getOrCreate(wsUrl, handshakeHeaders(options)), options);
     }
 
     get isOpen(): boolean {

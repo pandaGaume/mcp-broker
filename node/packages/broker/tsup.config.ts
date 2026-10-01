@@ -6,6 +6,9 @@ export default defineConfig({
         // The CLI. Its shebang is the first line of the entry, which esbuild
         // preserves, so `npx @cyanmycelium/mcp-broker` keeps working.
         "bin": "src/bin.ts",
+        // `@cyanmycelium/mcp-broker/testing`: a broker for tests, with callers
+        // that need no authorization server. Never imported by the CLI.
+        "testing/index": "src/testing/index.ts",
     },
     // The broker uses exactly one thing from the provider package: the tunnel
     // envelope codec, a handful of pure functions over the wire format that

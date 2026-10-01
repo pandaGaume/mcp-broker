@@ -226,6 +226,97 @@ export class SharedSecretProviderAuthenticator implements IProviderAuthenticator
     }
 }
 
+/**
+ * One provider identity, as the broker operator configures it: the secret it
+ * presents, who it is, and what it may publish.
+ */
+export interface IProviderCredential {
+    /** Stable principal id, what `protectedSlots` and the audit name. */
+    readonly id: string;
+    /** The secret this provider presents (`X-Provider-Token` or `Authorization: Bearer`). */
+    readonly secret: string;
+    /**
+     * Subjects this provider holds when it acts as a client of the broker, in
+     * the form the policy engine uses (`service:mcp-scada`). A client whose
+     * token maps to one of them is the same party as this provider; that is
+     * what admits it to the slots this provider protects.
+     */
+    readonly subjects?: readonly string[];
+    /** Resource patterns this provider may publish into; absent means all. */
+    readonly allowedResources?: readonly string[];
+}
+
+/**
+ * Authenticates each provider by its own secret, and hands back the principal
+ * configured for it.
+ *
+ * The shared secret ({@link SharedSecretProviderAuthenticator}) gives every
+ * provider one and the same identity, so the broker can never tell two of them
+ * apart: which is fine for "keep strangers out", and useless as soon as one
+ * provider may do what another may not (declare authorization, protect a slot,
+ * be the only one allowed to publish into it). This one gives each its own.
+ *
+ * Every secret is compared, in constant time, whatever matched earlier, so the
+ * time taken does not reveal which entry a guess came close to. A legacy shared
+ * secret may sit alongside the table; it keeps yielding the `"shared-secret"`
+ * principal it always has.
+ */
+export class ProviderTableAuthenticator implements IProviderAuthenticator {
+    private readonly _entries: readonly IProviderCredential[];
+    private readonly _sharedSecret: string | null;
+
+    constructor(entries: readonly IProviderCredential[], sharedSecret?: string) {
+        const ids = new Set<string>();
+        const secrets = new Set<string>(sharedSecret ? [sharedSecret] : []);
+        for (const [index, entry] of entries.entries()) {
+            const label = `provider auth: providers[${index}]`;
+            if (typeof entry.id !== "string" || entry.id.length === 0) throw new Error(`${label}: "id" must be a non-empty string.`);
+            if (entry.id === "shared-secret") throw new Error(`${label}: the id "shared-secret" is reserved for the legacy shared secret.`);
+            if (ids.has(entry.id)) throw new Error(`${label}: the id "${entry.id}" is used twice; every provider needs its own.`);
+            ids.add(entry.id);
+            if (typeof entry.secret !== "string" || entry.secret.length === 0) throw new Error(`${label} ("${entry.id}"): its secret is empty.`);
+            if (secrets.has(entry.secret)) {
+                throw new Error(
+                    `${label} ("${entry.id}"): its secret is also used by another provider, so the broker could not tell them apart. Give every provider its own secret.`
+                );
+            }
+            secrets.add(entry.secret);
+            for (const subject of entry.subjects ?? []) {
+                if (typeof subject !== "string" || !/^[^:\s]+:\S+$/.test(subject)) {
+                    throw new Error(`${label} ("${entry.id}"): subject ${JSON.stringify(subject)} must have the form "<kind>:<value>", for example "service:mcp-scada".`);
+                }
+            }
+            if (entry.allowedResources) compileProviderAllowedResources(entry.allowedResources, `${label} ("${entry.id}") allowedResources`);
+        }
+        this._entries = entries.map((entry) => Object.freeze({ ...entry }));
+        this._sharedSecret = sharedSecret ?? null;
+    }
+
+    authenticate(req: IncomingMessage): ProviderAuthenticationResult {
+        const presented = presentedSecret(req);
+        if (!presented) return { authenticated: false };
+
+        let match: IProviderCredential | null = null;
+        for (const entry of this._entries) {
+            if (safeEqual(presented, entry.secret) && match === null) match = entry;
+        }
+        const shared = this._sharedSecret !== null && safeEqual(presented, this._sharedSecret);
+
+        if (match) {
+            return {
+                authenticated: true,
+                principal: {
+                    id: match.id,
+                    ...(match.subjects ? { subjects: [...match.subjects] } : {}),
+                    ...(match.allowedResources ? { allowedResources: [...match.allowedResources] } : {}),
+                },
+            };
+        }
+        if (shared) return { authenticated: true, principal: { id: "shared-secret", allowedResources: ["**"] } };
+        return { authenticated: false };
+    }
+}
+
 /** @deprecated Use {@link IProviderPrincipal}. */
 export type ProviderPrincipal = IProviderPrincipal;
 /** @deprecated Use {@link IProviderAuthenticator}. */

@@ -26,6 +26,7 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | Your app already owns an HTTP port, or hosts MCP servers in-process | **Embed the library**: `new WsTunnelBuilder()...build()`, then `await tunnel.start()` |
 | You are wiring Claude Desktop or another stdio MCP host | Run the process with `MCP_BROKER_STDIO_PROVIDER=_all` (see §4) |
 | You are writing an MCP **client** | Install nothing of ours. Point a standard MCP client at `http://<host>/<slot>/mcp` |
+| You are writing **tests** that need a broker, callers with identities, or provider identities | `startTestBroker()` from `@cyanmycelium/mcp-broker/testing`: a real broker, tokens are caller names, no authorization server ([guide](node/packages/broker/docs/testing.md)) |
 
 ## 2. Topology table
 
@@ -194,6 +195,19 @@ this._forwardResourceContentChanged("plant://gauge");
 - **Policy:** `resources/subscribe` needs `mcp.resources.read` (`broker.providers.read` on `_broker`), and each update is re-checked per recipient; a recipient that lost the grant is unsubscribed. `resources/unsubscribe` is never refused.
 - **Limits** (`resourceSubscriptions` in `config.json`, `withResourceSubscriptionLimits()`, or `MCP_BROKER_MAX_SUBSCRIPTIONS_PER_CLIENT` / `_PER_SLOT` / `MCP_BROKER_MAX_RESOURCE_URI_LENGTH`): 64 URIs per client, 1024 client subscriptions per slot, 2048-character URIs. Past a limit: `-32000`; an overlong URI: `-32602`.
 
+### Declared authorization (1.5.0)
+
+A provider that serves its own kind of resource (SCADA first) can make the broker its decision point instead of carrying a policy.
+
+- **Identity first.** The provider needs its own entry in the security file's `providers` table (`{ id, secretEnv, subjects?, allowedResources? }`), or a `principal` passed to `registerLoopbackProvider(name, transport, { principal })`. The shared secret identifies nobody and is refused.
+- **Declare**: `await transport.broker.declare({ version, domain, namespace: { resource }, capabilities, resources?, protects? })`. Describes, grants nothing: `assignments` / `roles` / `denies`, a capability outside `<domain>.*`, a path outside the namespace or outside `allowedResources` refuse it whole, `error.data.errors` lists every problem.
+- **Caller reference**: after that, each request the provider receives carries `params._meta["io.cyanmycelium/caller"] = { ref, correlationId }`, valid on that slot while that request is pending. The broker strips the key from every client frame, on every slot, `_all` included; calls through `_all` carry the caller of `_all`. With mcp-core 1.4.0 an adapter reads it from `request?.meta` (`callerReferenceOf()` in the provider package).
+- **Ask**: `await transport.broker.authorize({ principal: { type: "caller-ref", ref }, checks: [{ capability, resource, resourcePath, attributes? }] })`, or `principal: { type: "provider" }` for the provider's own work. One audited decision per check: `{ decisionId, effect, reason, policies? }`. Only `resourcePath` is evaluated; `resource` is the native id, for the audit.
+- **Protected slots** live in the security file (`authorization.protectedSlots`), closed from startup: only the declarer's `subjects` may call one, only `publishedBy` may publish it, never in `_all`. A declaration confirms them in `protects`; it cannot create one.
+- **Provider secret from Node**: `new DirectTransport(url, { secret })` (or `MultiplexTransport.create(name, url, { secret })`) sends `X-Provider-Token`. Node 22+ only; a browser cannot.
+- **In tests**: `startTestBroker({ callers, providers, policy, protectedSlots })` from `@cyanmycelium/mcp-broker/testing` does all of the above with no authorization server; see [docs/testing.md](node/packages/broker/docs/testing.md).
+- **Security file**: `securityFile` in `config.json` or `MCP_BROKER_SECURITY_FILE`. Holds `auth`, `providers`, `authorization`. Fails closed; no secret in clear; `auth` in both files refuses the start. Its hash starts every `policyVersion` (`broker_info`).
+
 ## 6. Symptom to fix
 
 | symptom | cause | fix |
@@ -216,6 +230,10 @@ this._forwardResourceContentChanged("plant://gauge");
 | Subscribed, `notifications/resources/updated` never arrives | the update names another URI (matching is exact), has no `params.uri` (dropped, logged once), or the read grant was revoked (unsubscribed) | compare URIs byte for byte; read the broker log |
 | `resources/subscribe` answers `-32601` on a provider slot | the provider does not implement it (mcp-core before 1.3.0 did not) | upgrade the provider to mcp-core 1.3.0 or implement the method |
 | `-32000 Subscription limit reached` | `maxSubscriptionsPerClient` / `maxSubscriptionsPerSlot` | unsubscribe what you no longer watch, or raise `resourceSubscriptions` |
+| `broker/authorization/declare` refused: `anonymous` or `shared secret` | declaring needs a provider identity of its own | add the provider to the security file's `providers` table |
+| `broker/authorize`: `-32602 principal.ref is unknown, expired` | the reference's request was already answered, or it is used on another slot | ask before answering, on the socket the request came on |
+| Every decision is `no-matching-grant` | the caller is anonymous (client OAuth off) or nothing grants the capability | enable client auth; grant the capability in `auth.assignments` |
+| Client refused on a protected slot (1008 / HTTP 403) | only the declarer's own client identity may call it | the protection working; go through the declaring provider |
 | `resourceSubscriptionCount` in `provider_status` only grows | HTTP clients leave without `DELETE` | send the DELETE on shutdown |
 
 ## 7. Anti-goals, stated plainly

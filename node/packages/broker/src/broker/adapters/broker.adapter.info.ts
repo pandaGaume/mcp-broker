@@ -41,6 +41,9 @@ export class BrokerInfoAdapter extends McpAdapterBase {
             port: c.port,
             tls: c.tls,
             paths: c.paths,
+            // The security configuration in force plus the declarations accepted
+            // since; every broker/authorize decision carries the same string.
+            ...(c.getAuthorityInfo ? { policyVersion: c.getAuthorityInfo()?.policyVersion } : {}),
         };
     }
 }
