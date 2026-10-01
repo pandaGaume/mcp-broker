@@ -26,6 +26,7 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | Your app already owns an HTTP port, or hosts MCP servers in-process | **Embed the library**: `new WsTunnelBuilder()...build()`, then `await tunnel.start()` |
 | You are wiring Claude Desktop or another stdio MCP host | Run the process with `MCP_BROKER_STDIO_PROVIDER=_all` (see §4) |
 | You are writing an MCP **client** | Install nothing of ours. Point a standard MCP client at `http://<host>/<slot>/mcp` |
+| You are writing **tests** that need a broker, callers with identities, or provider identities | `startTestBroker()` from `@cyanmycelium/mcp-broker/testing`: a real broker, tokens are caller names, no authorization server ([guide](node/packages/broker/docs/testing.md)) |
 
 ## 2. Topology table
 
@@ -203,6 +204,8 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 - **Caller reference**: after that, each request the provider receives carries `params._meta["io.cyanmycelium/caller"] = { ref, correlationId }`, valid on that slot while that request is pending. The broker strips the key from every client frame, on every slot, `_all` included; calls through `_all` carry the caller of `_all`. With mcp-core 1.4.0 an adapter reads it from `request?.meta` (`callerReferenceOf()` in the provider package).
 - **Ask**: `await transport.broker.authorize({ principal: { type: "caller-ref", ref }, checks: [{ capability, resource, resourcePath, attributes? }] })`, or `principal: { type: "provider" }` for the provider's own work. One audited decision per check: `{ decisionId, effect, reason, policies? }`. Only `resourcePath` is evaluated; `resource` is the native id, for the audit.
 - **Protected slots** live in the security file (`authorization.protectedSlots`), closed from startup: only the declarer's `subjects` may call one, only `publishedBy` may publish it, never in `_all`. A declaration confirms them in `protects`; it cannot create one.
+- **Provider secret from Node**: `new DirectTransport(url, { secret })` (or `MultiplexTransport.create(name, url, { secret })`) sends `X-Provider-Token`. Node 22+ only; a browser cannot.
+- **In tests**: `startTestBroker({ callers, providers, policy, protectedSlots })` from `@cyanmycelium/mcp-broker/testing` does all of the above with no authorization server; see [docs/testing.md](node/packages/broker/docs/testing.md).
 - **Security file**: `securityFile` in `config.json` or `MCP_BROKER_SECURITY_FILE`. Holds `auth`, `providers`, `authorization`. Fails closed; no secret in clear; `auth` in both files refuses the start. Its hash starts every `policyVersion` (`broker_info`).
 
 ## 6. Symptom to fix

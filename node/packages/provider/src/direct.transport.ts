@@ -1,7 +1,7 @@
 import type { IMessageTransport } from "@cyanmycelium/mcp-core";
 import { encodeRegisterFrame } from "./protocol/index";
 import { BrokerClient } from "./broker.client";
-import { describeFrame, PendingFrames, ThrottledNotice, warnIfMultiplexPath } from "./transport.support";
+import { describeFrame, handshakeHeaders, openWebSocket, PendingFrames, ThrottledNotice, warnIfMultiplexPath } from "./transport.support";
 
 /** Options accepted by {@link DirectTransport}. */
 export interface IDirectTransportOptions {
@@ -31,6 +31,21 @@ export interface IDirectTransportOptions {
      * at once. Only for an older broker, which drops methods it does not know.
      */
     brokerRequestTimeoutMs?: number;
+
+    /**
+     * The provider secret, sent as the `X-Provider-Token` header of the
+     * WebSocket handshake. Required by a broker that authenticates providers
+     * (`providerSecret`, or the security file's `providers` table, where it is
+     * what gives this provider its own identity).
+     *
+     * **Node only.** Node's `WebSocket` (22 and later) accepts handshake
+     * headers; a browser's does not, and a browser provider cannot
+     * authenticate (terminate provider auth in a reverse proxy instead).
+     */
+    secret?: string;
+
+    /** Extra handshake headers, Node only, like {@link secret}. */
+    headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -50,6 +65,7 @@ export interface IDirectTransportOptions {
 export class DirectTransport implements IMessageTransport {
     private readonly _wsUrl: string;
     private readonly _aggregate: boolean | undefined;
+    private readonly _headers: Record<string, string> | undefined;
     private readonly _pending: PendingFrames;
 
     /** Throttles the "wrote to a closed transport" line, which repeats per frame. */
@@ -73,6 +89,7 @@ export class DirectTransport implements IMessageTransport {
     constructor(wsUrl: string, options?: IDirectTransportOptions) {
         this._wsUrl = wsUrl;
         this._aggregate = options?.aggregate;
+        this._headers = handshakeHeaders(options);
         this._pending = new PendingFrames(`DirectTransport ${wsUrl}`);
         this.broker = new BrokerClient((frame) => this.send(frame), { requestTimeoutMs: options?.brokerRequestTimeoutMs });
     }
@@ -91,7 +108,7 @@ export class DirectTransport implements IMessageTransport {
         // and then drops every frame this transport writes.
         warnIfMultiplexPath(this._wsUrl);
 
-        const ws = new WebSocket(this._wsUrl);
+        const ws = openWebSocket(this._wsUrl, this._headers);
 
         this._closed = false;
 

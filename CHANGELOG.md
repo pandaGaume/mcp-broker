@@ -49,6 +49,13 @@ repository; the changes it needed for this release are listed under
   a handle with `declare()` and `authorize()`.
 - **broker** `broker_diagnose` reports an unconfirmed protected slot and domain
   capabilities no declaration covers.
+- **broker** `@cyanmycelium/mcp-broker/testing`: `startTestBroker()` starts a
+  real broker for tests in one call, with callers whose token is their name
+  (`TestTokenValidator`), provider identities with generated secrets, a policy
+  and protected slots. See `docs/testing.md`.
+- **provider** `secret` (sent as `X-Provider-Token`) and `headers` options on
+  `DirectTransport` and `MultiplexTransport`, for Node 22+. Until now a
+  provider using these transports could not authenticate at all.
 - **provider** `transport.broker.declare()` / `.authorize()` on
   `DirectTransport` and `MultiplexTransport`, `callerReferenceOf()`,
   `BrokerRequestError`, and `brokerRequestTimeoutMs` (off by default).

@@ -263,3 +263,30 @@ export function warnIfSlotScopedPath(wsUrl: string): void {
             RECONFIGURED_HINT
     );
 }
+
+/**
+ * The handshake headers a transport sends: `headers`, plus `X-Provider-Token`
+ * from `secret`. `undefined` when there are none, so the socket is built with
+ * the one-argument constructor every runtime has.
+ */
+export function handshakeHeaders(options: { readonly secret?: string; readonly headers?: Readonly<Record<string, string>> } | undefined): Record<string, string> | undefined {
+    const headers: Record<string, string> = { ...(options?.headers ?? {}) };
+    if (options?.secret) headers["x-provider-token"] = options.secret;
+    return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/**
+ * Opens a WebSocket, with handshake headers when there are any. Headers need
+ * Node's `WebSocket` (22+); a browser cannot send them, and is told so.
+ */
+export function openWebSocket(url: string, headers: Record<string, string> | undefined): WebSocket {
+    if (!headers) return new WebSocket(url);
+    try {
+        return new (WebSocket as unknown as new (url: string, init: { headers: Record<string, string> }) => WebSocket)(url, { headers });
+    } catch (error) {
+        throw new Error(
+            `Cannot open ${url} with handshake headers (secret / headers): this runtime's WebSocket does not accept them. ` +
+                `Node 22 and later do; a browser never does, so a browser provider cannot authenticate to the broker. ${(error as Error).message}`
+        );
+    }
+}

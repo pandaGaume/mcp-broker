@@ -122,8 +122,12 @@ const { decisions } = await transport.broker.authorize({
 ```
 
 - The provider needs its own identity on the broker (an entry in the security
-  file's `providers` table), which means presenting a secret, which a browser
-  cannot do: this is for Node and native providers.
+  file's `providers` table), which means presenting a secret:
+  `new DirectTransport(url, { secret })`, sent as `X-Provider-Token`. Node 22
+  and later can; a browser cannot, so this is for Node and native providers.
+- To test all of this without an authorization server, start the broker with
+  `startTestBroker()` from `@cyanmycelium/mcp-broker/testing`
+  ([guide](../broker/docs/testing.md)).
 - The broker's answers are taken off the socket before the MCP server sees
   them. A refused request rejects with `BrokerRequestError` (`code`, `data`).
 - There is no timeout by default: a broker from 1.4.1 on answers at once. Set

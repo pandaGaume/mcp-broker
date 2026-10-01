@@ -79,6 +79,10 @@ the observable signatures are worth knowing:
 
 `broker_diagnose` reports the first as `transport-path-mismatch`.
 
+> **Testing?** `startTestBroker()` from `@cyanmycelium/mcp-broker/testing` runs a
+> real broker in one call, with callers that need no authorization server. See
+> [docs/testing.md](docs/testing.md).
+
 ## Configuration
 
 Two sources, env vars **always win** over the file. The file is the static baseline you ship with the broker; env vars are deploy-specific overrides.
