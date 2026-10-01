@@ -29,7 +29,8 @@ set(MCPB_SRCS
     src/mcpb_common.c
     src/mcpb_sha1.c
     src/mcpb_ws.c
-    src/mcpb_provider.c)
+    src/mcpb_provider.c
+    src/mcpb_telemetry.c)
 if(MCPB_MUX)
     list(APPEND MCPB_SRCS src/mcpb_envelope.c src/mcpb_mux.c)
 endif()
@@ -46,7 +47,7 @@ target_compile_options(mcpb PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:${MCPB_WARNINGS}>)
 
 # ---------------------------------------------------------------------------
-# Bench: 83 checks, no network. Off when embedded in another project.
+# Bench: no network. Off when embedded in another project.
 # ---------------------------------------------------------------------------
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR MCPB_BUILD_TESTS)
     enable_testing()

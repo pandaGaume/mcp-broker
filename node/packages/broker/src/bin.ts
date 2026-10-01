@@ -57,6 +57,8 @@
  * | MCP_BROKER_PROVIDER_HEARTBEAT_MS      | 30000 | Provider ws ping interval; 0 disables liveness.  |
  * | MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS| 60000 | Deadline for one provider answer; 0 disables.    |
  * | MCP_BROKER_PROVIDER_TAKEOVER   | liveness | "reject" | "liveness" | "always" on slot contention |
+ * | OTEL_EXPORTER_OTLP_TRACES_ENDPOINT | (none) | Full OTLP/HTTP traces endpoint.               |
+ * | OTEL_EXPORTER_OTLP_HEADERS     | (none)   | Comma-separated percent-encoded key=value.     |
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -120,6 +122,9 @@ function printHelp(): void {
             `  MCP_BROKER_PROVIDER_HEARTBEAT_MS       Ping interval per provider socket (default 30000, 0 off)\n` +
             `  MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS Deadline for one provider answer (default 60000, 0 off)\n` +
             `  MCP_BROKER_PROVIDER_TAKEOVER           reject | liveness | always (default liveness)\n\n` +
+            `PROVIDER TELEMETRY (OpenTelemetry, opt-in)\n` +
+            `  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT     Full OTLP/HTTP endpoint, enables trace export\n` +
+            `  OTEL_EXPORTER_OTLP_HEADERS             Comma-separated percent-encoded key=value headers\n\n` +
             `AUTHORIZATION (OAuth 2.1, opt-in)\n` +
             `  MCP_BROKER_AUTH_ENABLED     "1" to require bearer tokens on client endpoints\n` +
             `  MCP_BROKER_PUBLIC_BASE_URL  Public origin, e.g. https://mcp.example.com\n` +
@@ -238,6 +243,32 @@ const clientPath = process.env["MCP_BROKER_CLIENT_PATH"] ?? "/";
 const mcpPath = process.env["MCP_BROKER_MCP_PATH"] ?? "/mcp";
 const ssePath = process.env["MCP_BROKER_SSE_PATH"] ?? "/sse";
 const messagesPath = process.env["MCP_BROKER_MESSAGES_PATH"] ?? "/messages";
+
+// Provider telemetry uses the standard OpenTelemetry deployment variables so
+// the same collector configuration works in Docker, Kubernetes and Windows.
+const otlpTracesEndpoint = process.env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] ?? config.telemetry?.otlpHttpEndpoint;
+
+function otlpHeadersFromEnv(raw: string | undefined): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (!raw) return headers;
+    for (const field of raw.split(",")) {
+        const separator = field.indexOf("=");
+        if (separator <= 0) {
+            console.warn(`[mcp-broker] Ignoring malformed OTEL_EXPORTER_OTLP_HEADERS field: ${JSON.stringify(field)}.`);
+            continue;
+        }
+        try {
+            const key = decodeURIComponent(field.slice(0, separator).trim());
+            const value = decodeURIComponent(field.slice(separator + 1).trim());
+            if (key) headers[key] = value;
+        } catch {
+            console.warn(`[mcp-broker] Ignoring malformed percent encoding in OTEL_EXPORTER_OTLP_HEADERS field: ${JSON.stringify(field)}.`);
+        }
+    }
+    return headers;
+}
+
+const otlpHeaders = { ...(config.telemetry?.headers ?? {}), ...otlpHeadersFromEnv(process.env["OTEL_EXPORTER_OTLP_HEADERS"]) };
 
 // ── TLS material ─────────────────────────────────────────────────────────────
 // Env var (relative to cwd) wins over config (relative to baseDir).
@@ -419,6 +450,24 @@ async function main(): Promise<void> {
     }
     if (providerTakeover) {
         builder.withProviderTakeover(providerTakeover);
+    }
+    if (otlpTracesEndpoint) {
+        builder.withOtlpHttpTelemetry(
+            {
+                endpoint: otlpTracesEndpoint,
+                headers: otlpHeaders,
+                timeoutMs: config.telemetry?.timeoutMs,
+                serviceNamespace: config.telemetry?.serviceNamespace,
+            },
+            {
+                maxFrameBytes: config.telemetry?.maxFrameBytes,
+                queueCapacity: config.telemetry?.queueCapacity,
+                batchSize: config.telemetry?.batchSize,
+                maxAttributes: config.telemetry?.maxAttributes,
+                maxEvents: config.telemetry?.maxEvents,
+                onExportError: (error) => console.error(`[mcp-broker] telemetry export failed: ${(error as Error).message}`),
+            }
+        );
     }
 
     if (useTls) {
@@ -634,6 +683,7 @@ async function main(): Promise<void> {
     if (!allowedOrigins) {
         console.log(`                          a page this broker serves is refused too, list its origin to admit it`);
     }
+    console.log(`📈  Provider telemetry    ${otlpTracesEndpoint ? `OTLP/HTTP to ${otlpTracesEndpoint}` : "disabled"}`);
     console.log(hr);
     console.log(`   New here? Call broker_guide on the ${BROKER_PROVIDER_NAME} slot: ${localhost}/${BROKER_PROVIDER_NAME}/${mcpSuffix}`);
     console.log(`   Press Ctrl+C to stop.`);

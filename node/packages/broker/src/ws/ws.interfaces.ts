@@ -9,6 +9,7 @@ import type { IProtectedSlot } from "../authority/declaration";
 import type { BrokerMethodOutcome } from "../authority/broker.authority";
 import type { IPolicyAuthorization, ISlotResourceResolver } from "../authorization/index";
 import type { IResourceSubscriptionLimits } from "../subscriptions/resource.subscription.registry";
+import type { IProviderTelemetryOptions } from "../telemetry/index";
 
 /**
  * Every type the WebSocket tunnel exchanges or is configured with.
@@ -395,6 +396,15 @@ export interface IWsTunnelOptions {
      * subscriptions.
      */
     resourceSubscriptions?: Partial<IResourceSubscriptionLimits>;
+
+    /**
+     * Optional provider telemetry pipeline. Telemetry notifications are
+     * consumed by the broker, validated, queued with fixed bounds and sent to
+     * this exporter. They are never relayed to MCP clients.
+     *
+     * @default undefined, provider telemetry is dropped
+     */
+    telemetry?: IProviderTelemetryOptions;
 
     /**
      * Optional static-file mounts served over plain HTTP.

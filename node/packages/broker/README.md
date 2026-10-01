@@ -163,6 +163,8 @@ This table is complete: it lists every `MCP_BROKER_*` variable the CLI reads.
 | `MCP_BROKER_PROVIDER_HEARTBEAT_MS` | `30000` | ws-level ping interval on provider sockets. `0` disables |
 | `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS` | `60000` | How long a provider has to answer one request before it is failed. `0` disables |
 | `MCP_BROKER_PROVIDER_TAKEOVER` | `liveness` | `reject`, `liveness` or `always` when a second provider claims an occupied slot |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | (unset) | Standard OpenTelemetry full traces endpoint. Enables provider telemetry export |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (unset) | Standard comma-separated, percent-encoded OTLP headers |
 | `MCP_BROKER_WWW_DIR` | (unset) | If set, serve this directory at `/` |
 | `MCP_BROKER_BUNDLE_DIR` | (unset) | If set, serve this directory at `/bundle` |
 | `MCP_BROKER_OPEN` | (unset) | `1` opens the broker root on startup; a `/path` or a same-origin absolute URL opens that page. Opens only when a static mount actually covers the resolved path |
@@ -364,6 +366,105 @@ class GaugeAdapter extends McpAdapterBase {
     }
 }
 ```
+
+## Provider telemetry and OTLP
+
+The complete protocol and deployment contract is in
+[docs/telemetry.md](https://github.com/pandaGaume/mcp-broker/blob/main/docs/telemetry.md).
+
+The optional telemetry extension accepts `notifications/telemetry` from any
+provider slot. The broker consumes these notifications itself. It never sends
+them to MCP clients, and it never waits for the exporter while routing requests
+or responses.
+
+The pipeline has explicit bounds. By default it accepts frames up to 64 KiB,
+queues at most 256 spans, exports batches of up to 32, and drops new telemetry
+when the queue is full. `getTelemetryStats()` reports every accepted, exported,
+and dropped span. A trace failure therefore cannot block MCP control traffic.
+
+For the CLI, set the standard OpenTelemetry environment variable:
+
+```sh
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces mcp-broker
+```
+
+`OTEL_EXPORTER_OTLP_HEADERS` carries optional comma-separated, percent-encoded
+headers. The same settings can be kept in `config.json` under `telemetry`:
+
+```json
+{
+    "telemetry": {
+        "otlpHttpEndpoint": "http://otel-collector:4318/v1/traces",
+        "timeoutMs": 5000,
+        "queueCapacity": 256,
+        "batchSize": 32
+    }
+}
+```
+
+Configure the built-in dependency-free OTLP/HTTP JSON exporter:
+
+```ts
+import { WsTunnelBuilder } from "@cyanmycelium/mcp-broker";
+
+const broker = new WsTunnelBuilder()
+    .withPort(3000)
+    .withOtlpHttpTelemetry(
+        {
+            endpoint: "http://otel-collector:4318/v1/traces",
+            headers: { Authorization: `Bearer ${process.env.OTLP_TOKEN}` },
+        },
+        {
+            queueCapacity: 512,
+            batchSize: 32,
+            onExportError: (error) => console.error("telemetry export failed", error),
+        }
+    )
+    .build();
+```
+
+Or pass any sink with `withTelemetry({ exporter })`. This is useful for a file,
+Kafka, an existing OpenTelemetry SDK, or a deterministic test collector.
+
+Provider wire format:
+
+```json
+{
+    "jsonrpc": "2.0",
+    "method": "notifications/telemetry",
+    "params": {
+        "version": 1,
+        "signal": "traces",
+        "span": {
+            "traceId": "0123456789abcdef0123456789abcdef",
+            "spanId": "0123456789abcdef",
+            "parentSpanId": "fedcba9876543210",
+            "name": "modbus.read",
+            "kind": 3,
+            "startTimeUnixNano": "1720000000000000000",
+            "endTimeUnixNano": "1720000000001000000",
+            "attributes": {
+                "modbus.function_code": 3,
+                "network.transport": "tcp"
+            },
+            "events": [
+                {
+                    "name": "pdu.rx",
+                    "timeUnixNano": "1720000000000900000",
+                    "attributes": { "bytes": 9 }
+                }
+            ],
+            "status": { "code": 1 }
+        }
+    }
+}
+```
+
+Trace IDs and parent relationships follow W3C Trace Context representation.
+The exporter produces an OTLP `ExportTraceServiceRequest` and enriches each
+resource with `service.name` and `mcp.provider.slot`. Raw protocol payloads are
+not required by the schema. A provider should emit them only when its own
+runtime trace policy explicitly enables that level of detail.
 
 ## Authorization (OAuth 2.1)
 
