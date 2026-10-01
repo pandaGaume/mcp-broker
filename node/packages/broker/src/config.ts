@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { IAuthorizationPolicyConfig } from "./authorization/index";
+import type { IProviderCredential } from "./auth/provider.auth";
+import type { IProtectedSlot } from "./authority/declaration";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
     /** Master switch. Absent/`false` keeps the broker unauthenticated. */
@@ -162,8 +165,19 @@ export interface IBrokerConfig {
      *
      * Scalars also map to env vars (which win): `MCP_BROKER_AUTH_ENABLED`,
      * `MCP_BROKER_PUBLIC_BASE_URL`, `MCP_BROKER_JWKS`, `MCP_BROKER_ISSUER`.
+     *
+     * Deprecated here: put it in the security file ({@link securityFile}).
+     * The broker refuses to start when both carry one.
      */
     auth?: IBrokerAuthConfig;
+
+    /**
+     * Path to the security file, resolved against this file's directory. It
+     * holds `auth`, the `providers` table and `authorization.protectedSlots`,
+     * so topology and security are written, read and protected separately.
+     * Maps to `MCP_BROKER_SECURITY_FILE` (resolved against the cwd), which wins.
+     */
+    securityFile?: string;
 
     /**
      * URL paths (override the defaults). Every key is also settable through an
@@ -292,6 +306,154 @@ export const DEFAULT_CONFIG_FILENAME = "config.json";
 
 /** Legacy flat config filename at the cwd root (pre-`.mcp-broker/` layout). */
 export const LEGACY_CONFIG_FILENAME = "mcp-broker.config.json";
+
+/** One entry of the security file's `providers` table: the secret is named, never written. */
+export interface ISecurityProviderEntry {
+    /** Provider principal id. */
+    id: string;
+    /** Name of the environment variable holding this provider's secret. */
+    secretEnv: string;
+    /** Subjects this provider holds when it calls the broker as a client. */
+    subjects?: string[];
+    /** Resource patterns this provider may publish into; absent means all. */
+    allowedResources?: string[];
+}
+
+/**
+ * Shape of the security file: everything that decides who may do what, kept
+ * apart from the topology in `config.json`.
+ */
+export interface ISecurityConfig {
+    /** The same block as `config.json`'s `auth`, minus `providerSecret` (use `MCP_BROKER_PROVIDER_SECRET`). */
+    auth?: IBrokerAuthConfig;
+    /** One identity per provider. */
+    providers?: ISecurityProviderEntry[];
+    authorization?: {
+        /** Slots only one provider may call and one may publish, keyed by slot name. */
+        protectedSlots?: Record<string, IProtectedSlot>;
+    };
+}
+
+/** A loaded security file, with the secrets it names resolved from the environment. */
+export interface ILoadedSecurityConfig {
+    readonly security: ISecurityConfig;
+    /** Absolute path of the file. */
+    readonly sourcePath: string;
+    /** First 12 hex digits of the file's SHA-256: what `policyVersion` starts with. */
+    readonly version: string;
+    /** The `providers` table, secrets resolved. */
+    readonly credentials: readonly IProviderCredential[];
+}
+
+const SECURITY_KEYS = new Set(["$schema", "description", "auth", "providers", "authorization"]);
+
+/**
+ * Loads the security file named by `MCP_BROKER_SECURITY_FILE` or by
+ * `config.securityFile`, or returns `null` when neither names one.
+ *
+ * Fails closed, like {@link loadBrokerConfig}: a designated file that is
+ * missing, unreadable, not a JSON object, or inconsistent throws a
+ * {@link BrokerConfigError}, and so does a provider whose secret variable is
+ * unset. So does a `config.json` that still carries `auth` next to a security
+ * file: picking one of the two silently would leave the operator guessing
+ * which rules are in force.
+ */
+export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.ProcessEnv = process.env): ILoadedSecurityConfig | null {
+    // Keys that only the security file may carry, refused in config.json
+    // whether or not a security file exists: left there, they would be
+    // ignored, and a protection the operator wrote would silently not exist.
+    const misplaced = ["providers", "authorization"].filter((key) => Object.prototype.hasOwnProperty.call(loaded.config, key));
+    if (misplaced.length > 0 && loaded.sourcePath) {
+        throw new BrokerConfigError(
+            loaded.sourcePath,
+            `${misplaced.map((k) => `"${k}"`).join(" and ")} belong in the security file (securityFile / MCP_BROKER_SECURITY_FILE), not in the config file`
+        );
+    }
+
+    const envPath = env["MCP_BROKER_SECURITY_FILE"];
+    const sourcePath = envPath ? resolve(process.cwd(), envPath) : loaded.config.securityFile ? resolve(loaded.baseDir, loaded.config.securityFile) : null;
+    if (!sourcePath) return null;
+
+    if (!existsSync(sourcePath)) {
+        throw new BrokerConfigError(sourcePath, `the security file designated by ${envPath ? "MCP_BROKER_SECURITY_FILE" : "securityFile in the config file"} does not exist`);
+    }
+    let raw: Buffer;
+    let parsed: unknown;
+    try {
+        raw = readFileSync(sourcePath);
+        parsed = JSON.parse(raw.toString("utf-8")) as unknown;
+    } catch (err) {
+        throw new BrokerConfigError(sourcePath, (err as Error).message);
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new BrokerConfigError(sourcePath, "the top-level value must be a JSON object");
+    }
+    const security = parsed as ISecurityConfig;
+
+    const problems: string[] = [];
+    for (const key of Object.keys(security)) if (!SECURITY_KEYS.has(key)) problems.push(`unknown key "${key}"`);
+    if (loaded.config.auth !== undefined) {
+        problems.push(
+            `the config file${loaded.sourcePath ? ` (${loaded.sourcePath})` : ""} also carries "auth"; move it into the security file, so there is one source of security settings`
+        );
+    }
+    if (security.auth?.providerSecret !== undefined) {
+        problems.push('"auth.providerSecret" would put a secret in clear in the file; set MCP_BROKER_PROVIDER_SECRET instead, or give each provider an entry in "providers"');
+    }
+
+    const credentials: IProviderCredential[] = [];
+    if (security.providers !== undefined) {
+        if (!Array.isArray(security.providers)) problems.push('"providers" must be an array');
+        else {
+            for (const [index, entry] of security.providers.entries()) {
+                const label = `providers[${index}]`;
+                if (typeof entry !== "object" || entry === null) {
+                    problems.push(`${label} must be an object`);
+                    continue;
+                }
+                for (const key of Object.keys(entry)) {
+                    if (key === "secret") problems.push(`${label}: "secret" would put a secret in clear in the file; name the environment variable that holds it in "secretEnv"`);
+                    else if (!["id", "secretEnv", "subjects", "allowedResources"].includes(key)) problems.push(`${label}: unknown key "${key}"`);
+                }
+                if (typeof entry.secretEnv !== "string" || entry.secretEnv.length === 0) {
+                    problems.push(`${label}: "secretEnv" must name the environment variable holding this provider's secret`);
+                    continue;
+                }
+                const secret = env[entry.secretEnv];
+                if (!secret) {
+                    problems.push(`${label} ("${String(entry.id)}"): the environment variable ${entry.secretEnv} is not set`);
+                    continue;
+                }
+                credentials.push({
+                    id: entry.id,
+                    secret,
+                    ...(entry.subjects !== undefined ? { subjects: entry.subjects } : {}),
+                    ...(entry.allowedResources !== undefined ? { allowedResources: entry.allowedResources } : {}),
+                });
+            }
+        }
+    }
+
+    const authorization = security.authorization;
+    if (authorization !== undefined) {
+        if (typeof authorization !== "object" || authorization === null || Array.isArray(authorization)) problems.push('"authorization" must be an object');
+        else {
+            for (const key of Object.keys(authorization)) if (key !== "protectedSlots") problems.push(`authorization: unknown key "${key}"`);
+            const slots = authorization.protectedSlots;
+            if (slots !== undefined && (typeof slots !== "object" || slots === null || Array.isArray(slots)))
+                problems.push('"authorization.protectedSlots" must be an object keyed by slot name');
+        }
+    }
+
+    if (problems.length > 0) throw new BrokerConfigError(sourcePath, problems.join("; "));
+
+    return {
+        security,
+        sourcePath,
+        version: createHash("sha256").update(raw!).digest("hex").slice(0, 12),
+        credentials,
+    };
+}
 
 /**
  * A config file was designated or found, and could not be used.

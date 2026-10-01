@@ -118,4 +118,48 @@ describe.skipIf(!built)("published CLI", () => {
         expect(code).toBe(1);
         expect(output.join("")).toContain("refuses to start");
     }, 30_000);
+
+    /** Runs the CLI in a scratch directory holding `config.json` and `security.json`. */
+    async function runWithSecurity(security: unknown, env: Record<string, string> = {}): Promise<{ child: ReturnType<typeof spawn>; output: string[]; port: number }> {
+        const cwd = mkdtempSync(join(tmpdir(), "mcp-broker-smoke-"));
+        mkdirSync(join(cwd, ".mcp-broker"));
+        writeFileSync(join(cwd, ".mcp-broker", "config.json"), JSON.stringify({ securityFile: "security.json" }));
+        writeFileSync(join(cwd, ".mcp-broker", "security.json"), JSON.stringify(security));
+        const port = await freePort();
+        const output: string[] = [];
+        const child = spawn(process.execPath, [BIN], {
+            cwd,
+            env: { ...process.env, ...env, MCP_BROKER_CONFIG: "", MCP_BROKER_SECURITY_FILE: "", MCP_BROKER_PORT: String(port), MCP_BROKER_HOST: "127.0.0.1", MCP_BROKER_OPEN: "" },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+        child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+        return { child, output, port };
+    }
+
+    it("refuses to start on protected slots it could not enforce", async () => {
+        // No providers table: no provider identity to restrict the slot to.
+        const { child, output } = await runWithSecurity({ authorization: { protectedSlots: { bench: { declaredBy: "a", publishedBy: "b" } } } });
+        const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+        expect(code).toBe(1);
+        expect(output.join("")).toContain("protectedSlots cannot be enforced");
+    }, 30_000);
+
+    it("starts with a security file that names its providers and protects a slot", async () => {
+        const run = await runWithSecurity(
+            {
+                providers: [
+                    { id: "mcp-scada", secretEnv: "SMOKE_SCADA_SECRET", subjects: ["service:mcp-scada"] },
+                    { id: "modbus-bench", secretEnv: "SMOKE_MODBUS_SECRET" },
+                ],
+                authorization: { protectedSlots: { bench: { declaredBy: "mcp-scada", publishedBy: "modbus-bench" } } },
+            },
+            { SMOKE_SCADA_SECRET: "a", SMOKE_MODBUS_SECRET: "b" }
+        );
+        proc = run.child;
+        await waitForListening(`http://127.0.0.1:${run.port}/_broker/mcp`, run.child);
+        const log = run.output.join("");
+        expect(log).toMatch(/Security file .*security\.json \(version [0-9a-f]{12}, 1 protected slot/);
+        expect(log).toContain("2 provider identities");
+    }, 30_000);
 });
