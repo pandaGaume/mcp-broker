@@ -63,8 +63,15 @@ The broker looks in this order:
    logs a deprecation warning to stderr. Move it to `.mcp-broker/config.json`
    to silence.
 
-When none of these exist, the broker runs with env-vars-or-defaults only , 
-no error, no warning.
+When discovery (2 and 3) finds nothing, the broker runs with
+env-vars-or-defaults only: no error, no warning.
+
+It **fails closed** otherwise. When `MCP_BROKER_CONFIG` names a file that does
+not exist, or when the file in use cannot be read, is not valid JSON, or is not
+a JSON object, the broker refuses to start and exits with code 1, naming the
+file. Before 1.4.1 it logged the parse error and started with an empty config,
+which is a broker with authentication and authorization switched off.
+`loadBrokerConfig()` throws a `BrokerConfigError` in the same cases.
 
 ### Path resolution
 

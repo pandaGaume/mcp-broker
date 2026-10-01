@@ -294,6 +294,26 @@ export const DEFAULT_CONFIG_FILENAME = "config.json";
 export const LEGACY_CONFIG_FILENAME = "mcp-broker.config.json";
 
 /**
+ * A config file was designated or found, and could not be used.
+ *
+ * Thrown rather than logged: starting with an empty config instead would start
+ * a broker with no authentication and no authorization at all.
+ */
+export class BrokerConfigError extends Error {
+    constructor(
+        public readonly sourcePath: string,
+        public readonly detail: string
+    ) {
+        super(
+            `[mcp-broker] Cannot use the config file at ${sourcePath}: ${detail}. ` +
+                `The broker refuses to start rather than run without the security settings that file may hold. ` +
+                `Fix the file, or point MCP_BROKER_CONFIG at a valid one.`
+        );
+        this.name = "BrokerConfigError";
+    }
+}
+
+/**
  * Loads the broker config from a JSON file.
  *
  * Discovery order:
@@ -303,9 +323,15 @@ export const LEGACY_CONFIG_FILENAME = "mcp-broker.config.json";
  * 4. `./mcp-broker.config.json` relative to `process.cwd()` (legacy layout ,
  *    a deprecation warning is written to stderr).
  *
- * When no file is found, returns the built-in empty config with
- * `baseDir = process.cwd()`. On invalid JSON, logs a warning to stderr and
- * returns the same empty config, never throws.
+ * When no file is found by discovery (steps 3 and 4), returns the built-in
+ * empty config with `baseDir = process.cwd()`.
+ *
+ * Fails closed otherwise: throws a {@link BrokerConfigError} when a file was
+ * designated (steps 1 and 2) but does not exist, or when the file that was
+ * found cannot be read, is not valid JSON, or is not a JSON object. This used
+ * to log a warning and return the empty config, and the empty config is a
+ * broker with no authentication and no authorization: one stray comma in a
+ * secured deployment's config opened every slot to everyone.
  *
  * Paths inside the config file are intended to be resolved against
  * {@link ILoadedBrokerConfig.baseDir} by the consumer.
@@ -333,20 +359,24 @@ export function loadBrokerConfig(path?: string): ILoadedBrokerConfig {
         }
     }
 
-    if (!sourcePath || !existsSync(sourcePath)) {
+    if (!sourcePath) {
         return { config: {}, baseDir: cwd, sourcePath: null };
     }
+    if (!existsSync(sourcePath)) {
+        const origin = path ? "the path given to loadBrokerConfig()" : "MCP_BROKER_CONFIG";
+        throw new BrokerConfigError(sourcePath, `the file designated by ${origin} does not exist`);
+    }
 
-    const baseDir = dirname(sourcePath);
-
+    let parsed: unknown;
     try {
-        const raw = readFileSync(sourcePath, "utf-8");
-        const config = JSON.parse(raw) as IBrokerConfig;
-        return { config, baseDir, sourcePath };
+        parsed = JSON.parse(readFileSync(sourcePath, "utf-8")) as unknown;
     } catch (err) {
-        process.stderr.write(`[mcp-broker] Failed to parse config file at ${sourcePath}: ${(err as Error).message}\n`);
-        return { config: {}, baseDir: cwd, sourcePath: null };
+        throw new BrokerConfigError(sourcePath, (err as Error).message);
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new BrokerConfigError(sourcePath, "the top-level value must be a JSON object");
+    }
+    return { config: parsed as IBrokerConfig, baseDir: dirname(sourcePath), sourcePath };
 }
 
 /**
