@@ -661,6 +661,7 @@ async function main(): Promise<void> {
             if (security.credentials.length > 0) builder.withProviderPrincipals(security.credentials);
             const protectedSlots = security.security.authorization?.protectedSlots;
             if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
+            if (security.security.limits) builder.withLimits(security.security.limits);
             builder.withSecurityVersion(security.version);
         }
         tunnel = builder.build();

@@ -10,6 +10,15 @@ import { BrokerConfigError, loadSecurityConfig, type ILoadedBrokerConfig } from 
  * fails closed exactly like the config file, and never holds a secret in clear.
  */
 describe("loadSecurityConfig", () => {
+    it("loads strict execution limits and resolves the store relative to the security file", () => {
+        write("security.json", { limits: { storeFile: "ledger.json", rules: [{ id: "calls", calls: { max: 2, windowMs: 1000 } }] } });
+        const result = loadSecurityConfig(loaded({ securityFile: "security.json" }), {})!;
+        expect(result.security.limits?.storeFile).toBe(join(dir, "ledger.json"));
+        write("security.json", { limits: { rules: [{ id: "typo", concurency: 1 }] } });
+        expect(() => loadSecurityConfig(loaded({ securityFile: "security.json" }), {})).toThrow(/unknown key/);
+        expect(() => loadSecurityConfig(loaded({ limits: { rules: [] } }), {})).toThrow(/security file/);
+    });
+
     let dir: string;
 
     beforeEach(() => {

@@ -58,7 +58,10 @@ export type BrokerDiagnosisRuleId =
     | "undeclared-capability"
     | "decision-result-overdue"
     | "telemetry-export-failures"
-    | "telemetry-spans-dropped";
+    | "telemetry-spans-dropped"
+    | "limits-storage-fault"
+    | "limits-reservations-expired"
+    | "limits-admission-refused";
 
 /** One detected problem: what is wrong, what proves it, and what to do. */
 export interface IBrokerDiagnosisProblem {
@@ -441,6 +444,32 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
 
     // -- Declarations and protected slots -----------------------------------
     const authorityInfo = context.getAuthorityInfo?.();
+    const limits = authorityInfo?.limits;
+    if (limits?.storageFault)
+        problems.push({
+            id: "limits-storage-fault",
+            severity: "error",
+            symptom: "Budget storage is unavailable; new controlled work is refused.",
+            evidence: { storageFault: limits.storageFault },
+            fix: "Repair the local store and restart the broker. Preserve its ledger; do not reset counters to resume work.",
+        });
+    if (limits?.expiredReservations)
+        problems.push({
+            id: "limits-reservations-expired",
+            severity: "warning",
+            symptom: "Reserved operations have no reported outcome.",
+            evidence: { count: limits.expiredReservations },
+            fix: "Inspect the provider logs using reservationId and requestId. Expiry does not refund the reserved units.",
+        });
+    const refused = limits?.recentEvents.filter((e) => !e.allowed).slice(-10);
+    if (refused?.length)
+        problems.push({
+            id: "limits-admission-refused",
+            severity: "info",
+            symptom: "Recent calls or reservations were refused by the execution limits.",
+            evidence: { events: refused },
+            fix: "Use ruleId and retryAfterMs to identify the limiting rule. For stuck concurrency, verify the provider stopped before operator recovery.",
+        });
     if (!authorityInfo) {
         checksSkipped.push({
             id: "protected-slot-unconfirmed",

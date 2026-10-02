@@ -1,3 +1,4 @@
+import { validateLimitsConfig, type ILimitsConfig } from "./limits/controller";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -338,6 +339,7 @@ export interface ISecurityProviderEntry {
  * apart from the topology in `config.json`.
  */
 export interface ISecurityConfig {
+    limits?: ILimitsConfig;
     /** The same block as `config.json`'s `auth`, minus `providerSecret` (use `MCP_BROKER_PROVIDER_SECRET`). */
     auth?: IBrokerAuthConfig;
     /** One identity per provider. */
@@ -359,7 +361,7 @@ export interface ILoadedSecurityConfig {
     readonly credentials: readonly IProviderCredential[];
 }
 
-const SECURITY_KEYS = new Set(["$schema", "description", "auth", "providers", "authorization"]);
+const SECURITY_KEYS = new Set(["$schema", "description", "auth", "providers", "authorization", "limits"]);
 
 /**
  * Loads the security file named by `MCP_BROKER_SECURITY_FILE` or by
@@ -376,7 +378,7 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
     // Keys that only the security file may carry, refused in config.json
     // whether or not a security file exists: left there, they would be
     // ignored, and a protection the operator wrote would silently not exist.
-    const misplaced = ["providers", "authorization"].filter((key) => Object.prototype.hasOwnProperty.call(loaded.config, key));
+    const misplaced = ["providers", "authorization", "limits"].filter((key) => Object.prototype.hasOwnProperty.call(loaded.config, key));
     if (misplaced.length > 0 && loaded.sourcePath) {
         throw new BrokerConfigError(
             loaded.sourcePath,
@@ -454,6 +456,14 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
         }
     }
 
+    if (security.limits !== undefined) {
+        try {
+            validateLimitsConfig(security.limits);
+            if (security.limits.storeFile) security.limits = { ...security.limits, storeFile: resolve(dirname(sourcePath), security.limits.storeFile) };
+        } catch (error) {
+            problems.push((error as Error).message);
+        }
+    }
     const authorization = security.authorization;
     if (authorization !== undefined) {
         if (typeof authorization !== "object" || authorization === null || Array.isArray(authorization)) problems.push('"authorization" must be an object');

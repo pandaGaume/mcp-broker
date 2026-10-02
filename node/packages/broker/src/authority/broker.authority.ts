@@ -1,3 +1,4 @@
+import type { LimitController } from "../limits/controller";
 import { randomBytes } from "crypto";
 import type { IProviderPrincipal } from "../auth/provider.auth";
 import { writeAuthorizationAuditEvent } from "../authorization/audit";
@@ -74,6 +75,7 @@ export interface IOverdueDecision {
 
 /** What `getAuthorityInfo` reports, for `broker_diagnose` and `broker_info`. */
 export interface IBrokerAuthorityInfo {
+    readonly limits?: ReturnType<LimitController["info"]>;
     readonly policyVersion: string;
     readonly protectedSlots: readonly { readonly slot: string; readonly declaredBy: string; readonly publishedBy: string; readonly confirmed: boolean }[];
     readonly declarations: readonly {
@@ -341,7 +343,7 @@ export class BrokerAuthority {
      * protocol faults, not policy outcomes. Each well-formed check then gets
      * its own decision, audited, with a `decisionId`.
      */
-    authorize(params: unknown, origin: IBrokerMethodOrigin, isPending: (slot: string, brokerId: string) => boolean): BrokerMethodOutcome {
+    authorize(params: unknown, origin: IBrokerMethodOrigin, isPending: (slot: string, brokerId: string) => boolean, trackResult = true): BrokerMethodOutcome {
         const principal = origin.principal;
         const declaration = this.declarationOf(principal?.id);
         if (!principal || !declaration) {
@@ -407,9 +409,69 @@ export class BrokerAuthority {
             if (check.attributes !== undefined && (typeof check.attributes !== "object" || check.attributes === null || Array.isArray(check.attributes))) {
                 return invalidParams(`checks[${index}].attributes must be an object`);
             }
-            decisions.push(this._decide(check, subject, onBehalfOf, correlationId, traceId, declaration, origin.slot));
+            decisions.push(this._decide(check, subject, onBehalfOf, correlationId, traceId, declaration, origin.slot, trackResult));
         }
         return { result: { policyVersion: this.policyVersion, decisions } };
+    }
+
+    /** Reuses the caller-reference and declared authorization checks before reserving. */
+    reserveBudget(params: unknown, origin: IBrokerMethodOrigin, isPending: (slot: string, id: string) => boolean, limits: LimitController): BrokerMethodOutcome {
+        if (typeof params !== "object" || params === null || Array.isArray(params)) return invalidParams("budget params must be an object");
+        const p = params as Record<string, unknown>;
+        if (Object.keys(p).some((k) => !["principal", "capability", "resource", "resourcePath", "unit", "quantity", "idempotencyKey"].includes(k)))
+            return invalidParams("unknown budget key");
+        if (
+            typeof p.idempotencyKey !== "string" ||
+            !/^[A-Za-z0-9._:-]{1,128}$/.test(p.idempotencyKey) ||
+            !Number.isSafeInteger(p.quantity) ||
+            (p.quantity as number) <= 0 ||
+            typeof p.unit !== "string"
+        )
+            return invalidParams("invalid budget quantity, unit or idempotencyKey");
+        const asked = p.principal as { type?: string; ref?: string } | undefined;
+        if (asked?.type !== "caller-ref") return invalidParams("budget reservations require a live caller-ref");
+        const answer = this.authorize(
+            { principal: p.principal, checks: [{ capability: p.capability, resource: p.resource, resourcePath: p.resourcePath }] },
+            origin,
+            isPending,
+            false
+        );
+        if ("error" in answer) return answer;
+        const decision = (answer.result as { decisions: { allowed: boolean; decisionId: string; reason: string }[] }).decisions[0]!;
+        if (!decision.allowed) return { error: { code: -32003, message: "Budget authorization refused", data: decision } };
+        const declaration = this.declarationOf(origin.principal!.id)!;
+        if (!declaration.budgetUnits.includes(p.unit)) return invalidParams("unit not declared by this provider");
+        const caller = this._refs.get(asked.ref!)!;
+        const result = limits.reserve(
+            {
+                subjects: caller.subject.ids,
+                provider: origin.slot,
+                providerId: origin.principal!.id,
+                requestId: caller.brokerId,
+                correlationId: caller.correlationId,
+                capability: p.capability as string,
+                resource: p.resourcePath as string,
+            },
+            p.unit,
+            p.quantity as number,
+            p.idempotencyKey,
+            decision.decisionId
+        );
+        return result.allowed ? { result: result.value } : { error: { code: -32029, message: "Budget reservation refused", data: result.error } };
+    }
+
+    settleBudget(params: unknown, origin: IBrokerMethodOrigin, limits: LimitController): BrokerMethodOutcome {
+        if (!origin.principal) return { error: { code: -32003, message: "Provider identity required" } };
+        if (typeof params !== "object" || params === null || Array.isArray(params)) return invalidParams("settlement must be an object");
+        const p = params as Record<string, unknown>;
+        if (
+            Object.keys(p).some((k) => !["reservationId", "used", "result"].includes(k)) ||
+            typeof p.reservationId !== "string" ||
+            !["success", "failure", "refused"].includes(p.result as string)
+        )
+            return invalidParams("invalid settlement");
+        const result = limits.settle(origin.principal.id, origin.slot, p.reservationId, p.used as number, p.result as string);
+        return result.allowed ? { result: result.value } : { error: { code: -32029, message: "Budget settlement refused", data: result.error } };
     }
 
     /** One check, already well-formed, to one audited decision. */
@@ -420,7 +482,8 @@ export class BrokerAuthority {
         correlationId: string,
         traceId: string | undefined,
         declaration: IProviderDeclaration,
-        slot: string
+        slot: string,
+        trackResult: boolean
     ): unknown {
         const capability = check.capability as string;
         const nativeResource = check.resource as string;
@@ -481,7 +544,8 @@ export class BrokerAuthority {
             ...(obligations ? { obligations } : {}),
         };
         writeAuthorizationAuditEvent(event);
-        this._trackDecision(event, declaration, decision.allowed && declaration.resultsRequired.has(capability));
+        // Reservations track their outcome through the budget ledger and settlement.
+        if (trackResult) this._trackDecision(event, declaration, decision.allowed && declaration.resultsRequired.has(capability));
 
         return {
             decisionId,

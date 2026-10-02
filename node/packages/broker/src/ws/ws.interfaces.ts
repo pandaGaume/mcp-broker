@@ -1,3 +1,4 @@
+import type { ILimitsConfig } from "../limits/controller";
 import type { ServerResponse } from "http";
 import type { WebSocket } from "ws";
 import type { GrammarResolverOptions, IMessageTransport } from "@cyanmycelium/mcp-core";
@@ -258,6 +259,7 @@ export interface IInternalClient {
  * Configuration options for a {@link WsTunnel} instance.
  */
 export interface IWsTunnelOptions {
+    readonly limits?: ILimitsConfig;
     /** TCP port to listen on. */
     port: number;
 
@@ -582,6 +584,8 @@ export interface IWsTunnelOptions {
  * resolves with the JSON-RPC `result` or `error` the frame would have got.
  */
 export interface ILoopbackProviderHandle {
+    reserveBudget(params: unknown): Promise<BrokerMethodOutcome>;
+    settleBudget(params: unknown): Promise<BrokerMethodOutcome>;
     /** `broker/authorization/declare`. */
     declare(params: unknown): Promise<BrokerMethodOutcome>;
     /** `broker/authorize`. */

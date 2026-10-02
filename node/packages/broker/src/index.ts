@@ -227,3 +227,14 @@ export type {
     BrokerConfig,
     LoadedBrokerConfig,
 } from "./config";
+
+export {
+    LimitController,
+    validateLimitsConfig,
+    type ILimitsConfig,
+    type ILimitRule,
+    type ILimitWindow,
+    type ILimitContext,
+    type ILimitFailure,
+    type ILimitAuditEvent,
+} from "./limits/controller";

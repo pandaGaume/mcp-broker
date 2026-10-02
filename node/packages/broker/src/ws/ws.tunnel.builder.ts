@@ -1,3 +1,4 @@
+import type { ILimitsConfig } from "../limits/controller";
 import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
 import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMode } from "./ws.interfaces";
@@ -69,6 +70,7 @@ export class WsTunnelBuilder {
     private _slotResourceResolver: ISlotResourceResolver | undefined = undefined;
     private _providerSecret: string | undefined = undefined;
     private _providerCredentials: readonly IProviderCredential[] | undefined = undefined;
+    private _limits: ILimitsConfig | undefined;
     private _protectedSlots: Readonly<Record<string, IProtectedSlot>> | undefined = undefined;
     private _securityVersion: string | undefined = undefined;
     private _authorizeBatchLimit: number | undefined = undefined;
@@ -408,6 +410,11 @@ export class WsTunnelBuilder {
      * `publishedBy` may publish into it, and it never joins `_all`. Enforced
      * from startup; the declaring provider confirms it with its declaration.
      */
+    withLimits(config: ILimitsConfig): this {
+        this._limits = config;
+        return this;
+    }
+
     withProtectedSlots(slots: Readonly<Record<string, IProtectedSlot>>): this {
         this._protectedSlots = { ...slots };
         return this;
@@ -473,6 +480,7 @@ export class WsTunnelBuilder {
             authorization,
             slotResourceResolver: this._slotResourceResolver ?? authorization?.slotResourceResolver ?? this._auth?.slotResourceResolver,
             protectedSlots: this._protectedSlots,
+            limits: this._limits,
             knownProviderPrincipals: this._providerCredentials?.map((c) => ({
                 id: c.id,
                 ...(c.subjects ? { subjects: [...c.subjects] } : {}),

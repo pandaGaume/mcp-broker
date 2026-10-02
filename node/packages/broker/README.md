@@ -937,3 +937,7 @@ The workflow runs lint, build, test, then `npm publish --access public --provena
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Execution limits
+
+Operator-owned call quotas and provider operation budgets: [configuration, SDK and recovery](docs/execution-limits.md).

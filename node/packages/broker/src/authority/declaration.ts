@@ -59,6 +59,7 @@ export interface IProviderDeclaration {
     /** The subtree every resource of this declaration lives in. */
     readonly namespace: ResourcePath;
     readonly capabilities: ReadonlySet<string>;
+    readonly budgetUnits: readonly string[];
     /** Declared resources, keyed by native identifier. */
     readonly resources: ReadonlyMap<string, IDeclaredResource>;
     /** Slots this declaration confirms as protected. */
@@ -89,7 +90,7 @@ export interface IDeclarationContext {
 const RESERVED_DOMAINS: ReadonlySet<string> = new Set(["mcp", "broker"]);
 
 /** Keys a declaration may carry. Anything else refuses it. */
-const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects", "resultsRequired"]);
+const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects", "resultsRequired", "budgetUnits"]);
 
 /** Keys that would grant rights. Named in the refusal, since that is the whole point of refusing them. */
 const RIGHTS_KEYS = new Set(["assignments", "roles", "denies"]);
@@ -379,6 +380,10 @@ export function validateDeclaration(
         }
     }
 
+    const budgetUnits = params.budgetUnits ?? [];
+    if (!Array.isArray(budgetUnits) || budgetUnits.length > 32 || !budgetUnits.every((u) => typeof u === "string" && /^[a-z][a-z0-9._-]{0,63}$/.test(u)))
+        errors.push("budgetUnits must contain at most 32 valid units");
+
     // Results the provider promises to report: a subset of what it declared.
     const resultsRequired = new Set<string>();
     if (params.resultsRequired !== undefined) {
@@ -404,6 +409,7 @@ export function validateDeclaration(
             domain: domain as string,
             namespace,
             capabilities,
+            budgetUnits: Object.freeze([...(budgetUnits as string[])]),
             resources,
             protects: Object.freeze(protects),
             resultsRequired: Object.freeze(resultsRequired),
