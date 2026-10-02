@@ -61,7 +61,8 @@ export type BrokerDiagnosisRuleId =
     | "telemetry-spans-dropped"
     | "limits-storage-fault"
     | "limits-reservations-expired"
-    | "limits-admission-refused";
+    | "limits-admission-refused"
+    | "limits-calls-held";
 
 /** One detected problem: what is wrong, what proves it, and what to do. */
 export interface IBrokerDiagnosisProblem {
@@ -460,6 +461,20 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
             symptom: "Reserved operations have no reported outcome.",
             evidence: { count: limits.expiredReservations },
             fix: "Inspect the provider logs using reservationId and requestId. Expiry does not refund the reserved units.",
+        });
+    // A call holding a concurrency slot for over a minute is past any normal
+    // answer: either the provider is stuck, or the answer was lost and the
+    // slot will stay held (rules default to onTimeout: "hold").
+    const held = limits?.activeCalls.filter((c) => c.ageMs > 60_000) ?? [];
+    if (held.length)
+        problems.push({
+            id: "limits-calls-held",
+            severity: "warning",
+            symptom: `${held.length} call(s) have held an execution-limit slot for over a minute; while they hold it, new calls on the same rule are refused.`,
+            evidence: { calls: held },
+            fix:
+                "Check on the provider side that the native work of each call stopped, then release it with broker_limits_release({ slot, requestId }) (needs broker.limits.admin). " +
+                'For reads, set onTimeout: "release" on the rule so a deadline frees the slot by itself.',
         });
     const refused = limits?.recentEvents.filter((e) => !e.allowed).slice(-10);
     if (refused?.length)

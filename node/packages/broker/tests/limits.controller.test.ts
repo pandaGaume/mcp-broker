@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitController, validateLimitsConfig, type ILimitContext } from "../src/limits/controller";
 const context: ILimitContext = { subjects: ["user:alice"], provider: "lan", providerId: "net", capability: "network.discover", resource: "/ot/site/lan", requestId: "r1" };
@@ -98,11 +98,11 @@ describe("limits transactions", () => {
         expect(resumed.reserve(context, "packet", 1, "k", "d")).toMatchObject({ ...grant, value: { ...(grant.allowed ? grant.value : {}), replayed: true } });
         expect(resumed.reserve(context, "packet", 1, "new", "d").allowed).toBe(false);
     });
-    it("fails closed on corrupt storage or policy drift", () => {
+    it("fails closed on corrupt storage, and on policy drift when asked to", () => {
         const storeFile = file();
         const c = make({ storeFile, rules: [] });
         c.close();
-        expect(() => new LimitController({ storeFile, rules: [{ id: "new", concurrency: 1 }] })).toThrow(/migration/);
+        expect(() => new LimitController({ storeFile, onRulesChange: "refuse", rules: [{ id: "new", concurrency: 1 }] })).toThrow(/migrate it explicitly/);
         writeFileSync(storeFile, "broken");
         expect(() => new LimitController({ storeFile, rules: [] })).toThrow();
     });
@@ -123,3 +123,84 @@ describe("limits transactions", () => {
     });
 });
 import * as requireFs from "node:fs";
+
+describe("operability on a supervised gateway", () => {
+    it("frees a concurrency slot at the deadline only for rules that say so", () => {
+        const c = make({
+            rules: [
+                { id: "reads", concurrency: 1, onTimeout: "release" },
+                { id: "writes", match: { capability: "plc.write" }, concurrency: 1 },
+            ],
+        });
+        expect(c.admit({ ...context, requestId: "r1" }, []).allowed).toBe(true);
+        expect(c.admit({ ...context, requestId: "r2" }, [])).toMatchObject({ allowed: false, error: { ruleId: "reads" } });
+        c.timedOut("lan", "r1");
+        expect(c.admit({ ...context, requestId: "r3" }, []).allowed).toBe(true);
+
+        const write = { ...context, capability: "plc.write" };
+        const d = make({ rules: [{ id: "writes", concurrency: 1 }] });
+        expect(d.admit({ ...write, requestId: "w1" }, []).allowed).toBe(true);
+        d.timedOut("lan", "w1");
+        expect(d.admit({ ...write, requestId: "w2" }, [])).toMatchObject({ allowed: false, error: { reason: "concurrency-exceeded" } });
+        expect(d.release("lan", "w1", ["user:operator"])).toBe(true);
+        expect(d.admit({ ...write, requestId: "w3" }, []).allowed).toBe(true);
+        expect(d.info().recentEvents.some((e) => e.action === "release" && e.by?.[0] === "user:operator")).toBe(true);
+        expect(d.release("lan", "unknown", ["user:operator"])).toBe(false);
+    });
+
+    it("refuses onTimeout without a concurrency limit, and unknown lock or migration modes", () => {
+        expect(() => validateLimitsConfig({ rules: [{ id: "a", calls: { max: 1, windowMs: 1000 }, onTimeout: "release" }] })).toThrow(/concurrency/);
+        expect(() => validateLimitsConfig({ rules: [], staleLock: "ignore" })).toThrow(/staleLock/);
+        expect(() => validateLimitsConfig({ rules: [], onRulesChange: "drop" })).toThrow(/onRulesChange/);
+    });
+
+    it("keeps calls quotas and held slots on disk, but not rate counters", () => {
+        const storeFile = file();
+        const rules = [
+            { id: "pace", rate: { max: 1, windowMs: 60000 } },
+            { id: "quota", match: { capability: "plc.write" }, calls: { max: 1, windowMs: 60000 } },
+        ];
+        const c = make({ storeFile, rules });
+        expect(c.admit({ ...context, requestId: "r1" }, []).allowed).toBe(true);
+        expect(JSON.parse(readFileSync(storeFile, "utf8")).entries).toHaveLength(0);
+        c.close();
+
+        const d = make({ storeFile, rules });
+        expect(d.admit({ ...context, requestId: "r2" }, []).allowed).toBe(true);
+        d.close();
+        const e = make({ storeFile, rules: [{ id: "quota", match: { capability: "plc.write" }, calls: { max: 1, windowMs: 60000 } }] });
+        expect(e.admit({ ...context, capability: "plc.write", requestId: "w1" }, []).allowed).toBe(true);
+        expect(JSON.parse(readFileSync(storeFile, "utf8")).entries).toHaveLength(1);
+        e.close();
+        const f = make({ storeFile, rules: [{ id: "quota", match: { capability: "plc.write" }, calls: { max: 1, windowMs: 60000 } }] });
+        expect(f.admit({ ...context, capability: "plc.write", requestId: "w2" }, [])).toMatchObject({ allowed: false, error: { ruleId: "quota" } });
+    });
+
+    it("migrates a store written under other rules: kept rules keep their counters, removed ones go", () => {
+        const storeFile = file();
+        const quota = { id: "quota", calls: { max: 1, windowMs: 60000 } };
+        const c = make({ storeFile, rules: [quota, { id: "old", calls: { max: 5, windowMs: 60000 } }] });
+        expect(c.admit(context, []).allowed).toBe(true);
+        c.close();
+        const d = make({ storeFile, rules: [quota] });
+        expect(d.admit({ ...context, requestId: "r2" }, [])).toMatchObject({ allowed: false, error: { ruleId: "quota" } });
+        const stored = JSON.parse(readFileSync(storeFile, "utf8")) as { entries: { debits: { ruleId: string }[] }[] };
+        expect(stored.entries.flatMap((e) => e.debits.map((x) => x.ruleId))).toEqual(["quota"]);
+    });
+
+    it("takes over a lock left by a dead process on this host, and only that", () => {
+        const storeFile = file();
+        const lock = storeFile + ".lock";
+        writeFileSync(lock, JSON.stringify({ pid: 2147483646, host: hostname() }));
+        const c = make({ storeFile, rules: [] });
+        c.close();
+
+        writeFileSync(lock, JSON.stringify({ pid: process.pid, host: hostname() }));
+        expect(() => new LimitController({ storeFile, rules: [] })).toThrow(/live process/);
+        writeFileSync(lock, JSON.stringify({ pid: 2147483646, host: "another-gateway" }));
+        expect(() => new LimitController({ storeFile, rules: [] })).toThrow(/another-gateway/);
+        writeFileSync(lock, JSON.stringify({ pid: 2147483646, host: hostname() }));
+        expect(() => new LimitController({ storeFile, rules: [], staleLock: "refuse" })).toThrow();
+        rmSync(lock);
+    });
+});

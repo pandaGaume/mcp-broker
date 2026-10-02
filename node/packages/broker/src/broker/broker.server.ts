@@ -4,6 +4,7 @@ import { BrokerInfoBehavior } from "./behaviors/broker.behavior.info";
 import { BrokerProvidersBehavior } from "./behaviors/broker.behavior.providers";
 import { BrokerGuideBehavior } from "./behaviors/broker.behavior.guide";
 import { BrokerDiagnoseBehavior } from "./behaviors/broker.behavior.diagnose";
+import { BrokerLimitsBehavior } from "./behaviors/broker.behavior.limits";
 import { iterAvailableBrokerGrammars, iterBrokerGrammarsFrom } from "./broker.grammars";
 import { BROKER_PROVIDER_NAME } from "./broker.slots";
 import type { IBrokerContext } from "./broker.context";
@@ -105,6 +106,8 @@ export async function startBrokerServer(
             }),
         })
         .register(new BrokerInfoBehavior(context), new BrokerProvidersBehavior(context), new BrokerGuideBehavior(context), new BrokerDiagnoseBehavior(context));
+    // An acting tool, listed only where there is something to act on.
+    if (context.limitsEnabled) builder.register(new BrokerLimitsBehavior(context));
 
     // Register every `(userAgent, locale)` JSON found on disk as a raw
     // grammar layer. The candidate-chain resolution in

@@ -23,6 +23,13 @@
             "properties": {
                 "slot": "把报告限定到某一个 provider 槽位（区分大小写）。省略则诊断整个 broker。"
             }
+        },
+        "broker_limits_release": {
+            "description": "在确认原生操作已停止后，释放卡住的调用仍占用的执行限制名额。需要 broker.limits.admin；以您的身份记录审计。不退还任何配额。用 broker_diagnose 查找卡住的调用。",
+            "properties": {
+                "slot": "卡住调用所在的 slot，按 broker_diagnose 列出的值填写。",
+                "requestId": "卡住调用的 requestId，按 broker_diagnose 列出的值填写。"
+            }
         }
     },
     "resources": {

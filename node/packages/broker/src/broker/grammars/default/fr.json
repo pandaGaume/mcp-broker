@@ -23,6 +23,13 @@
             "properties": {
                 "slot": "Restreint le rapport à un seul emplacement de provider (sensible à la casse). Omettre pour diagnostiquer tout le broker."
             }
+        },
+        "broker_limits_release": {
+            "description": "Libère les places de limite d'exécution qu'un appel bloqué occupe encore, après avoir vérifié que son travail natif est arrêté. Exige broker.limits.admin ; audité avec votre identité. Ne rembourse aucun quota. broker_diagnose liste les appels bloqués.",
+            "properties": {
+                "slot": "Slot de l'appel bloqué, tel que broker_diagnose le liste.",
+                "requestId": "requestId de l'appel bloqué, tel que broker_diagnose le liste."
+            }
         }
     },
     "resources": {
