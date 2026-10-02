@@ -7,6 +7,12 @@ import { DirectTransport, MultiplexTransport, callerReferenceOf } from "@cyanmyc
 import { startTestBroker, type ITestBroker } from "../src/testing";
 import { mcpCall } from "./streamable.helper";
 import type { ILimitsConfig } from "../src/limits/controller";
+
+// Node 20 has no global WebSocket; use the same implementation as the other provider tests.
+if (typeof globalThis.WebSocket === "undefined") {
+    globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+}
+
 interface Frame {
     id: string | number;
     method?: string;
