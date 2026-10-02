@@ -215,6 +215,27 @@ that namespace before the slot becomes visible. A multiplexed connection checks
 each announced slot independently. The shared-secret implementation remains
 unrestricted for backward compatibility.
 
+### Declared domains have one owner
+
+A provider identity may declare an authorization domain
+(`broker/authorization/declare`) and have the broker decide for it. Each domain
+has a single owner:
+
+- the first identity whose declaration of a domain is accepted owns it;
+- a declaration of that domain from any other identity is refused with
+  `domain "<d>" is already declared by provider "<id>"; a domain has one owner`;
+- the owner may declare again, and its new declaration replaces the previous one;
+- ownership follows the provider identity, not the slot, and is kept for the
+  broker's lifetime, even after the owner disconnects: a network cut must not
+  hand the domain to someone else. There is no administrative withdrawal yet,
+  so moving a domain to another identity needs a broker restart;
+- an identity holds one declaration, so it owns at most one domain.
+
+A domain is a capability vocabulary (`<domain>.*`), not a place: where a
+capability applies is the resource path, assigned by subtree. Several sites are
+therefore served by one owner of one domain, not by one domain per site, which
+would turn every role into one copy per site.
+
 ---
 
 ## Endpoints summary
