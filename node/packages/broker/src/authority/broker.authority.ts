@@ -27,6 +27,13 @@ export const BROKER_AUDIT_RESULT_METHOD = "broker/audit/result";
  */
 export const CALLER_META_KEY = "io.cyanmycelium/caller";
 
+/**
+ * The `params._meta` key under which the broker tells its own `_broker` tools
+ * who is calling them (`{ subjects, policy }`), for the ones that act and must
+ * audit their operator. Stripped from every client frame like the caller key.
+ */
+export const OPERATOR_META_KEY = "io.cyanmycelium/operator";
+
 /** Default cap on the number of checks in one `broker/authorize`. */
 export const DEFAULT_AUTHORIZE_BATCH_LIMIT = 256;
 
@@ -437,8 +444,14 @@ export class BrokerAuthority {
             false
         );
         if ("error" in answer) return answer;
-        const decision = (answer.result as { decisions: { allowed: boolean; decisionId: string; reason: string }[] }).decisions[0]!;
-        if (!decision.allowed) return { error: { code: -32003, message: "Budget authorization refused", data: decision } };
+        const decision = (answer.result as { decisions: { allowed: boolean; effect: string; decisionId: string; reason: string; obligations?: unknown }[] }).decisions[0]!;
+        // A reservation is a debit, not a wider permission: an allow that comes
+        // with engineering constraints reserves like any allow, and the
+        // constraints travel with the grant for the provider to apply. Only a
+        // deny refuses. `allowed` alone would refuse every resource that has
+        // declared limits, which are the physical ones a budget exists for.
+        if (decision.effect !== "allow" && decision.effect !== "allow-with-constraints")
+            return { error: { code: -32003, message: "Budget authorization refused", data: decision } };
         const declaration = this.declarationOf(origin.principal!.id)!;
         if (!declaration.budgetUnits.includes(p.unit)) return invalidParams("unit not declared by this provider");
         const caller = this._refs.get(asked.ref!)!;
@@ -457,7 +470,8 @@ export class BrokerAuthority {
             p.idempotencyKey,
             decision.decisionId
         );
-        return result.allowed ? { result: result.value } : { error: { code: -32029, message: "Budget reservation refused", data: result.error } };
+        if (!result.allowed) return { error: { code: -32029, message: "Budget reservation refused", data: result.error } };
+        return { result: { ...result.value, effect: decision.effect, ...(decision.obligations ? { obligations: decision.obligations } : {}) } };
     }
 
     settleBudget(params: unknown, origin: IBrokerMethodOrigin, limits: LimitController): BrokerMethodOutcome {

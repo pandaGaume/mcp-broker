@@ -23,6 +23,13 @@
             "properties": {
                 "slot": "Narrow the report to one provider slot (case-sensitive). Omit to diagnose the whole broker."
             }
+        },
+        "broker_limits_release": {
+            "description": "Releases the execution-limit slots a stuck call still holds, after you checked its native work stopped. Needs broker.limits.admin; audited with your identity. Refunds no quota. Find held calls with broker_diagnose.",
+            "properties": {
+                "slot": "Slot of the held call, as broker_diagnose lists it.",
+                "requestId": "requestId of the held call, as broker_diagnose lists it."
+            }
         }
     },
     "resources": {

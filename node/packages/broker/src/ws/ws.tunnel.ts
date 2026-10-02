@@ -52,6 +52,7 @@ import {
     BROKER_DECLARE_METHOD,
     BROKER_METHOD_PREFIX,
     CALLER_META_KEY,
+    OPERATOR_META_KEY,
     type BrokerMethodOutcome,
     type IBrokerAuthorityInfo,
 } from "../authority/broker.authority";
@@ -195,8 +196,11 @@ function stripCallerMeta(message: unknown): boolean {
     const params = (message as { params?: unknown }).params;
     if (typeof params !== "object" || params === null || Array.isArray(params)) return false;
     const meta = (params as { _meta?: unknown })._meta;
-    if (typeof meta !== "object" || meta === null || Array.isArray(meta) || !Object.prototype.hasOwnProperty.call(meta, CALLER_META_KEY)) return false;
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return false;
+    const has = (key: string) => Object.prototype.hasOwnProperty.call(meta, key);
+    if (!has(CALLER_META_KEY) && !has(OPERATOR_META_KEY)) return false;
     delete (meta as Record<string, unknown>)[CALLER_META_KEY];
+    delete (meta as Record<string, unknown>)[OPERATOR_META_KEY];
     if (Object.keys(meta).length === 0) delete (params as { _meta?: unknown })._meta;
     return true;
 }
@@ -227,6 +231,21 @@ interface IProviderFrameOrigin {
 function principalKey(principal: IPrincipal): string {
     const claims = principal.claims as { iss?: unknown; sub?: unknown; client_id?: unknown };
     return JSON.stringify([claims.iss ?? null, claims.sub ?? null, claims.sub === undefined ? (claims.client_id ?? null) : null]);
+}
+
+/**
+ * `_broker` tools an operator needs to get out of a saturated limit: finding
+ * the held calls, and releasing them. A global rule applies to `_broker` too,
+ * so without this exemption the way out would be refused exactly when it is
+ * needed. They stay behind the policy (`broker.providers.read`,
+ * `broker.limits.admin`) like every other call.
+ */
+const LIMITS_RECOVERY_TOOLS: ReadonlySet<string> = new Set(["broker_diagnose", "broker_limits_release"]);
+
+function isLimitsRecoveryCall(providerName: string, message: Record<string, unknown>): boolean {
+    if (providerName !== BROKER_PROVIDER_NAME) return false;
+    const name = (message.params as { name?: unknown } | undefined)?.name;
+    return typeof name === "string" && LIMITS_RECOVERY_TOOLS.has(name);
 }
 
 /** Slots the broker owns and that no configuration may protect. */
@@ -561,6 +580,20 @@ export class WsTunnel implements IBrokerContext {
      * Not exposed over MCP or provider RPC. Does not refund calls or operation budgets. */
     public resolveLimitCall(provider: string, requestId: string): void {
         this._limits?.complete(provider, requestId);
+    }
+
+    /** `true` when execution limits are configured. */
+    get limitsEnabled(): boolean {
+        return this._limits !== undefined;
+    }
+
+    /**
+     * Releases every limit slot a call still holds, on behalf of `by` (the
+     * operator's subjects), after the operator checked the native work
+     * stopped. What `broker_limits_release` calls. Refunds no quota.
+     */
+    public releaseLimitCall(provider: string, requestId: string, by: readonly string[]): boolean {
+        return this._limits?.release(provider, requestId, by) ?? false;
     }
 
     /** The authorization state providers declared, for `broker_diagnose`. */
@@ -1480,6 +1513,20 @@ export class WsTunnel implements IBrokerContext {
         const message = parsed as Record<string, unknown>;
         stripCallerMeta(message);
 
+        // The broker's own tools that act (releasing a held limit slot) must
+        // audit who acted. `_broker` is in process, so it is told directly.
+        if (
+            providerName === BROKER_PROVIDER_NAME &&
+            message.method === "tools/call" &&
+            typeof message.params === "object" &&
+            message.params !== null &&
+            !Array.isArray(message.params)
+        ) {
+            const params = message.params as Record<string, unknown>;
+            const meta = typeof params._meta === "object" && params._meta !== null && !Array.isArray(params._meta) ? (params._meta as Record<string, unknown>) : {};
+            params._meta = { ...meta, [OPERATOR_META_KEY]: { subjects: this._authorizationSubject(principal).ids, policy: this._authorization !== null } };
+        }
+
         const clientId = message.id;
         if (typeof clientId !== "string" && typeof clientId !== "number") return this._limits && message.method === "tools/call" ? "" : JSON.stringify(message);
 
@@ -1513,7 +1560,7 @@ export class WsTunnel implements IBrokerContext {
             }
         }
 
-        if (this._limits && providerName !== AggregateServer.SLOT && message.method === "tools/call") {
+        if (this._limits && providerName !== AggregateServer.SLOT && message.method === "tools/call" && !isLimitsRecoveryCall(providerName, message)) {
             let failure: unknown;
             try {
                 const resource = this._slotResourceResolver.resolve(providerName);
@@ -1649,6 +1696,10 @@ export class WsTunnel implements IBrokerContext {
             for (const [brokerId, entry] of state.pending) {
                 if (entry.expiresAt === 0 || entry.expiresAt > now) continue;
                 state.pending.delete(brokerId);
+                // Rules with `onTimeout: "release"` free their slot here; the
+                // others keep holding it, since a deadline does not prove the
+                // native work stopped.
+                this._limits?.timedOut(name, String(brokerId));
                 console.warn(
                     `[broker] provider "${name}" did not answer a request within ${timeout}ms; the caller was sent a timeout error. ` +
                         `The socket is still connected, so this is the provider not replying rather than a disconnect: check that its MCP message handler was installed BEFORE the transport connected, ` +

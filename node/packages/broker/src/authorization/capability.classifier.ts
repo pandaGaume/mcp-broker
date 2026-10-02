@@ -99,6 +99,8 @@ export class ConfiguredCapabilityClassifier implements ICapabilityClassifier {
             if (method === "tools/call") {
                 const tool = toolNameFrom(operation.params);
                 if (tool && BROKER_READ_TOOLS.has(tool)) return { capability: "broker.providers.read", tool };
+                // Acts on execution limits: never the generic mcp.tools.call.
+                if (tool === "broker_limits_release") return { capability: "broker.limits.admin", tool };
             }
         }
 

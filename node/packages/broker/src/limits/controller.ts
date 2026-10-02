@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, isAbsolute } from "node:path";
 import { ResourcePath, ResourcePathPattern } from "../authorization/resource.path";
 
@@ -17,6 +18,14 @@ export interface ILimitRule {
     readonly concurrency?: number;
     readonly budget?: ILimitWindow & { readonly unit: string };
     readonly requireReservation?: boolean;
+    /**
+     * What a request deadline does to the concurrency slot this rule holds.
+     * `"hold"` (default) keeps it until the provider answers or an operator
+     * releases it: a timeout does not prove the native work stopped, which is
+     * what matters for a write. `"release"` frees it at the deadline, which is
+     * right for reads, where a late answer changes nothing in the plant.
+     */
+    readonly onTimeout?: "hold" | "release";
 }
 export interface ILimitsConfig {
     readonly rules: readonly ILimitRule[];
@@ -24,6 +33,22 @@ export interface ILimitsConfig {
     readonly storeFile?: string;
     readonly retentionMs?: number;
     readonly maxRecords?: number;
+    /**
+     * What a `<storeFile>.lock` left by a crash does at startup.
+     * `"pid-check"` (default): the lock records the process id and host; when
+     * that host is this one and the process is gone, the lock is stale, so the
+     * broker takes it over and says so. Any doubt (another host, a live or
+     * unreadable process) refuses, as `"refuse"` always does. A supervisor
+     * restarting a crashed broker therefore restarts a working one.
+     */
+    readonly staleLock?: "pid-check" | "refuse";
+    /**
+     * What a store written under different rules does at startup.
+     * `"migrate"` (default): counters of rules that still exist are kept,
+     * counters of removed rules are dropped, unresolved concurrency is kept,
+     * and the change is logged. `"refuse"` stops instead.
+     */
+    readonly onRulesChange?: "migrate" | "refuse";
 }
 export interface ILimitContext {
     readonly subjects: readonly string[];
@@ -51,6 +76,10 @@ interface Debit {
     key: string;
     quantity: number;
     windowMs: number;
+    /** Absent in stores written before 1.6.1. */
+    ruleId?: string;
+    /** Which limit the debit counts against. `rate` debits are kept in memory only. Absent before 1.6.1: treated as durable. */
+    kind?: "calls" | "rate" | "budget";
 }
 interface Entry {
     id: string;
@@ -59,6 +88,8 @@ interface Entry {
     context: ILimitContext;
     debits: Debit[];
     activeKeys: string[];
+    /** The rule behind each active key, same order. Absent before 1.6.1: those slots are held. */
+    activeRules?: string[];
     finished: boolean;
     fingerprint?: string;
     idempotencyKey?: string;
@@ -85,13 +116,17 @@ export interface ILimitsInfo {
 }
 export interface ILimitAuditEvent {
     readonly timestamp: string;
-    readonly action: "admit" | "reserve" | "settle" | "complete";
+    readonly action: "admit" | "reserve" | "settle" | "complete" | "timeout" | "release";
     readonly allowed: boolean;
     readonly requestId?: string;
     readonly correlationId?: string;
     readonly decisionId?: string;
     readonly reservationId?: string;
     readonly error?: ILimitFailure;
+    /** For `release`: who released it, as the operator's subjects. */
+    readonly by?: readonly string[];
+    /** For `timeout`: the rules whose slot the deadline freed. */
+    readonly releasedRules?: readonly string[];
 }
 
 function object(v: unknown): v is Record<string, unknown> {
@@ -113,7 +148,10 @@ function window(v: unknown, label: string, budget = false): void {
 }
 export function validateLimitsConfig(value: unknown): asserts value is ILimitsConfig {
     if (!object(value)) throw new Error("limits must be an object");
-    keys(value, ["rules", "storeFile", "retentionMs", "maxRecords"], "limits");
+    keys(value, ["rules", "storeFile", "retentionMs", "maxRecords", "staleLock", "onRulesChange"], "limits");
+    if (value.staleLock !== undefined && value.staleLock !== "pid-check" && value.staleLock !== "refuse") throw new Error('limits.staleLock must be "pid-check" or "refuse"');
+    if (value.onRulesChange !== undefined && value.onRulesChange !== "migrate" && value.onRulesChange !== "refuse")
+        throw new Error('limits.onRulesChange must be "migrate" or "refuse"');
     if (!Array.isArray(value.rules) || value.rules.length > 256) throw new Error("limits.rules must be an array of at most 256 rules");
     if (value.storeFile !== undefined && (typeof value.storeFile !== "string" || !value.storeFile.length)) throw new Error("limits.storeFile must be a non-empty path");
     if (value.retentionMs !== undefined) positive(value.retentionMs, "limits.retentionMs");
@@ -121,7 +159,9 @@ export function validateLimitsConfig(value: unknown): asserts value is ILimitsCo
     const ids = new Set<string>();
     for (const r of value.rules) {
         if (!object(r)) throw new Error("limit rule must be an object");
-        keys(r, ["id", "match", "groupBy", "calls", "rate", "concurrency", "budget", "requireReservation"], "limit rule");
+        keys(r, ["id", "match", "groupBy", "calls", "rate", "concurrency", "budget", "requireReservation", "onTimeout"], "limit rule");
+        if (r.onTimeout !== undefined && r.onTimeout !== "hold" && r.onTimeout !== "release") throw new Error('limit rule onTimeout must be "hold" or "release"');
+        if (r.onTimeout !== undefined && r.concurrency === undefined) throw new Error("limit rule onTimeout only applies to a concurrency limit");
         if (typeof r.id !== "string" || !/^[a-zA-Z0-9._-]{1,128}$/.test(r.id) || ids.has(r.id)) throw new Error("limit rule id invalid or duplicated");
         ids.add(r.id);
         if (r.match !== undefined) {
@@ -147,6 +187,21 @@ export function validateLimitsConfig(value: unknown): asserts value is ILimitsCo
         if (!r.calls && !r.rate && !r.concurrency && !r.budget) throw new Error("limit rule needs a limit");
     }
 }
+/** `true` while process `pid` exists on this host. `EPERM` means it exists but belongs to someone else. */
+function processAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "EPERM";
+    }
+}
+
+/** Entries that must survive a restart: reservations, `calls` quotas, and calls still holding a concurrency slot. */
+function durable(e: Entry): boolean {
+    return e.kind === "reservation" || (!e.finished && e.activeKeys.length > 0) || e.debits.some((d) => d.kind !== "rate");
+}
+
 function hash(value: unknown): string {
     return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -169,18 +224,17 @@ export class LimitController {
         const file = config.storeFile;
         if (file) {
             if (!isAbsolute(file)) throw new Error("limits.storeFile must be absolute in the library API");
-            // Never guess that a lock is stale. After a crash an operator verifies
-            // the old process is gone before removing <storeFile>.lock.
-            this.lock = openSync(file + ".lock", "wx", 0o600);
+            this.lock = this.acquireLock(file + ".lock");
             try {
-                writeFileSync(this.lock, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+                writeFileSync(this.lock, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }));
                 fsyncSync(this.lock);
                 if (existsSync(file)) {
                     const loaded = JSON.parse(readFileSync(file, "utf8")) as State & { checksum?: string };
                     if (loaded.checksum !== hash(loaded.entries)) throw new Error("limit store checksum mismatch");
                     const s: State = loaded;
-                    if (s.version !== 1 || s.policyHash !== this.state.policyHash || !Array.isArray(s.entries))
-                        throw new Error("limit store invalid or policy changed; explicit migration required");
+                    if (s.version !== 1 || !Array.isArray(s.entries)) throw new Error("limit store invalid");
+                    if (s.policyHash !== this.state.policyHash && (config.onRulesChange ?? "migrate") === "refuse")
+                        throw new Error('limit store was written under other rules and limits.onRulesChange is "refuse"; migrate it explicitly');
                     for (const e of s.entries) {
                         if (
                             !e ||
@@ -197,7 +251,7 @@ export class LimitController {
                         )
                             throw new Error("corrupt limit store entry");
                     }
-                    this.state = s;
+                    this.state = s.policyHash === this.state.policyHash ? s : this.migrate(s);
                 }
                 this.persist(this.state);
             } catch (e) {
@@ -206,13 +260,75 @@ export class LimitController {
             }
         }
     }
+    /**
+     * Takes `<storeFile>.lock`. With `staleLock: "pid-check"`, a lock whose
+     * process is gone from this very host is stale and taken over; anything
+     * uncertain refuses, so two brokers never share a ledger.
+     */
+    private acquireLock(path: string): number {
+        try {
+            return openSync(path, "wx", 0o600);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST" || (this.config.staleLock ?? "pid-check") !== "pid-check") throw error;
+            let owner: { pid?: unknown; host?: unknown } = {};
+            try {
+                owner = JSON.parse(readFileSync(path, "utf8")) as typeof owner;
+            } catch {
+                throw new Error(`limit store lock ${path} exists and cannot be read; verify no other broker owns the store, then remove the lock`);
+            }
+            if (typeof owner.pid !== "number" || owner.host !== hostname()) {
+                throw new Error(`limit store lock ${path} belongs to ${String(owner.host ?? "an unknown host")}; verify that broker is gone, then remove the lock`);
+            }
+            if (processAlive(owner.pid)) throw new Error(`limit store lock ${path} is held by live process ${owner.pid}; another broker owns this store`);
+            console.warn(
+                `[broker] limits: taking over the stale lock ${path}: process ${owner.pid} on this host is gone (it crashed or was killed). The ledger is kept as it was.`
+            );
+            unlinkSync(path);
+            return openSync(path, "wx", 0o600);
+        }
+    }
+
+    /**
+     * Carries a store written under other rules over to the current ones:
+     * counters of rules that still exist are kept (a changed maximum applies
+     * to them from now on), counters of removed rules are dropped, and
+     * unresolved concurrency is kept unless its rule was removed.
+     */
+    private migrate(s: State): State {
+        const ids = new Set(this.config.rules.map((r) => r.id));
+        let dropped = 0;
+        const entries = s.entries.map((e) => {
+            const debits = e.debits.filter((d) => {
+                const keep = d.ruleId === undefined || ids.has(d.ruleId);
+                if (!keep) dropped++;
+                return keep;
+            });
+            if (!e.activeRules) return { ...e, debits };
+            const keep = e.activeRules.map((id) => ids.has(id));
+            const activeKeys = e.activeKeys.filter((_, i) => keep[i]);
+            const activeRules = e.activeRules.filter((_, i) => keep[i]);
+            return { ...e, debits, activeKeys, activeRules, finished: e.finished || (e.kind === "call" && activeKeys.length === 0) };
+        });
+        console.warn(
+            `[broker] limits: the store was written under other rules; migrated it to the current ${this.config.rules.length} rule(s), ` +
+                `dropping ${dropped} counter(s) of removed rules. Set limits.onRulesChange to "refuse" to stop instead.`
+        );
+        return { version: 1, policyHash: this.state.policyHash, entries };
+    }
+
     private persist(next: State): void {
         const file = this.config.storeFile;
         if (!file) return;
         const temporary = file + ".tmp";
         const fd = openSync(temporary, "w", 0o600);
         try {
-            writeFileSync(fd, JSON.stringify({ ...next, checksum: hash(next.entries) }));
+            // Only what must survive a restart: reservations (budgets, idempotency),
+            // `calls` quotas (a crash must not reset them) and unresolved
+            // concurrency. `rate` counters pace starts over short windows; losing
+            // them costs one window, and keeping them would put a synchronous disk
+            // write on every admitted call of a high-frequency reader.
+            const entries = next.entries.filter(durable);
+            writeFileSync(fd, JSON.stringify({ ...next, entries, checksum: hash(entries) }));
             fsyncSync(fd);
         } finally {
             closeSync(fd);
@@ -227,11 +343,11 @@ export class LimitController {
             }
         }
     }
-    private commit(entries: Entry[]): boolean {
+    private commit(entries: Entry[], persist = true): boolean {
         if (this.closed || this.fault) return false;
         const next: State = { ...this.state, entries };
         try {
-            this.persist(next);
+            if (persist) this.persist(next);
             this.state = next;
             return true;
         } catch {
@@ -290,7 +406,8 @@ export class LimitController {
         if (!rules.length) return { allowed: true, value: undefined };
         const now = this.clock(),
             debits: Debit[] = [],
-            activeKeys: string[] = [];
+            activeKeys: string[] = [],
+            activeRules: string[] = [];
         for (const r of rules) {
             if (r.requireReservation && (!c.providerId || !units.includes(r.budget!.unit))) return this.failure("admit", { reason: "reservation-unsupported", ruleId: r.id }, c);
             for (const kind of ["calls", "rate"] as const) {
@@ -299,20 +416,22 @@ export class LimitController {
                 const key = this.key(r, c, kind),
                     error = this.check(key, w, 1, now, r.id);
                 if (error) return this.failure("admit", error, c);
-                debits.push({ key, quantity: 1, windowMs: w.windowMs });
+                debits.push({ key, quantity: 1, windowMs: w.windowMs, ruleId: r.id, kind });
             }
             if (r.concurrency) {
                 const key = this.key(r, c, "concurrency");
                 if (this.state.entries.filter((e) => !e.finished && e.activeKeys.includes(key)).length >= r.concurrency)
                     return this.failure("admit", { reason: "concurrency-exceeded", ruleId: r.id }, c);
                 activeKeys.push(key);
+                activeRules.push(r.id);
             }
         }
         const entries = this.retained(now);
         if (entries.length >= (this.config.maxRecords ?? 10000)) return this.failure("admit", { reason: "ledger-full" }, c);
         const id = randomUUID();
-        entries.push({ id, kind: "call", at: now, context: c, debits, activeKeys, finished: activeKeys.length === 0 });
-        if (!this.commit(entries)) return this.failure("admit", { reason: "storage-unavailable" }, c);
+        entries.push({ id, kind: "call", at: now, context: c, debits, activeKeys, activeRules, finished: activeKeys.length === 0 });
+        // A call that only moves `rate` counters changes nothing that must survive a restart.
+        if (!this.commit(entries, durable(entries[entries.length - 1]))) return this.failure("admit", { reason: "storage-unavailable" }, c);
         this.audit({ timestamp: new Date(now).toISOString(), action: "admit", allowed: true, requestId: c.requestId, correlationId: c.correlationId });
         return { allowed: true, value: id };
     }
@@ -322,6 +441,44 @@ export class LimitController {
         if (this.commit(this.state.entries.map((e) => (e === found ? { ...e, finished: true } : e))))
             this.audit({ timestamp: new Date(this.clock()).toISOString(), action: "complete", allowed: true, requestId });
     }
+    /**
+     * The request deadline passed. Frees the concurrency slots of the rules
+     * that say `onTimeout: "release"`; the others stay held until the provider
+     * answers or an operator releases them.
+     */
+    timedOut(provider: string, requestId: string): void {
+        const found = this.state.entries.find((e) => e.kind === "call" && e.context.provider === provider && e.context.requestId === requestId && !e.finished);
+        if (!found || !found.activeRules) return;
+        const releasing = new Set(this.config.rules.filter((r) => r.onTimeout === "release").map((r) => r.id));
+        const keep = found.activeRules.map((id) => !releasing.has(id));
+        if (keep.every(Boolean)) return;
+        const activeKeys = found.activeKeys.filter((_, i) => keep[i]);
+        const activeRules = found.activeRules.filter((_, i) => keep[i]);
+        const released = found.activeRules.filter((_, i) => !keep[i]);
+        const next = { ...found, activeKeys, activeRules, finished: activeKeys.length === 0 };
+        if (this.commit(this.state.entries.map((e) => (e === found ? next : e))))
+            this.audit({
+                timestamp: new Date(this.clock()).toISOString(),
+                action: "timeout",
+                allowed: true,
+                requestId,
+                correlationId: found.context.correlationId,
+                releasedRules: released,
+            });
+    }
+
+    /**
+     * An operator releases every slot a call still holds, after checking the
+     * native work stopped. Returns `false` when no such unresolved call exists.
+     */
+    release(provider: string, requestId: string, by: readonly string[]): boolean {
+        const found = this.state.entries.find((e) => e.kind === "call" && e.context.provider === provider && e.context.requestId === requestId && !e.finished);
+        if (!found) return false;
+        if (!this.commit(this.state.entries.map((e) => (e === found ? { ...e, activeKeys: [], activeRules: [], finished: true } : e)))) return false;
+        this.audit({ timestamp: new Date(this.clock()).toISOString(), action: "release", allowed: true, requestId, correlationId: found.context.correlationId, by });
+        return true;
+    }
+
     reserve(c: ILimitContext, unit: string, quantity: number, idempotencyKey: string, decisionId: string): LimitOutcome<IBudgetGrant> {
         if (this.closed || this.fault) return this.failure("reserve", { reason: "storage-unavailable" }, c);
         if (!Number.isSafeInteger(quantity) || quantity <= 0 || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey))
@@ -354,7 +511,7 @@ export class LimitController {
                 key = this.key(r, c, "budget"),
                 error = this.check(key, w, quantity, now, r.id);
             if (error) return this.failure("reserve", error, c);
-            debits.push({ key, quantity, windowMs: w.windowMs });
+            debits.push({ key, quantity, windowMs: w.windowMs, ruleId: r.id, kind: "budget" });
         }
         const entries = this.retained(now);
         if (entries.length >= (this.config.maxRecords ?? 10000)) return this.failure("reserve", { reason: "ledger-full" }, c);

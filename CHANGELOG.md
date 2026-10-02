@@ -107,6 +107,27 @@ repository; the changes it needed for this release are listed under
 
 ### Fixed
 
+- **broker** A budget reservation on a resource with declared engineering
+  limits is accepted: an `allow-with-constraints` decision reserves like an
+  `allow`, and the grant carries `effect` and `obligations.constraints` for the
+  provider to apply. 1.6.0 refused every constrained allow, so the physical
+  resources could not be budgeted at all.
+- **broker** A stuck call no longer locks a concurrency limit for good on a
+  CLI broker. A rule may say `onTimeout: "release"` (right for reads) to free
+  its slot at the request deadline; the default `"hold"` keeps it. The new
+  `_broker` tool `broker_limits_release({ slot, requestId })`, behind
+  `broker.limits.admin` and audited with the operator's identity, releases a
+  held call; `broker_diagnose` reports calls held over a minute
+  (`limits-calls-held`). Both tools are exempt from admission, so the way out
+  stays open while a rule is saturated.
+- **broker** A crashed broker restarts under a supervisor: with
+  `staleLock: "pid-check"` (default) a lock whose process is gone from this
+  host is taken over and logged; any doubt still refuses. Changing the rules
+  no longer refuses startup: `onRulesChange: "migrate"` (default) keeps the
+  counters of rules that still exist and drops those of removed ones.
+- **broker** `rate` counters are no longer written to disk: a call that only
+  moves them is admitted without a synchronous write. Reservations, `calls`
+  quotas and held concurrency still are.
 - **broker** Config loading fails closed. A config file that is designated
   (`MCP_BROKER_CONFIG`, or the path given to `loadBrokerConfig()`) but missing,
   or a config file that cannot be read, is not valid JSON, or is not a JSON
@@ -124,6 +145,7 @@ repository; the changes it needed for this release are listed under
 
 ### Changed
 
+- **provider** `IBudgetReservation` gains `effect` and `obligations`.
 - **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.0`. The
   provider's peer range is unchanged.
 

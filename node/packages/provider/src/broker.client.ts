@@ -292,6 +292,10 @@ export interface IBudgetReservation {
     readonly quantity: number;
     readonly decisionId: string;
     readonly replayed: boolean;
+    /** `"allow-with-constraints"` when the resource has declared engineering limits (broker 1.6.1 and later). */
+    readonly effect?: "allow" | "allow-with-constraints";
+    /** The constraints the native work must respect, e.g. `{ minValue, maxValue }`. Apply them before acting. */
+    readonly obligations?: IAuthorizationDecision["obligations"];
 }
 export interface IBudgetSettlement {
     readonly reservationId: string;

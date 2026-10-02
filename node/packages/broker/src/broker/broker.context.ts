@@ -88,6 +88,12 @@ export interface IBrokerContext {
      */
     getAuthorityInfo?(): IBrokerAuthorityInfo | undefined;
 
+    /** `true` when execution limits are configured; `broker_limits_release` exists only then. */
+    readonly limitsEnabled?: boolean;
+
+    /** Releases the limit slots a call still holds, on behalf of `by`. `false` when no such call is held. */
+    releaseLimitCall?(slot: string, requestId: string, by: readonly string[]): boolean;
+
     /** Bounded provider telemetry counters, or `undefined` when unsupported. */
     getTelemetryStats?(): IProviderTelemetryStats | undefined;
 
