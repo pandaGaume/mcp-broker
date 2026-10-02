@@ -21,7 +21,7 @@
         "test": "npm run test --workspaces --if-present",
         "lint": "npm run lint --workspaces --if-present",
         "lint:fix": "npm run lint:fix --workspaces --if-present",
-        "bump:minor": "npm version minor --workspace @cyanmycelium/mcp-broker --tag-version-prefix=node-v -m \"release broker %s\"",
+        "bump:minor": "node scripts/bump-broker-minor.mjs",
         "format": "npm run format --workspaces --if-present",
         "format:fix": "npm run format:fix --workspaces --if-present"
     }

@@ -928,8 +928,9 @@ The package is published to npm by [`.github/workflows/release-node.yml`](https:
 
 ```sh
 # from the node/ directory:
-npm version patch            # creates a "node-v0.1.1" tag (.npmrc sets the prefix)
-git push --follow-tags
+npm run bump:minor           # updates the broker, commits, and creates node-v<version>
+git push                     # pushes the release commit
+git push origin node-v1.6.0  # pushes the tag explicitly and starts the workflow
 ```
 
 The workflow runs lint, build, test, then `npm publish --access public --provenance` and creates a GitHub Release with auto-generated notes.
