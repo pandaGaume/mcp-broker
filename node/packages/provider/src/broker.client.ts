@@ -163,6 +163,7 @@ export interface IDeclaredResource {
 
 /** `broker/authorization/declare` parameters. Describes; grants nothing. */
 export interface IAuthorizationDeclaration {
+    readonly budgetUnits?: readonly string[];
     readonly version: string;
     readonly domain: string;
     readonly namespace: { readonly resource: string };
@@ -278,6 +279,26 @@ const ID_PREFIX = "provider-broker-";
  * on {@link DirectTransport} and {@link MultiplexTransport}; the transport
  * routes the broker's answers here before anything reaches the MCP server.
  */
+
+export interface IBudgetReservationQuery extends Pick<IAuthorizationCheck, "capability" | "resource" | "resourcePath"> {
+    readonly principal: { readonly type: "caller-ref"; readonly ref: string };
+    readonly unit: string;
+    readonly quantity: number;
+    readonly idempotencyKey: string;
+}
+export interface IBudgetReservation {
+    readonly reservationId: string;
+    readonly expiresAt: number;
+    readonly quantity: number;
+    readonly decisionId: string;
+    readonly replayed: boolean;
+}
+export interface IBudgetSettlement {
+    readonly reservationId: string;
+    readonly used: number;
+    readonly result: "success" | "failure" | "refused";
+}
+
 export class BrokerClient {
     private readonly _write: (frame: string) => void;
     private readonly _writeTelemetry: (frame: string) => boolean;
@@ -304,6 +325,34 @@ export class BrokerClient {
      */
     declare(declaration: IAuthorizationDeclaration): Promise<IDeclarationAccepted> {
         return this._request("broker/authorization/declare", declaration) as Promise<IDeclarationAccepted>;
+    }
+
+    reserveBudget(query: IBudgetReservationQuery): Promise<IBudgetReservation> {
+        return this._request("broker/budget/reserve", query) as Promise<IBudgetReservation>;
+    }
+
+    settleBudget(report: IBudgetSettlement): Promise<{ readonly settled: true }> {
+        return this._request("broker/budget/settle", report) as Promise<{ readonly settled: true }>;
+    }
+
+    /** Executes only a fresh reservation. A retry must never repeat native work. */
+    async withBudget<T>(query: IBudgetReservationQuery, work: (grant: IBudgetReservation) => Promise<T>): Promise<T> {
+        const grant = await this.reserveBudget(query);
+        if (grant.replayed || Date.now() >= grant.expiresAt) throw new Error("Budget reservation was replayed or expired; native work was not started");
+        let value: T;
+        try {
+            value = await work(grant);
+        } catch (error) {
+            // A failed operation may already have emitted all reserved work.
+            try {
+                await this.settleBudget({ reservationId: grant.reservationId, used: grant.quantity, result: "failure" });
+            } catch {
+                /* debit remains */
+            }
+            throw error;
+        }
+        await this.settleBudget({ reservationId: grant.reservationId, used: grant.quantity, result: "success" });
+        return value;
     }
 
     /** Asks for one decision per check. */

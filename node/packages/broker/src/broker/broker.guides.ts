@@ -155,6 +155,8 @@ const GUIDE_INDEX = [
 // ---------------------------------------------------------------------------
 
 const GUIDE_PUBLISH_PROVIDER = [
+    "Operation budgets: declare budgetUnits along with capabilities, then use transport.broker.reserveBudget / settleBudget or withBudget. Reserve requires a live caller-ref, capability, native resource, resourcePath, unit, quantity and idempotencyKey. Declaring a unit grants nothing. A rule requiring a unit refuses unsupported providers.",
+    "A reservation is debited before native work. Never execute a replayed grant twice. Settlement and expiry never refund units in this version. Enforce expiry and physical network limits locally. broker/authorize only checks rights and consumes no quota.",
     "# Publish an MCP server into a broker slot",
     "",
     "## 1. The pairing rule",
@@ -770,6 +772,8 @@ const GUIDE_HOST_CONFIG = [
 // ---------------------------------------------------------------------------
 
 const GUIDE_DEPLOY = [
+    "Execution limits: put limits in the security file, separate from auth roles. Rules may bound calls/rate/concurrency and declared operation budgets; all matching rules intersect. Use withLimits in the library. storeFile enables a single-owner local durable ledger. broker_diagnose reports its faults and refusals.",
+    "A timeout does not release unresolved native concurrency. Inspect authority.limits.activeCalls, verify work stopped, then use the embedding-only resolveLimitCall(slot, requestId). Preserve the ledger across restart. After a crash, remove a stale .lock only after verifying its owner is gone. Multi-broker storage is unsupported.",
     "# Deploying the broker",
     "",
     "## 1. Two ways to run it",

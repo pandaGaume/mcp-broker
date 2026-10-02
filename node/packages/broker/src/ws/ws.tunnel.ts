@@ -1,3 +1,4 @@
+import { LimitController } from "../limits/controller";
 import { AsyncLocalStorage } from "async_hooks";
 import * as fs from "fs";
 import * as http from "http";
@@ -485,6 +486,9 @@ export class WsTunnel implements IBrokerContext {
     /** Optional low-priority provider telemetry queue. */
     private readonly _telemetry: ProviderTelemetryDispatcher | null;
 
+    private readonly _limits: LimitController | undefined;
+    private readonly _requestEpoch = randomUUID();
+
     constructor(options: IWsTunnelOptions) {
         this._options = options;
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
@@ -515,6 +519,7 @@ export class WsTunnel implements IBrokerContext {
             knownPrincipals: options.knownProviderPrincipals,
             callerRefMaxAgeMs: (options.providerRequestTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS) || DEFAULT_CALLER_REF_MAX_AGE_MS,
         });
+        this._limits = options.limits ? new LimitController(options.limits) : undefined;
     }
 
     /**
@@ -552,9 +557,15 @@ export class WsTunnel implements IBrokerContext {
         if (problems.length > 0) throw new Error(`protectedSlots cannot be enforced: ${problems.join("; ")}.`);
     }
 
+    /** Operator recovery only: call after independently verifying native work stopped.
+     * Not exposed over MCP or provider RPC. Does not refund calls or operation budgets. */
+    public resolveLimitCall(provider: string, requestId: string): void {
+        this._limits?.complete(provider, requestId);
+    }
+
     /** The authorization state providers declared, for `broker_diagnose`. */
     public getAuthorityInfo(): IBrokerAuthorityInfo {
-        return this._authority.info(this._authorization?.capabilities);
+        return { ...this._authority.info(this._authorization?.capabilities), ...(this._limits ? { limits: this._limits.info() } : {}) };
     }
 
     // -------------------------------------------------------------------------
@@ -775,6 +786,8 @@ export class WsTunnel implements IBrokerContext {
                     : { error: { code: -32000, message: `Loopback provider "${name}" is no longer registered.` } }
             );
         return {
+            reserveBudget: (params: unknown) => call("broker/budget/reserve", params),
+            settleBudget: (params: unknown) => call("broker/budget/settle", params),
             declare: (params: unknown) => call(BROKER_DECLARE_METHOD, params),
             authorize: (params: unknown) => call(BROKER_AUTHORIZE_METHOD, params),
             reportResult: (params: unknown) => {
@@ -1112,6 +1125,7 @@ export class WsTunnel implements IBrokerContext {
         // busy, and both of these fire on sockets that are about to be torn
         // down. They are `unref`'d, so they cannot by themselves hold a process
         // open, but a test runner that checks for leaked handles counts them.
+        this._limits?.close();
         this._stopHeartbeat();
         this._stopRequestTimeoutSweep();
         this._stopCallerRefSweep();
@@ -1430,6 +1444,25 @@ export class WsTunnel implements IBrokerContext {
         // so a frame with two `_meta` keys could hide a caller reference from
         // the strip and show it to the provider. Re-serializing leaves exactly
         // what the broker checked.
+        if (this._limits && Array.isArray(parsed) && parsed.some((item) => item?.method === "tools/call")) {
+            for (const item of parsed)
+                if (item && (typeof item.id === "string" || typeof item.id === "number")) {
+                    this._deliverToSink(
+                        state,
+                        sink,
+                        JSON.stringify({
+                            jsonrpc: "2.0",
+                            id: item.id,
+                            error: {
+                                code: -32029,
+                                message: "Tool batches are unavailable with admission limits; send individual requests",
+                                data: { reason: "untracked-batch" },
+                            },
+                        })
+                    );
+                }
+            return "";
+        }
         if (Array.isArray(parsed)) {
             // A batch item without `method` is response-shaped. A client has
             // nothing to answer (the broker relays no provider request), and an
@@ -1448,20 +1481,21 @@ export class WsTunnel implements IBrokerContext {
         stripCallerMeta(message);
 
         const clientId = message.id;
-        if (typeof clientId !== "string" && typeof clientId !== "number") return JSON.stringify(message);
+        if (typeof clientId !== "string" && typeof clientId !== "number") return this._limits && message.method === "tools/call" ? "" : JSON.stringify(message);
 
         // Every addressed MCP request carries a valid W3C context. A provider
         // can continue it directly, and an intermediary can replace parent-id
         // with its CLIENT span id before calling the next slot.
         const trace = ensureTraceparent(message);
 
-        const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._nextRequestId++}`;
+        const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._limits ? this._requestEpoch + "-" : ""}${this._nextRequestId++}`;
         const timeout = this._requestTimeoutMs();
 
         // A provider that declared an authorization domain gets, with each
         // request, a reference to whoever sent it: valid on this slot, for as
         // long as this request is pending, and good for nothing else.
         let callerRef: string | undefined;
+        let admissionCorrelationId = clientCorrelationId ?? trace.traceId;
         if (sink.type !== "broker") {
             const providerPrincipal = this._providerPrincipalOfSlot(providerName, state);
             if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id)) {
@@ -1475,9 +1509,42 @@ export class WsTunnel implements IBrokerContext {
                 );
                 injectCallerMeta(message, issued);
                 callerRef = issued.ref;
+                admissionCorrelationId = issued.correlationId;
             }
         }
 
+        if (this._limits && providerName !== AggregateServer.SLOT && message.method === "tools/call") {
+            let failure: unknown;
+            try {
+                const resource = this._slotResourceResolver.resolve(providerName);
+                const provider = this._providerPrincipalOfSlot(providerName, state);
+                const capability = resource ? (this._authorization?.capabilityClassifier.classify(message, resource, providerName)?.capability ?? "mcp.tools.call") : undefined;
+                if (!resource || !capability || !this._clientMayReach(providerName, principal) || !this._authorizeMcpFrame(providerName, JSON.stringify(message), principal))
+                    failure = { reason: "authorization-denied" };
+                else {
+                    const outcome = this._limits.admit(
+                        {
+                            subjects: this._authorizationSubject(principal).ids,
+                            provider: providerName,
+                            providerId: provider?.id,
+                            capability,
+                            resource: resource.value,
+                            requestId: brokerId,
+                            correlationId: admissionCorrelationId,
+                        },
+                        this._authority.declarationOf(provider?.id)?.budgetUnits ?? []
+                    );
+                    if (!outcome.allowed) failure = outcome.error;
+                }
+            } catch {
+                failure = { reason: "admission-error" };
+            }
+            if (failure) {
+                this._authority.releaseRef(callerRef);
+                this._deliverToSink(state, sink, JSON.stringify({ jsonrpc: "2.0", id: clientId, error: { code: -32029, message: "Tool admission refused", data: failure } }));
+                return "";
+            }
+        }
         state.pending.set(brokerId, { sink, clientId, expiresAt: timeout > 0 ? Date.now() + timeout : 0, ...(callerRef ? { callerRef } : {}) });
         message.id = brokerId;
         return JSON.stringify(message);
@@ -2756,6 +2823,7 @@ export class WsTunnel implements IBrokerContext {
      * envelope when the provider's WebSocket is a multiplexed connection.
      */
     private _sendToProvider(state: IProviderState, providerName: string, data: string, principal: IPrincipal | null = null): void {
+        if (!data) return;
         // The `_all` aggregate is a loopback, but it needs the caller's principal
         // to scope its catalog/routing, hand it off directly rather than through
         // the generic transport, which would drop the context.
@@ -2895,6 +2963,7 @@ export class WsTunnel implements IBrokerContext {
                 // Response: route to the specific sink that made the request, and
                 // put the client's own id back in place of the broker's before it
                 // is delivered (see `_trackRequest`).
+                this._limits?.complete(providerName, String(msg.id));
                 const entry = state.pending.get(msg.id);
                 if (entry) {
                     state.pending.delete(msg.id);
@@ -2982,6 +3051,12 @@ export class WsTunnel implements IBrokerContext {
         }
         const origin = { slot: providerName, principal };
         switch (method) {
+            case "broker/budget/reserve":
+                return this._limits
+                    ? this._authority.reserveBudget(params, origin, (slot, id) => this._providers.get(slot)?.pending.has(id) ?? false, this._limits)
+                    : { error: { code: -32029, message: "No budget policy configured", data: { reason: "no-budget-policy" } } };
+            case "broker/budget/settle":
+                return this._limits ? this._authority.settleBudget(params, origin, this._limits) : { error: { code: -32029, message: "No budget policy configured" } };
             case BROKER_DECLARE_METHOD:
                 return this._authority.declare(params, origin);
             case BROKER_AUTHORIZE_METHOD:
