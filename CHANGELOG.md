@@ -146,8 +146,10 @@ repository; the changes it needed for this release are listed under
 ### Changed
 
 - **provider** `IBudgetReservation` gains `effect` and `obligations`.
-- **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.0`. The
-  provider's peer range is unchanged.
+- **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.1`. The
+  provider's peer range is unchanged. 1.4.1 fixes the Streamable HTTP endpoint
+  behind every `/<slot>/mcp`: one GET stream per session, and a POST whose
+  connection breaks is settled instead of left pending.
 
 ### Coordinated releases
 
