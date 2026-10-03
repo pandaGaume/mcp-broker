@@ -79,18 +79,24 @@ static int _send_all(mcpb_ws_t *ws, const uint8_t *buf, size_t len)
 /* Reads into buf until *got reaches want, or the deadline passes. On a
  * timeout *got keeps the progress so the caller can come back for the rest:
  * that is the whole difference with _recv_exact, and the reason a frame can
- * straddle several polls without the stream losing its framing. */
+ * straddle several polls without the stream losing its framing.
+ *
+ * A passed deadline does not skip the read: recv is still called, with 0,
+ * which the port treats as non-blocking (mcpb_port.h). Bytes already waiting
+ * are taken, and the port's own MCPB_ERR_TIMEOUT ends the loop once there
+ * are none. Checking the deadline before reading would make a poll with
+ * timeout 0 never read anything, since its deadline is reached on entry. */
 static int _recv_more(mcpb_ws_t *ws, uint8_t *buf, size_t want, size_t *got,
                       const deadline_t *d)
 {
     while (*got < want)
     {
         const int left = _remaining(ws, d);
-        if (left == 0 && !d->infinite)
-            return MCPB_ERR_TIMEOUT;
         const int n = ws->port->recv(ws->port->ctx, buf + *got, want - *got, left);
         if (n < 0)
             return n;
+        if (n == 0 && left == 0)
+            return MCPB_ERR_TIMEOUT; /* a port breaking the never-0 rule */
         *got += (size_t)n;
     }
     return MCPB_OK;
@@ -103,11 +109,11 @@ static int _recv_exact(mcpb_ws_t *ws, uint8_t *buf, size_t len,
     while (got < len)
     {
         const int left = _remaining(ws, d);
-        if (left == 0 && !d->infinite)
-            return MCPB_ERR_TIMEOUT;
         const int n = ws->port->recv(ws->port->ctx, buf + got, len - got, left);
         if (n < 0)
             return n;
+        if (n == 0 && left == 0)
+            return MCPB_ERR_TIMEOUT;
         got += (size_t)n;
     }
     return MCPB_OK;

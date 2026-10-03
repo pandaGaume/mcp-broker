@@ -55,6 +55,10 @@ typedef struct
     /* sleep_ms: the clock moves by what was asked, and the asks are counted. */
     uint32_t slept_ms;
     int      sleeps;
+    /* The timeout of the latest recv, and how many there were: a poll with
+     * timeout 0 must still read, without waiting. */
+    int last_recv_timeout;
+    int recvs;
 } fake_t;
 
 static void fake_push(fake_t *f, const void *data, size_t n)
@@ -84,8 +88,9 @@ static int f_send(void *ctx, const uint8_t *b, size_t n, int t)
 }
 static int f_recv(void *ctx, uint8_t *b, size_t n, int t)
 {
-    (void)t;
     fake_t *f = (fake_t *)ctx;
+    f->last_recv_timeout = t;
+    f->recvs++;
     if (f->pause_at != 0 && !f->paused && f->inbox_pos >= f->pause_at)
     {
         f->paused = 1;
@@ -614,6 +619,63 @@ int main(void)
 
         check(mcpb_provider_send(&pr, "{\"result\":{}}", 13) == MCPB_OK, "reply sent");
         check(pr.tx_messages == 1 && pr.rx_messages == 1, "counters up to date");
+    }
+    {
+        /* Timeout 0 is non-blocking, not "do not read": a message already on
+         * the socket comes back from a poll with timeout 0, read by a recv
+         * that was told not to wait. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[256]; const char *out; size_t olen;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, "{\"id\":7}", 8));
+
+        memset(&c, 0, sizeof(c));
+        c.host = "broker.local"; c.port = 3000;
+        c.name = "zero-timeout";
+        c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_provider_init(&pr, &p, &c);
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT,
+              "timeout 0: the first poll connects");
+
+        const int before = f.recvs;
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_OK,
+              "timeout 0: a waiting message is returned");
+        check(olen == 8 && memcmp(out, "{\"id\":7}", 8) == 0,
+              "timeout 0: exact content");
+        check(f.recvs > before && f.last_recv_timeout == 0,
+              "timeout 0: read through a recv that does not wait");
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT,
+              "timeout 0: nothing left, idle");
+        check(f.last_recv_timeout == 0, "timeout 0: the idle poll did not wait");
+    }
+    {
+        /* Timeout 0 on a frame split across polls: the bytes read before the
+         * pause are kept, and the next zero-timeout poll finishes the frame. */
+        fake_t f; mcpb_port_t p; mcpb_provider_t pr;
+        mcpb_provider_config_t c; uint8_t rx[2048];
+        unsigned char fr[256]; const char *out; size_t olen;
+        fake_init(&f, &p);
+        push_handshake_ok(&f);
+        const size_t frame_at = f.inbox_len;
+        fake_push(&f, fr, make_frame(fr, 1, 0x1, "{\"id\":8}", 8));
+        f.pause_at = frame_at + 5; /* inside the payload */
+
+        memset(&c, 0, sizeof(c));
+        c.host = "broker.local"; c.port = 3000;
+        c.name = "zero-timeout-split";
+        c.rx_buffer = rx; c.rx_capacity = sizeof(rx);
+        mcpb_provider_init(&pr, &p, &c);
+        mcpb_provider_poll(&pr, &out, &olen, 0); /* connects */
+
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_ERR_TIMEOUT,
+              "timeout 0: half a frame is not a message");
+        check(mcpb_provider_is_connected(&pr), "timeout 0: the link survives the pause");
+        check(mcpb_provider_poll(&pr, &out, &olen, 0) == MCPB_OK,
+              "timeout 0: the next poll completes the frame");
+        check(olen == 8 && memcmp(out, "{\"id\":8}", 8) == 0,
+              "timeout 0: content intact across polls");
     }
     {
         /* The window doubles and caps. Deterministic, therefore checkable,
