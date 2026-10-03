@@ -73,8 +73,8 @@ MCPB_API const char *mcpb_strerror(int err);
 
 #define MCPB_VERSION_MAJOR 0
 #define MCPB_VERSION_MINOR 4
-#define MCPB_VERSION_PATCH 1
-#define MCPB_VERSION_STRING "0.4.1"
+#define MCPB_VERSION_PATCH 2
+#define MCPB_VERSION_STRING "0.4.2"
 
 #ifdef __cplusplus
 } /* extern "C" */
