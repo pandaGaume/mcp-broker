@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="132" height="20" viewBox="0 0 132 20" role="img" aria-labelledby="title desc">
+  <title id="title">mcp-broker: 1.6.1</title>
+  <desc id="desc">Declared MCP Broker compatibility version. This static badge does not certify test results.</desc>
+  <defs>
+    <clipPath id="round"><rect width="132" height="20" rx="3"/></clipPath>
+    <linearGradient id="shine" x2="0" y2="100%"><stop offset="0" stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-opacity=".08"/></linearGradient>
+  </defs>
+  <g clip-path="url(#round)">
+    <path fill="#0756a6" d="M0 0h87v20H0z"/>
+    <path fill="#008cff" d="M87 0h45v20H87z"/>
+    <rect width="132" height="20" fill="url(#shine)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">
+    <text x="43.5" y="14">mcp-broker</text>
+    <text x="109.5" y="14">1.6.1</text>
+  </g>
+</svg>

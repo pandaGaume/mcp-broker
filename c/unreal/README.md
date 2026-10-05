@@ -1,3 +1,5 @@
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](../../LICENSE)
+
 # mcp-broker on Unreal Engine 5
 
 An Unreal plugin that publishes the MCP servers running inside a game (or an editor) as provider slots on a CyanMycelium mcp-broker, through **one WebSocket for all of them**. Unreal is one process; a socket per server is not what it wants, so the multiplexed endpoint is the default here and the dedicated one is the exception.

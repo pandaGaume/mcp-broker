@@ -1,3 +1,7 @@
+[![npm](https://img.shields.io/npm/v/@cyanmycelium/mcp-broker-provider)](https://www.npmjs.com/package/@cyanmycelium/mcp-broker-provider)
+[![CI (Node)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-node.yml/badge.svg)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-node.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 # @cyanmycelium/mcp-broker-provider
 
 Provider side of the [CyanMycelium MCP broker](https://github.com/pandaGaume/mcp-broker) tunnel: what an application uses to **publish** its MCP server to a broker slot.

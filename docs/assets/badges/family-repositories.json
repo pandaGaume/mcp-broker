@@ -1,0 +1,78 @@
+{
+  "description": "Exact local broker dependency versions, including pinned submodules. Repositories without a local broker dependency display the adjacent mcp-broker source version, as requested. The family emblem is placed beside the project logo, or alone when no logo exists. This is not a certification.",
+  "repositories": [
+    {
+      "repository": "mcp-broker",
+      "version": "1.6.1",
+      "sourceType": "source",
+      "evidence": "node/packages/broker/package.json"
+    },
+    {
+      "repository": "mcp-cache",
+      "version": "1.6.0",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    },
+    {
+      "repository": "mcp-core",
+      "version": "1.6.1",
+      "sourceType": "neighbor",
+      "evidence": "../mcp-broker/node/packages/broker/package.json"
+    },
+    {
+      "repository": "mcp-for-babylon",
+      "version": "1.6.1",
+      "sourceType": "neighbor",
+      "evidence": "../mcp-broker/node/packages/broker/package.json"
+    },
+    {
+      "repository": "mcp-history",
+      "version": "1.6.0",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    },
+    {
+      "repository": "mcp-modbus",
+      "version": "1.6.0",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    },
+    {
+      "repository": "mcp-modbus-bluepanda-fixes",
+      "version": "1.3.4",
+      "sourceType": "submodule-dependency",
+      "evidence": "deps/mcp-broker submodule at b7092a243b2e7cdc1d2de21a5df9ed077b77827c"
+    },
+    {
+      "repository": "mcp-network-discovery",
+      "version": "1.6.0",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    },
+    {
+      "repository": "mcp-opc-ua",
+      "version": "1.6.1",
+      "sourceType": "neighbor",
+      "evidence": "../mcp-broker/node/packages/broker/package.json"
+    },
+    {
+      "repository": "mcp-scada",
+      "version": "1.6.0",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    },
+    {
+      "repository": "mcp-uns",
+      "version": "1.6.1",
+      "sourceType": "neighbor",
+      "evidence": "../mcp-broker/node/packages/broker/package.json"
+    },
+    {
+      "repository": "mcp-vault",
+      "version": "1.6.1",
+      "sourceType": "local-dependency",
+      "evidence": "node_modules/@cyanmycelium/mcp-broker/package.json"
+    }
+  ],
+  "logoSha256": "a7b7704a9ab1e4bb4be2a478ef0e13b7434e497f85786639d31ccd0b6375a82c"
+}
