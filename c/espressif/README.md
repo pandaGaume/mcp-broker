@@ -1,3 +1,5 @@
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](../../LICENSE)
+
 # mcp-broker on ESP-IDF
 
 The ESP32 side of the tunnel: an IDF component that runs [`libmcpb`](../libmcpb/) on its [Espressif port](../ports/espressif/) inside one FreeRTOS task, and a sample project that publishes a device as a broker slot over Wi-Fi.

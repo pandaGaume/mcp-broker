@@ -1,3 +1,6 @@
+[![CI (C)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-c.yml/badge.svg)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-c.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](../LICENSE)
+
 # mcp-broker: C
 
 The device side of the tunnel. Where [`node/packages/provider`](../node/packages/provider) lets a JavaScript application publish an MCP server through the broker, this folder does the same for firmware: a client that dials out to `ws[s]://<host>/provider/<name>`, keeps the link alive, reconnects, and hands one JSON-RPC message at a time to whatever MCP implementation the device already has.
