@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
 import { DirectTransport, callerReferenceOf } from "@cyanmycelium/mcp-broker-provider";
 import { startTestBroker, type ITestBroker } from "../src/testing";
 import { mcpCall } from "./streamable.helper";
@@ -10,10 +9,6 @@ import type { ILimitsConfig } from "../src/limits/controller";
  * engineering limits, a slot freed by its deadline, and an operator releasing
  * a stuck call from a running broker.
  */
-
-if (typeof globalThis.WebSocket === "undefined") {
-    globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-}
 
 interface Reply {
     result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string }[] };

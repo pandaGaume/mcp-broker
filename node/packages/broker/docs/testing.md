@@ -163,6 +163,8 @@ network exporter is involved.
 | `broker.tunnel.getAuthorityInfo()` | declarations, protected slots, live caller references |
 # Testing engineering patterns (1.7.0)
 
+The broker's Vitest configuration loads `tests/setup.ts` before every test file. It supplies `ws` as the global WebSocket when the runtime has none, so provider integration tests work on Node 20 without per-file initialization. CI covers Node 20 and Node 22, including a Node 22 run with `NODE_OPTIONS=--no-experimental-websocket`. Keep runtime compatibility setup in this shared file when adding tests.
+
 `startTestBroker({ policy: { resourceLimits: [{ id: "maintenance", pattern: "/nord/valves/{id}", where: { id: "V-0\\d{2}" }, limits: { maxValue: 80 } }], roles, assignments } })` installs the same operator rules as the security file. The provider's `transport.broker.declare()` accepts concrete resources and `{ resourcePattern, where?, limits? }` entries. Assert `effect: "allow-with-constraints"` and the returned obligations; `allowed` is false for constrained grants. Budgets use the same constraints and empty intersections refuse reservations.
 
 `broker.tunnel.getAuthorityInfo()` exposes patterns, rules and recent limit problems. Read `broker://authority` on `_broker` or call `broker_info` to verify the MCP surface. Run `npm run bench:limits --workspace @cyanmycelium/mcp-broker` from `node/` for 1,000 indexed patterns and 1,000 overlapping patterns. The second case exposes the cost of checking every applicable rule.

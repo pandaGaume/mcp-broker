@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { WebSocket as NodeWebSocket } from "ws";
 import { DirectTransport, callerReferenceOf } from "@cyanmycelium/mcp-broker-provider";
 import { startTestBroker, type ITestBroker } from "../src/testing/index";
 import { mcpCall } from "./streamable.helper";
@@ -11,13 +10,6 @@ import { mcpCall } from "./streamable.helper";
  *
  * Kept short on purpose: it doubles as the example the testing guide points to.
  */
-
-// The provider transports use the global WebSocket, which Node has from 22 on.
-// On Node 20 (still supported, and what CI runs) `ws` stands in; it accepts
-// the same `{ headers }` the transports pass for the secret.
-if (typeof globalThis.WebSocket === "undefined") {
-    globalThis.WebSocket = NodeWebSocket as unknown as typeof globalThis.WebSocket;
-}
 
 let broker: ITestBroker | null = null;
 afterEach(async () => {

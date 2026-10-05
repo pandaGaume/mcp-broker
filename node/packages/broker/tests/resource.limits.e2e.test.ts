@@ -1,12 +1,7 @@
 import { expect, it } from "vitest";
-import { WebSocket } from "ws";
 import { DirectTransport } from "@cyanmycelium/mcp-broker-provider";
 import { startTestBroker } from "../src/testing";
 import { mcpCall } from "./streamable.helper";
-
-if (typeof globalThis.WebSocket === "undefined") {
-    globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
-}
 
 it("accepts provider patterns and policy.resourceLimits through the real test broker", async () => {
     const broker = await startTestBroker({
