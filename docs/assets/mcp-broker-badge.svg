@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="132" height="20" viewBox="0 0 132 20" role="img" aria-labelledby="title desc">
-  <title id="title">mcp-broker: 1.6.1</title>
-  <desc id="desc">MCP Broker version 1.6.1, read from node/packages/broker/package.json. This badge is not a certification.</desc>
+  <title id="title">mcp-broker: 1.7.0</title>
+  <desc id="desc">MCP Broker version 1.7.0, read from node/packages/broker/package.json. This badge is not a certification.</desc>
   <defs><clipPath id="round"><rect width="132" height="20" rx="3"/></clipPath></defs>
   <g clip-path="url(#round)"><path fill="#0756a6" d="M0 0h87v20H0z"/><path fill="#008cff" d="M87 0h45v20H87z"/></g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">
-    <text x="43.5" y="14">mcp-broker</text><text x="109.5" y="14">1.6.1</text>
+    <text x="43.5" y="14">mcp-broker</text><text x="109.5" y="14">1.7.0</text>
   </g>
 </svg>

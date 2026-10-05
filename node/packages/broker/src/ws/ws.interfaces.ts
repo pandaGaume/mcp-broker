@@ -128,7 +128,7 @@ export type ProviderTakeoverMode = "reject" | "liveness" | "always";
  * - a `RegExp`, tested against the whole header
  * - a predicate, when the decision needs more than the string
  */
-export type AllowedOrigins = readonly string[] | RegExp | ((origin: string) => boolean);
+export type AllowedOrigins = readonly string[] | RegExp | { readonly pattern: string; readonly flags?: string } | ((origin: string) => boolean);
 
 /** One Streamable HTTP session attached to a provider slot. */
 export interface IHttpSession {
@@ -547,6 +547,7 @@ export interface IWsTunnelOptions {
      * slot name. Enforced from startup. Requires {@link providerAuth}: without
      * provider identities there is nobody to restrict them to.
      */
+    resourceLimits?: readonly import("../authority/resource.limits").IResourceLimitRule[];
     protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
 
     /**

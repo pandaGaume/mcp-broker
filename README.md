@@ -1,4 +1,3 @@
-[![@cyanmycelium/mcp-broker-provider](https://img.shields.io/npm/v/@cyanmycelium/mcp-broker-provider)](https://www.npmjs.com/package/@cyanmycelium/mcp-broker-provider) [![mcp-broker: 1.6.1](docs/assets/mcp-broker-badge.svg)](https://github.com/pandaGaume/mcp-broker)
 [![npm](https://img.shields.io/npm/v/@cyanmycelium/mcp-broker)](https://www.npmjs.com/package/@cyanmycelium/mcp-broker)
 [![CI](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-node.yml/badge.svg)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-node.yml)
 [![CI (C)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-c.yml/badge.svg)](https://github.com/pandaGaume/mcp-broker/actions/workflows/ci-c.yml)

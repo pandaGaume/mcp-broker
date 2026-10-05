@@ -1,6 +1,6 @@
 import { McpBehavior } from "@cyanmycelium/mcp-core";
 import type { McpResource, McpResourceContent, McpTool } from "@cyanmycelium/mcp-core";
-import { BROKER_INFO_URI, BrokerInfoAdapter } from "../adapters/broker.adapter.info";
+import { BROKER_INFO_URI, BROKER_AUTHORITY_URI, BrokerInfoAdapter } from "../adapters/broker.adapter.info";
 import { brokerBaselineResourceDescription, brokerBaselineResourceName, brokerBaselineToolDescription } from "../broker.grammars";
 import type { IBrokerContext } from "../broker.context";
 
@@ -30,6 +30,12 @@ export class BrokerInfoBehavior extends McpBehavior {
 
     protected override _buildResources(): McpResource[] {
         return [
+            {
+                uri: BROKER_AUTHORITY_URI,
+                name: "Broker authority",
+                mimeType: "application/json",
+                description: "Declared resource patterns and operator engineering limits in force.",
+            },
             {
                 uri: BROKER_INFO_URI,
                 name: brokerBaselineResourceName(BROKER_INFO_URI),

@@ -1,6 +1,6 @@
 {
     "name": "@cyanmycelium/mcp-broker",
-    "version": "1.6.1",
+    "version": "1.7.0",
     "description": "WebSocket-based Model Context Protocol broker. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports.",
     "type": "module",
     "license": "Apache-2.0",
@@ -63,6 +63,7 @@
         "start": "node dist/bin.js",
         "pack:mcpb": "npm run build && node scripts/pack-mcpb.mjs",
         "test": "vitest run",
+        "bench:limits": "vitest bench --run tests/resource.limits.bench.ts",
         "test:watch": "vitest",
         "demo:oauth": "npm run build && node web/demos/oauth-lab/server/start.mjs",
         "demo:oauth:smoke": "node web/demos/oauth-lab/server/smoke-test.mjs",
@@ -77,6 +78,7 @@
         "@cyanmycelium/mcp-core": "^1.4.1",
         "jose": "^6.2.3",
         "open": "^11.0.0",
+        "re2js": "^2.8.6",
         "ws": "^8.18.0"
     },
     "devDependencies": {

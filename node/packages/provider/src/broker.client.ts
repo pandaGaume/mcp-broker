@@ -168,7 +168,10 @@ export interface IAuthorizationDeclaration {
     readonly domain: string;
     readonly namespace: { readonly resource: string };
     readonly capabilities: readonly string[];
-    readonly resources?: readonly IDeclaredResource[];
+    readonly resources?: readonly (
+        | IDeclaredResource
+        | { readonly resourcePattern: string; readonly where?: Readonly<Record<string, string>>; readonly limits?: IResourceLimits }
+    )[];
     readonly protects?: readonly string[];
     /**
      * Declared capabilities whose allowed decisions this provider promises to

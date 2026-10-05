@@ -1,3 +1,4 @@
+import { compileRegex } from "../authority/resource.limits";
 import { LimitController } from "../limits/controller";
 import { AsyncLocalStorage } from "async_hooks";
 import * as fs from "fs";
@@ -287,10 +288,12 @@ function originPredicate(allowed: AllowedOrigins | undefined): (origin: string) 
     if (!allowed) return () => false;
     if (typeof allowed === "function") return allowed;
     if (allowed instanceof RegExp) {
-        return (origin) => {
-            allowed.lastIndex = 0;
-            return allowed.test(origin);
-        };
+        const regex = compileRegex(allowed.source, allowed.flags);
+        return (origin) => regex.matcher(origin).find();
+    }
+    if ("pattern" in allowed) {
+        const regex = compileRegex(allowed.pattern, allowed.flags);
+        return (origin) => regex.matcher(origin).find();
     }
     const exact = new Set(allowed);
     return (origin) => exact.has(origin);
@@ -530,6 +533,7 @@ export class WsTunnel implements IBrokerContext {
         this._validateProtectedSlots();
         this._authority = new BrokerAuthority({
             protectedSlots: options.protectedSlots,
+            resourceLimits: options.resourceLimits,
             slotResources: this._slotResourceResolver,
             authorization: this._authorization,
             securityVersion: options.securityVersion,

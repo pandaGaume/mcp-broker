@@ -348,18 +348,21 @@ const envOrigins = process.env["MCP_BROKER_ALLOWED_ORIGINS"]
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-let allowedOrigins: readonly string[] | RegExp | undefined;
+import { compileRegex } from "./authority/resource.limits";
+
+let allowedOrigins: readonly string[] | { readonly pattern: string; readonly flags?: string } | undefined;
 if (envOrigins?.length) {
     allowedOrigins = envOrigins;
 } else if (Array.isArray(config.allowedOrigins)) {
     allowedOrigins = config.allowedOrigins;
 } else if (config.allowedOrigins) {
     try {
-        allowedOrigins = new RegExp(config.allowedOrigins.pattern, config.allowedOrigins.flags);
+        compileRegex(config.allowedOrigins.pattern, config.allowedOrigins.flags);
+        allowedOrigins = config.allowedOrigins;
     } catch (err) {
-        // Falling back to the closed default rather than starting with a rule
-        // the operator believes is in force but which never compiled.
-        console.error(`[mcp-broker] Ignoring allowedOrigins.pattern: ${(err as Error).message}`);
+        // Invalid security expressions refuse startup.
+        console.error(`[mcp-broker] Cannot use allowedOrigins.pattern: ${(err as Error).message}`);
+        process.exit(1);
     }
 }
 
@@ -371,7 +374,7 @@ if (envOrigins?.length) {
  * is listed, and nothing else says so until the request fails.
  */
 function describeAllowedOrigins(): string {
-    if (allowedOrigins instanceof RegExp) return `pattern ${String(allowedOrigins)}`;
+    if (allowedOrigins && "pattern" in allowedOrigins) return `pattern /${allowedOrigins.pattern}/${allowedOrigins.flags ?? ""} (RE2)`;
     if (allowedOrigins && allowedOrigins.length > 0) return allowedOrigins.join(", ");
     return "none (set MCP_BROKER_ALLOWED_ORIGINS, or allowedOrigins in the config file). Requests carrying no Origin header (Claude Desktop, MCP Inspector, any server-side SDK) still pass";
 }
@@ -659,6 +662,8 @@ async function main(): Promise<void> {
         // ── Security file: one identity per provider, protected slots ────────
         if (security) {
             if (security.credentials.length > 0) builder.withProviderPrincipals(security.credentials);
+            const resourceLimits = security.security.authorization?.resourceLimits;
+            if (resourceLimits) builder.withResourceLimits(resourceLimits);
             const protectedSlots = security.security.authorization?.protectedSlots;
             if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
             if (security.security.limits) builder.withLimits(security.security.limits);

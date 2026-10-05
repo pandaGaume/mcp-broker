@@ -43,6 +43,11 @@ afterEach(async () => {
 });
 
 describe("browser origins on /<slot>/mcp", () => {
+    it("uses RE2 for object-form patterns and safely refuses a hostile origin", async () => {
+        const base = await start({ pattern: "^(https?://)?([a-z]+)+\\.example\\.fr$" });
+        expect((await post(base, "https://app.example.fr")).status).toBe(200);
+        expect((await post(base, "https://" + "a".repeat(10000) + "!.example.fr")).status).toBe(403);
+    });
     it("accepts a client that sends no Origin, whatever the configuration", async () => {
         const base = await start();
         expect((await post(base)).status).toBe(200);

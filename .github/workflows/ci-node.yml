@@ -21,7 +21,7 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
             matrix:
-                node-version: [20.x]
+                node-version: [20.x, 22.x]
         steps:
             - uses: actions/checkout@v5
             - uses: actions/setup-node@v5
@@ -35,3 +35,8 @@ jobs:
             # Type-checks the test files too, which `build` skips and vitest never verifies.
             - run: npm run typecheck
             - run: npm test
+            - name: Test without the native WebSocket
+              if: matrix.node-version == '22.x'
+              run: npm test
+              env:
+                  NODE_OPTIONS: --no-experimental-websocket

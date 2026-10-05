@@ -11,6 +11,7 @@ export type {
     WsTunnelOptions,
     StaticMount,
 } from "./ws/ws.interfaces";
+export type { IResourceLimitRule } from "./authority/resource.limits";
 export {
     BrokerAuthority,
     BROKER_AUDIT_RESULT_METHOD,

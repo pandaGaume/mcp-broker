@@ -49,7 +49,8 @@ export type AuthorizationDecisionReason =
     | "evaluation-error"
     | "undeclared-resource"
     | "undeclared-capability"
-    | "no-policy";
+    | "no-policy"
+    | "empty-limits";
 
 export interface IAuthorizationDecision {
     readonly allowed: boolean;
@@ -131,6 +132,7 @@ export interface IAuthorizationAuditEvent {
     readonly onBehalfOf?: "caller" | "provider";
     /** Only for a `broker/authorize` decision: the provider's native identifier of the resource. */
     readonly nativeResource?: string;
+    readonly limitSources?: readonly string[];
     /** Only for a `broker/authorize` decision: the attributes the provider sent, sensitive keys masked. */
     readonly attributes?: Readonly<Record<string, unknown>>;
     /**

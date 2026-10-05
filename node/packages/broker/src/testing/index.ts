@@ -78,7 +78,7 @@ export interface ITestBrokerOptions {
      * is enough to test a happy path; pass one to test a refusal.
      * `subjectMapping` is fixed by the kit (see {@link ITestCaller}).
      */
-    readonly policy?: Omit<IAuthorizationPolicyConfig, "subjectMapping">;
+    readonly policy?: Omit<IAuthorizationPolicyConfig, "subjectMapping"> & { readonly resourceLimits?: readonly import("../authority/resource.limits").IResourceLimitRule[] };
 
     /** Protected slots, as in the security file. Needs `providers`. */
     readonly protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
@@ -195,6 +195,7 @@ export async function startTestBroker(options: ITestBrokerOptions = {}): Promise
         });
     }
     if (credentials.length > 0) builder.withProviderPrincipals(credentials);
+    if (options.policy?.resourceLimits) builder.withResourceLimits(options.policy.resourceLimits);
     if (options.protectedSlots) builder.withProtectedSlots(options.protectedSlots);
     options.configure?.(builder);
 

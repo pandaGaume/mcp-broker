@@ -1,3 +1,4 @@
+import { compileResourceLimits, intersectLimits, type IResourceLimitRule, type LimitPatternIndex } from "./resource.limits";
 import type { LimitController } from "../limits/controller";
 import { randomBytes } from "crypto";
 import type { IProviderPrincipal } from "../auth/provider.auth";
@@ -82,6 +83,8 @@ export interface IOverdueDecision {
 
 /** What `getAuthorityInfo` reports, for `broker_diagnose` and `broker_info`. */
 export interface IBrokerAuthorityInfo {
+    readonly resourceLimits?: readonly { id: string; pattern: string; where?: Readonly<Record<string, string>>; limits?: import("./declaration").IResourceLimits }[];
+    readonly limitProblems?: readonly { slot: string; reason: "empty-limits" | "invalid-limit-pattern"; sources?: readonly string[]; errors?: readonly string[] }[];
     readonly limits?: ReturnType<LimitController["info"]>;
     readonly policyVersion: string;
     readonly protectedSlots: readonly { readonly slot: string; readonly declaredBy: string; readonly publishedBy: string; readonly confirmed: boolean }[];
@@ -93,6 +96,7 @@ export interface IBrokerAuthorityInfo {
         readonly acceptedAt: string;
         readonly capabilities: readonly string[];
         readonly resourceCount: number;
+        readonly resourcePatterns?: readonly ReturnType<import("./resource.limits").LimitPattern["info"]>[];
         readonly protects: readonly string[];
     }[];
     /** Domain-prefixed capabilities the policy grants that no accepted declaration covers. */
@@ -115,6 +119,7 @@ export interface IBrokerAuthorityInfo {
 }
 
 export interface IBrokerAuthorityOptions {
+    readonly resourceLimits?: readonly IResourceLimitRule[];
     readonly protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
     readonly slotResources: ISlotResourceResolver;
     readonly authorization: IPolicyAuthorization | null;
@@ -178,6 +183,8 @@ function invalidParams(message: string, data?: unknown): BrokerMethodOutcome {
  * It decides; the tunnel enforces. Nothing here touches a socket.
  */
 export class BrokerAuthority {
+    private readonly _resourceLimits: LimitPatternIndex;
+    private readonly _limitProblems: { slot: string; reason: "empty-limits" | "invalid-limit-pattern"; sources?: readonly string[]; errors?: readonly string[] }[] = [];
     private readonly _protectedSlots: Readonly<Record<string, IProtectedSlot>>;
     private readonly _slotResources: ISlotResourceResolver;
     private readonly _authorization: IPolicyAuthorization | null;
@@ -199,6 +206,7 @@ export class BrokerAuthority {
     private _declarationCount = 0;
 
     constructor(options: IBrokerAuthorityOptions) {
+        this._resourceLimits = compileResourceLimits(options.resourceLimits);
         this._protectedSlots = Object.freeze({ ...(options.protectedSlots ?? {}) });
         this._slotResources = options.slotResources;
         this._authorization = options.authorization;
@@ -284,6 +292,7 @@ export class BrokerAuthority {
             policyVersion
         );
         if (!outcome.ok) {
+            if (outcome.errors.some((e) => e.includes("RE2"))) this._noteLimitProblem({ slot: origin.slot, reason: "invalid-limit-pattern", errors: outcome.errors });
             console.warn(
                 `[broker] authorization declaration from slot "${origin.slot}" (principal "${origin.principal?.id ?? "(anonymous)"}") refused: ${outcome.errors.join("; ")}`
             );
@@ -532,7 +541,19 @@ export class BrokerAuthority {
         // The provider applies them; `allowed` stays true only for an
         // unconditional allow, so a provider that reads `allowed` alone and
         // ignores obligations refuses rather than oversteps.
-        const limits = decision.allowed ? declaration.resources.get(nativeResource)?.limits : undefined;
+        const entries: { limits: import("./declaration").IResourceLimits; source: string }[] = [];
+        if (decision.allowed && resourcePath) {
+            const concrete = declaration.resources.get(nativeResource);
+            if (concrete?.limits) entries.push({ limits: concrete.limits, source: `declaration:${nativeResource}` });
+            for (const pattern of [...declaration.resourcePatterns.matching(resourcePath), ...this._resourceLimits.matching(resourcePath)])
+                entries.push({ limits: pattern.limits!, source: pattern.source });
+        }
+        const intersection = intersectLimits(entries);
+        if (decision.allowed && intersection.empty) {
+            decision = { allowed: false, reason: "empty-limits", matchedPolicies: decision.matchedPolicies };
+            this._noteLimitProblem({ slot, reason: "empty-limits", sources: intersection.sources });
+        }
+        const limits = decision.allowed ? intersection.limits : undefined;
         const effect: "allow" | "deny" | "allow-with-constraints" = !decision.allowed ? "deny" : limits ? "allow-with-constraints" : "allow";
         const obligations = limits ? { constraints: limits } : undefined;
 
@@ -552,6 +573,7 @@ export class BrokerAuthority {
             policyVersion,
             onBehalfOf,
             nativeResource,
+            ...(intersection.sources.length ? { limitSources: intersection.sources } : {}),
             ...(check.attributes !== undefined ? { attributes: maskAttributes(check.attributes) as Record<string, unknown> } : {}),
             phase: "decision",
             effect,
@@ -665,6 +687,8 @@ export class BrokerAuthority {
 
         return {
             policyVersion: this.policyVersion,
+            resourceLimits: this._resourceLimits.patterns.map((p) => ({ id: p.source.slice(9), ...p.info() })),
+            limitProblems: [...this._limitProblems],
             protectedSlots: Object.entries(this._protectedSlots).map(([slot, p]) => ({
                 slot,
                 declaredBy: p.declaredBy,
@@ -679,12 +703,18 @@ export class BrokerAuthority {
                 acceptedAt: d.acceptedAt,
                 capabilities: [...d.capabilities].sort(),
                 resourceCount: d.resources.size,
+                resourcePatterns: d.resourcePatterns.patterns.map((p) => p.info()),
                 protects: d.protects,
             })),
             undeclaredCapabilities: undeclared,
             liveCallerRefs: this._refs.size,
             results: this._resultsInfo(),
         };
+    }
+
+    private _noteLimitProblem(problem: { slot: string; reason: "empty-limits" | "invalid-limit-pattern"; sources?: readonly string[]; errors?: readonly string[] }): void {
+        this._limitProblems.push(problem);
+        if (this._limitProblems.length > 20) this._limitProblems.shift();
     }
 
     private _resultsInfo(): IBrokerAuthorityInfo["results"] {
