@@ -71,6 +71,7 @@ export class WsTunnelBuilder {
     private _providerSecret: string | undefined = undefined;
     private _providerCredentials: readonly IProviderCredential[] | undefined = undefined;
     private _limits: ILimitsConfig | undefined;
+    private _resourceLimits: readonly import("../authority/resource.limits").IResourceLimitRule[] | undefined;
     private _protectedSlots: Readonly<Record<string, IProtectedSlot>> | undefined = undefined;
     private _securityVersion: string | undefined = undefined;
     private _authorizeBatchLimit: number | undefined = undefined;
@@ -415,6 +416,12 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /** Operator engineering limits, intersected with every applicable provider limit. */
+    withResourceLimits(rules: readonly import("../authority/resource.limits").IResourceLimitRule[]): this {
+        this._resourceLimits = rules;
+        return this;
+    }
+
     withProtectedSlots(slots: Readonly<Record<string, IProtectedSlot>>): this {
         this._protectedSlots = { ...slots };
         return this;
@@ -480,6 +487,7 @@ export class WsTunnelBuilder {
             authorization,
             slotResourceResolver: this._slotResourceResolver ?? authorization?.slotResourceResolver ?? this._auth?.slotResourceResolver,
             protectedSlots: this._protectedSlots,
+            resourceLimits: this._resourceLimits,
             limits: this._limits,
             knownProviderPrincipals: this._providerCredentials?.map((c) => ({
                 id: c.id,

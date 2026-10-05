@@ -1004,3 +1004,8 @@ static typing of custom loaders.
   multiple keys if you need annotations.
 - **Hot reload**: the config is read once at broker startup. Restart to pick
   up changes.
+# Resource limits and RE2 (1.7.0)
+
+In the security file, `authorization.resourceLimits` is an array of `{ id, pattern, where?, limits }`. IDs must be unique, non-empty strings of at most 128 characters. At most 10,000 rules are accepted; paths and `where` expressions are bounded to 2,048 characters. Limits use `minValue`, `maxValue`, `allowedValues`, `destinations`; unknown keys refuse startup. Patterns support literal segments, `*`, final `**`, and named `{segment}`. `where` maps named segments to full-segment RE2 expressions. Rules can precede provider declarations, grant no rights, and intersect all applicable provider limits. Remove a rule and restart to end a temporary restriction; changing the security file changes `policyVersion`.
+
+`allowedOrigins: { "pattern": "^https://[a-z0-9-]+\\.example\\.com$", "flags": "i" }` now uses `re2js`, as do `RegExp` values passed to embedded brokers. Expressions with lookarounds or backreferences refuse startup with an RE2 error. Flags `i`, `m`, `s`, `u`, `g`, `y` are accepted; RE2 uses Unicode matching, `g` is stateless, and `y` anchors to the beginning. Unsupported or duplicate flags refuse startup. Origin arrays and predicate functions keep their existing behavior.

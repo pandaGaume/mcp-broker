@@ -63,6 +63,21 @@ afterAll(() => {
 const built = existsSync(BIN);
 
 describe.skipIf(!built)("published CLI", () => {
+    it("fails closed when RE2 refuses an allowedOrigins expression", async () => {
+        const cwd = mkdtempSync(join(tmpdir(), "mcp-broker-re2-"));
+        const config = join(cwd, "config.json");
+        writeFileSync(config, JSON.stringify({ allowedOrigins: { pattern: "(?=https://)" } }));
+        const output: string[] = [];
+        const child = spawn(process.execPath, ["--disallow-code-generation-from-strings", BIN], {
+            cwd,
+            env: { ...process.env, MCP_BROKER_CONFIG: config, MCP_BROKER_ALLOWED_ORIGINS: "" },
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
+        const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+        expect(code).toBe(1);
+        expect(output.join("")).toContain("RE2 refused expression");
+    }, 30000);
     it("starts and serves its own `_broker` slot from the built layout", async () => {
         const port = await freePort();
 

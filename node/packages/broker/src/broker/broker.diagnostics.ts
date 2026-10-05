@@ -42,6 +42,8 @@ export type BrokerDiagnosisSeverity = "error" | "warning" | "info";
 
 /** Stable identifier of a diagnostic rule. Safe to branch on programmatically. */
 export type BrokerDiagnosisRuleId =
+    | "empty-limits"
+    | "invalid-limit-pattern"
     | "broker-not-started"
     | "transport-path-mismatch"
     | "provider-not-responding"
@@ -491,6 +493,20 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
             reason: "This broker context does not implement getAuthorityInfo(), so declarations and protected slots cannot be read.",
         });
     } else {
+        for (const problem of authorityInfo.limitProblems ?? []) {
+            if (slot !== undefined && problem.slot !== slot) continue;
+            problems.push({
+                id: problem.reason,
+                severity: "warning",
+                slot: problem.slot,
+                symptom:
+                    problem.reason === "empty-limits"
+                        ? "Engineering limits have an empty intersection; the decision was denied."
+                        : "A declaration contained an invalid RE2 expression.",
+                evidence: { ...problem },
+                fix: "Correct the listed engineering limit sources or RE2 expressions, then submit the declaration again or restart with the corrected security file.",
+            });
+        }
         for (const p of authorityInfo.protectedSlots) {
             if (p.confirmed || (slot !== undefined && slot !== p.slot)) continue;
             problems.push({

@@ -10,6 +10,18 @@ import { BrokerConfigError, loadSecurityConfig, type ILoadedBrokerConfig } from 
  * fails closed exactly like the config file, and never holds a secret in clear.
  */
 describe("loadSecurityConfig", () => {
+    it("loads resource limits, rejects malformed rules, and changes policy version when removed", () => {
+        const rule = { id: "maintenance", pattern: "/nord/{id}", where: { id: "V-0\\d{2}" }, limits: { maxValue: 80 } };
+        write("security.json", { authorization: { resourceLimits: [rule] } });
+        const first = loadSecurityConfig(loaded({ securityFile: "security.json" }), {})!;
+        expect(first.security.authorization?.resourceLimits).toEqual([rule]);
+        write("security.json", { authorization: { resourceLimits: [] } });
+        expect(loadSecurityConfig(loaded({ securityFile: "security.json" }), {})!.version).not.toBe(first.version);
+        write("security.json", { authorization: { resourceLimits: [{ ...rule, where: { id: "(?=x)" } }] } });
+        expect(() => loadSecurityConfig(loaded({ securityFile: "security.json" }), {})).toThrow(/RE2/);
+        write("security.json", { authorization: { resourceLimits: [{ ...rule, limits: { typo: 1 } }] } });
+        expect(() => loadSecurityConfig(loaded({ securityFile: "security.json" }), {})).toThrow(/unknown limit/);
+    });
     it("loads strict execution limits and resolves the store relative to the security file", () => {
         write("security.json", { limits: { storeFile: "ledger.json", rules: [{ id: "calls", calls: { max: 2, windowMs: 1000 } }] } });
         const result = loadSecurityConfig(loaded({ securityFile: "security.json" }), {})!;

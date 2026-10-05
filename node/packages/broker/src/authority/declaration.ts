@@ -1,3 +1,4 @@
+import { LimitPattern, LimitPatternIndex } from "./resource.limits";
 import { providerPublishDecision, type IProviderPrincipal } from "../auth/provider.auth";
 import { validateCapability } from "../authorization/capability.classifier";
 import { ResourcePath } from "../authorization/resource.path";
@@ -62,6 +63,7 @@ export interface IProviderDeclaration {
     readonly budgetUnits: readonly string[];
     /** Declared resources, keyed by native identifier. */
     readonly resources: ReadonlyMap<string, IDeclaredResource>;
+    readonly resourcePatterns: LimitPatternIndex;
     /** Slots this declaration confirms as protected. */
     readonly protects: readonly string[];
     /**
@@ -95,7 +97,7 @@ const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilitie
 /** Keys that would grant rights. Named in the refusal, since that is the whole point of refusing them. */
 const RIGHTS_KEYS = new Set(["assignments", "roles", "denies"]);
 
-const RESOURCE_KEYS = new Set(["resource", "resourcePath", "effect", "limits"]);
+const RESOURCE_KEYS = new Set(["resource", "resourcePath", "resourcePattern", "where", "effect", "limits"]);
 
 const LIMIT_KEYS = new Set(["minValue", "maxValue", "allowedValues", "destinations"]);
 
@@ -119,7 +121,7 @@ const LIMITS_MAX_LIST = 256;
  * now returns them as constraints, so a key it does not know, or a value of
  * the wrong type, would be a limit silently not enforced.
  */
-function parseLimits(raw: unknown, label: string, errors: string[]): IResourceLimits | undefined {
+export function parseLimits(raw: unknown, label: string, errors: string[]): IResourceLimits | undefined {
     if (!isObject(raw)) {
         errors.push(`${label} must be an object`);
         return undefined;
@@ -301,6 +303,7 @@ export function validateDeclaration(
 
     // Resources: both identifiers, the path inside the namespace.
     const resources = new Map<string, IDeclaredResource>();
+    const patterns: LimitPattern[] = [];
     if (params.resources !== undefined) {
         if (!Array.isArray(params.resources)) errors.push("resources must be an array");
         else if (params.resources.length > DECLARATION_LIMITS.maxResources) errors.push(`resources: at most ${DECLARATION_LIMITS.maxResources} entries`);
@@ -312,6 +315,27 @@ export function validateDeclaration(
                     continue;
                 }
                 for (const key of Object.keys(raw)) if (!RESOURCE_KEYS.has(key)) errors.push(`${label}: unknown key "${key}"`);
+                if (raw.resourcePattern !== undefined) {
+                    if (raw.resource !== undefined || raw.resourcePath !== undefined || raw.effect !== undefined)
+                        errors.push(`${label}: resourcePattern cannot be combined with resource, resourcePath or effect`);
+                    const limits = raw.limits === undefined ? undefined : parseLimits(raw.limits, `${label}.limits`, errors);
+                    try {
+                        const pattern = new LimitPattern(
+                            raw.resourcePattern as string,
+                            limits,
+                            `declaration:${String(raw.resourcePattern)}`,
+                            raw.where as Record<string, string> | undefined
+                        );
+                        if (namespace && !namespace.segments.every((segment, index) => pattern.segments[index] === segment))
+                            errors.push(`${label}.resourcePattern is outside the declared namespace`);
+                        else if (!pattern.isCoveredBy(allowedResources)) errors.push(`${label}.resourcePattern is outside this provider's allowedResources`);
+                        else patterns.push(pattern);
+                    } catch (error) {
+                        errors.push(`${label}: ${(error as Error).message}`);
+                    }
+                    continue;
+                }
+                if (raw.where !== undefined) errors.push(`${label}.where requires resourcePattern`);
                 const native = raw.resource;
                 if (typeof native !== "string" || native.length === 0 || native.length > DECLARATION_LIMITS.maxIdentifierLength) {
                     errors.push(`${label}.resource must be a non-empty string of at most ${DECLARATION_LIMITS.maxIdentifierLength} characters`);
@@ -411,6 +435,7 @@ export function validateDeclaration(
             capabilities,
             budgetUnits: Object.freeze([...(budgetUnits as string[])]),
             resources,
+            resourcePatterns: new LimitPatternIndex(patterns),
             protects: Object.freeze(protects),
             resultsRequired: Object.freeze(resultsRequired),
             policyVersion,

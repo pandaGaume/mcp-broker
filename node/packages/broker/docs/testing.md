@@ -161,3 +161,8 @@ network exporter is involved.
 | the declaration is refused | `error.data.errors` lists every reason; the broker log too |
 | the provider socket closes with 1008 | it publishes a protected slot it is not `publishedBy` for |
 | `broker.tunnel.getAuthorityInfo()` | declarations, protected slots, live caller references |
+# Testing engineering patterns (1.7.0)
+
+`startTestBroker({ policy: { resourceLimits: [{ id: "maintenance", pattern: "/nord/valves/{id}", where: { id: "V-0\\d{2}" }, limits: { maxValue: 80 } }], roles, assignments } })` installs the same operator rules as the security file. The provider's `transport.broker.declare()` accepts concrete resources and `{ resourcePattern, where?, limits? }` entries. Assert `effect: "allow-with-constraints"` and the returned obligations; `allowed` is false for constrained grants. Budgets use the same constraints and empty intersections refuse reservations.
+
+`broker.tunnel.getAuthorityInfo()` exposes patterns, rules and recent limit problems. Read `broker://authority` on `_broker` or call `broker_info` to verify the MCP surface. Run `npm run bench:limits --workspace @cyanmycelium/mcp-broker` from `node/` for 1,000 indexed patterns and 1,000 overlapping patterns. The second case exposes the cost of checking every applicable rule.

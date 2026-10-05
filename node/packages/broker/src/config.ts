@@ -1,3 +1,4 @@
+import { compileResourceLimits, type IResourceLimitRule } from "./authority/resource.limits";
 import { validateLimitsConfig, type ILimitsConfig } from "./limits/controller";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -346,6 +347,7 @@ export interface ISecurityConfig {
     providers?: ISecurityProviderEntry[];
     authorization?: {
         /** Slots only one provider may call and one may publish, keyed by slot name. */
+        resourceLimits?: readonly IResourceLimitRule[];
         protectedSlots?: Record<string, IProtectedSlot>;
     };
 }
@@ -468,7 +470,12 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
     if (authorization !== undefined) {
         if (typeof authorization !== "object" || authorization === null || Array.isArray(authorization)) problems.push('"authorization" must be an object');
         else {
-            for (const key of Object.keys(authorization)) if (key !== "protectedSlots") problems.push(`authorization: unknown key "${key}"`);
+            for (const key of Object.keys(authorization)) if (key !== "protectedSlots" && key !== "resourceLimits") problems.push(`authorization: unknown key "${key}"`);
+            try {
+                compileResourceLimits(authorization.resourceLimits);
+            } catch (error) {
+                problems.push((error as Error).message);
+            }
             const slots = authorization.protectedSlots;
             if (slots !== undefined && (typeof slots !== "object" || slots === null || Array.isArray(slots)))
                 problems.push('"authorization.protectedSlots" must be an object keyed by slot name');

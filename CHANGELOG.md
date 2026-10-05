@@ -20,6 +20,7 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
+
 ### Added
 
 - **broker** Optional bounded provider telemetry pipeline. The broker consumes
@@ -159,6 +160,19 @@ repository; the changes it needed for this release are listed under
   argument, `IMcpRequestContext` (`requestId`, `method`, `params._meta`
   frozen). This is how a provider reads the broker's caller reference
   (`request?.meta`). Adapters written without it are unchanged.
+
+## [broker 1.7.0] - 2026-10-05
+
+### Added
+
+- **broker** Engineering limits by resource path pattern, with named segments and full-segment RE2 `where` expressions. Every applicable concrete, provider and operator rule is intersected for authorization and budget reservations; impossible intersections deny with `empty-limits`.
+- **broker** `authorization.resourceLimits` in the security file and `withResourceLimits()` for embedded deployments. Audit `limitSources`, live `broker://authority` and `broker_info.authority` snapshots, and bounded diagnostics for empty intersections and invalid RE2 declarations.
+- **provider** Declaration types accept `{ resourcePattern, where?, limits? }` alongside concrete resources. Test brokers accept `policy.resourceLimits`; a benchmark measures 1,000 indexed and overlapping patterns.
+
+### Changed
+
+- **broker** Configured origin expressions and embedded `RegExp` origin rules use `re2js`. Unsupported backreferences, lookarounds or flags now refuse startup, rather than evaluating with V8 or ignoring an invalid configuration.
+
 
 ## [1.4.0] - 2026-09-30
 

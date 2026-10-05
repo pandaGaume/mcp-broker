@@ -276,3 +276,34 @@ See the Node implementation's [config reference](../node/packages/broker/docs/co
 for the concrete `auth` block, environment variables, and the builder API
 (`withJwtAuth`, `withProviderSecret`, `withAuthorizationPolicy`,
 `withPolicyEngine`, `withSlotResourceResolver`).
+# Engineering limits by pattern (1.7.0)
+
+A provider can describe instances it cannot enumerate:
+
+```json
+"resources": [
+  { "resourcePattern": "/nord/valves/{id}", "limits": { "minValue": 0, "maxValue": 100 } },
+  { "resourcePattern": "/nord/valves/{id}", "where": { "id": "V-1\\d{2}" }, "limits": { "maxValue": 60 } },
+  { "resource": "valve:V-012", "resourcePath": "/nord/valves/V-012", "limits": { "maxValue": 40 } }
+]
+```
+
+Patterns support literals, `*` for one segment, final `**` for zero or more segments, and `{name}` for one named segment. `where` constrains named segments with RE2 expressions matching the whole segment. Names are unique within a pattern. Patterns must remain inside the declaration namespace and the provider's `allowedResources`. A pattern entry cannot also contain concrete identifiers or `effect`; concrete entries cannot contain `where`. Invalid declarations are refused atomically, preserving the previous declaration.
+
+Operators independently tighten limits through the security file:
+
+```json
+"authorization": {
+  "resourceLimits": [
+    { "id": "maintenance-nord", "pattern": "/nord/valves/{id}", "where": { "id": "V-0\\d{2}" }, "limits": { "maxValue": 80 } }
+  ]
+}
+```
+
+Rules may be installed before any provider declares the paths. They grant no rights, apply to checks by callers and providers, and stay active until removed. Changing the file changes its hash and `policyVersion`; restart to load the new file. Embedded brokers use `WsTunnelBuilder.withResourceLimits(rules)`.
+
+Every applicable concrete entry, declaration pattern and operator rule contributes to the intersection. Minimums take the highest value, maximums the lowest; `allowedValues` and `destinations` intersect. Numeric ranges also filter allowed values. An impossible range or empty list denies with reason `empty-limits`. Policy denials remain denials. A concrete identifier under another path still denies with `undeclared-resource`.
+
+Successful constrained checks return `effect: "allow-with-constraints"`, `allowed: false` and `obligations.constraints`. The provider applies these constraints before acting. `broker/budget/reserve` uses exactly the same intersection. Audit decisions include `limitSources`, such as `declaration:/nord/valves/{id}`, `declaration:valve:V-012` and `security:maintenance-nord`. `broker_info.authority` and the live `broker://authority` resource expose the patterns and operator rules. `broker_diagnose` reports the last 20 limit problems, including `empty-limits` and `invalid-limit-pattern`.
+
+Patterns compile when accepted or when configuration loads, and are indexed by their leading literal segments. The performance target of 10 microseconds with 1,000 patterns applies to indexed paths. Rules sharing the same literal prefix still require checking each candidate; `npm run bench:limits --workspace @cyanmycelium/mcp-broker` measures both cases.

@@ -211,6 +211,14 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 - **In tests**: `startTestBroker({ callers, providers, policy, protectedSlots })` from `@cyanmycelium/mcp-broker/testing` does all of the above with no authorization server; see [docs/testing.md](node/packages/broker/docs/testing.md).
 - **Security file**: `securityFile` in `config.json` or `MCP_BROKER_SECURITY_FILE`. Holds `auth`, `providers`, `authorization`. Fails closed; no secret in clear; `auth` in both files refuses the start. Its hash starts every `policyVersion` (`broker_info`).
 
+### Engineering limits by resource pattern (1.7.0)
+
+- Declarations accept `{ resourcePattern: "/nord/valves/{id}", where: { id: "V-1\\d{2}" }, limits: { maxValue: 60 } }` in `resources`, alongside concrete entries. A pattern cannot carry `resource`, `resourcePath` or `effect`. Literal segments, `*`, a final `**` and named `{segment}` are supported; `where` only constrains named segments, with full-segment RE2 matching. Patterns must stay inside the namespace and provider `allowedResources`.
+- Operators configure `authorization.resourceLimits: [{ id, pattern, where?, limits }]` in the security file, or use `withResourceLimits()` when embedding. Rules may precede declarations and remain active until removed. They grant no rights. Their file hash changes `policyVersion`.
+- Concrete limits and every matching provider and operator rule are intersected: highest minimum, lowest maximum, intersection of allowed values and destinations. Empty intersections deny with `empty-limits`, including lists incompatible with the numeric range. Budgets use the same intersection. Providers must still apply `obligations.constraints`.
+- Audit events carry `limitSources`. `broker_info` and `broker://authority` expose declared patterns and operator limits. `broker_diagnose` reports recent empty intersections and rejected RE2 expressions, with bounded history.
+- Origin regexes, including library `RegExp` arguments, are evaluated with `re2js`. Unsupported lookarounds, backreferences or flags refuse startup. `i`, `m`, `s`, `u`, `g`, `y` are accepted; `g` is stateless and `y` anchors at the start. Existing fixed syntax validators are unchanged. Run `npm run bench:limits --workspace @cyanmycelium/mcp-broker` from `node/` for indexed and worst-case overlapping pattern measurements.
+
 ### Provider telemetry and trace propagation (1.5.0)
 
 - Provider telemetry uses the private JSON-RPC notification `broker/telemetry`, never `notifications/telemetry`. The broker consumes it and never broadcasts it to MCP clients.

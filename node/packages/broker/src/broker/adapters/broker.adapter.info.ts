@@ -4,6 +4,7 @@ import type { IBrokerContext } from "../broker.context";
 
 /** URI of the static resource backing the `broker_info` snapshot. */
 export const BROKER_INFO_URI = "broker://info";
+export const BROKER_AUTHORITY_URI = "broker://authority";
 
 /**
  * Read-only adapter that produces a snapshot of the broker's identity and
@@ -15,6 +16,7 @@ export class BrokerInfoAdapter extends McpAdapterBase {
     }
 
     public async readResourceAsync(uri: string): Promise<McpResourceContent | undefined> {
+        if (uri === BROKER_AUTHORITY_URI) return { uri, mimeType: "application/json", text: JSON.stringify(this._context.getAuthorityInfo?.() ?? null) };
         if (uri !== BROKER_INFO_URI) return undefined;
         return {
             uri,
@@ -32,6 +34,7 @@ export class BrokerInfoAdapter extends McpAdapterBase {
 
     private _snapshot() {
         const c = this._context;
+        const authority = c.getAuthorityInfo?.();
         return {
             name: c.name,
             version: c.version,
@@ -43,7 +46,7 @@ export class BrokerInfoAdapter extends McpAdapterBase {
             paths: c.paths,
             // The security configuration in force plus the declarations accepted
             // since; every broker/authorize decision carries the same string.
-            ...(c.getAuthorityInfo ? { policyVersion: c.getAuthorityInfo()?.policyVersion } : {}),
+            ...(authority ? { policyVersion: authority.policyVersion, authority } : {}),
         };
     }
 }
