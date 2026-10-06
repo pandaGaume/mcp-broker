@@ -1549,7 +1549,7 @@ export class WsTunnel implements IBrokerContext {
         let admissionCorrelationId = clientCorrelationId ?? trace.traceId;
         if (sink.type !== "broker") {
             const providerPrincipal = this._providerPrincipalOfSlot(providerName, state);
-            if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id)) {
+            if (providerPrincipal && this._authority.declarationOf(providerPrincipal.id, providerName)) {
                 const issued = this._authority.issueRef(
                     providerName,
                     brokerId,
@@ -1583,7 +1583,7 @@ export class WsTunnel implements IBrokerContext {
                             requestId: brokerId,
                             correlationId: admissionCorrelationId,
                         },
-                        this._authority.declarationOf(provider?.id)?.budgetUnits ?? []
+                        this._authority.declarationOf(provider?.id, providerName)?.budgetUnits ?? []
                     );
                     if (!outcome.allowed) failure = outcome.error;
                 }

@@ -165,6 +165,7 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** Declarations are scoped to `(provider identity, slot)`. One identity can publish several governed domains without replacing sibling declarations. Limits, budgets, result promises and caller references use the originating slot. Domain ownership remains reserved for the broker's lifetime. Authority snapshots and authorization audits include slot and domain.
 - **broker** Engineering limits by resource path pattern, with named segments and full-segment RE2 `where` expressions. Every applicable concrete, provider and operator rule is intersected for authorization and budget reservations; impossible intersections deny with `empty-limits`.
 - **broker** `authorization.resourceLimits` in the security file and `withResourceLimits()` for embedded deployments. Audit `limitSources`, live `broker://authority` and `broker_info.authority` snapshots, and bounded diagnostics for empty intersections and invalid RE2 declarations.
 - **provider** Declaration types accept `{ resourcePattern, where?, limits? }` alongside concrete resources. Test brokers accept `policy.resourceLimits`; a benchmark measures 1,000 indexed and overlapping patterns.

@@ -51,8 +51,10 @@ export interface IResourceLimits {
 
 /** An accepted declaration, as the broker holds it. */
 export interface IProviderDeclaration {
-    /** Provider principal id the declaration belongs to; the key it is stored under. */
+    /** Provider principal id the declaration belongs to. */
     readonly principalId: string;
+    /** Slot from which this declaration was accepted. Chosen by the broker. */
+    readonly slot: string;
     /** The version string the provider sent. */
     readonly version: string;
     /** Capability prefix: every declared capability is `<domain>.<name>`. */
@@ -80,6 +82,7 @@ export interface IProviderDeclaration {
 
 /** What the validator needs to know beyond the frame itself. */
 export interface IDeclarationContext {
+    readonly slot: string;
     /** The provider that sent the declaration, `null` when it is anonymous. */
     readonly principal: IProviderPrincipal | null;
     readonly protectedSlots: Readonly<Record<string, IProtectedSlot>>;
@@ -429,6 +432,7 @@ export function validateDeclaration(
         ok: true,
         declaration: Object.freeze({
             principalId: principal.id,
+            slot: context.slot,
             version: version as string,
             domain: domain as string,
             namespace,
