@@ -90,6 +90,7 @@ export interface IBrokerAuthorityInfo {
     readonly protectedSlots: readonly { readonly slot: string; readonly declaredBy: string; readonly publishedBy: string; readonly confirmed: boolean }[];
     readonly declarations: readonly {
         readonly principalId: string;
+        readonly slot: string;
         readonly domain: string;
         readonly version: string;
         readonly policyVersion: string;
@@ -170,7 +171,7 @@ function invalidParams(message: string, data?: unknown): BrokerMethodOutcome {
  *
  * Owns three things, all of them in memory:
  *
- * - **Declarations**, keyed by provider principal. A declaration describes
+ * - **Declarations**, keyed by provider principal and slot. A declaration describes
  *   (namespace, capabilities, resources, protected slots) and grants nothing.
  * - **Caller references**: opaque tokens handed to a declaring provider with
  *   each request, so it can ask "may the caller of this request do X?" without
@@ -200,7 +201,8 @@ export class BrokerAuthority {
     private _resultsUnmatched = 0;
     private _decisionsExpired = 0;
 
-    private readonly _declarations = new Map<string, IProviderDeclaration>();
+    private readonly _declarations = new Map<string, Map<string, IProviderDeclaration>>();
+    private readonly _domainOwners = new Map<string, string>();
     private readonly _refs = new Map<string, ICallerRef>();
     private readonly _principals = new Map<string, IProviderPrincipal>();
     private _declarationCount = 0;
@@ -277,18 +279,25 @@ export class BrokerAuthority {
     // Declarations
     // -------------------------------------------------------------------------
 
-    /** The accepted declaration of a provider principal, if any. */
-    declarationOf(principalId: string | undefined | null): IProviderDeclaration | undefined {
-        return principalId ? this._declarations.get(principalId) : undefined;
+    /** The accepted declaration on this slot. Without a slot, only an unambiguous single declaration is returned. */
+    declarationOf(principalId: string | undefined | null, slot?: string): IProviderDeclaration | undefined {
+        const declarations = principalId ? this._declarations.get(principalId) : undefined;
+        if (slot !== undefined) return declarations?.get(slot);
+        return declarations?.size === 1 ? declarations.values().next().value : undefined;
     }
 
     /** Handles `broker/authorization/declare`. */
     declare(params: unknown, origin: IBrokerMethodOrigin): BrokerMethodOutcome {
         const policyVersion = `${this._securityVersion}.${this._declarationCount + 1}`;
-        const owners = new Map([...this._declarations.values()].map((d) => [d.domain, d.principalId] as const));
         const outcome = validateDeclaration(
             params,
-            { principal: origin.principal, protectedSlots: this._protectedSlots, slotResources: this._slotResources, domainOwner: (domain) => owners.get(domain) },
+            {
+                principal: origin.principal,
+                slot: origin.slot,
+                protectedSlots: this._protectedSlots,
+                slotResources: this._slotResources,
+                domainOwner: (domain) => this._domainOwners.get(domain),
+            },
             policyVersion
         );
         if (!outcome.ok) {
@@ -302,10 +311,16 @@ export class BrokerAuthority {
         }
         const declaration = outcome.declaration;
         if (origin.principal) this.notePrincipal(origin.principal);
-        this._declarations.set(declaration.principalId, declaration);
+        let declarations = this._declarations.get(declaration.principalId);
+        if (!declarations) {
+            declarations = new Map();
+            this._declarations.set(declaration.principalId, declarations);
+        }
+        declarations.set(origin.slot, declaration);
+        this._domainOwners.set(declaration.domain, declaration.principalId);
         this._declarationCount += 1;
         console.info(
-            `[broker] authorization declaration accepted: principal "${declaration.principalId}", domain "${declaration.domain}", version "${declaration.version}", ` +
+            `[broker] authorization declaration accepted: principal "${declaration.principalId}", slot "${declaration.slot}", domain "${declaration.domain}", version "${declaration.version}", ` +
                 `${declaration.capabilities.size} capabilities, ${declaration.resources.size} resources, protects [${declaration.protects.join(", ")}], policyVersion ${declaration.policyVersion}`
         );
         return { result: { accepted: true, version: declaration.version, policyVersion: declaration.policyVersion } };
@@ -361,7 +376,7 @@ export class BrokerAuthority {
      */
     authorize(params: unknown, origin: IBrokerMethodOrigin, isPending: (slot: string, brokerId: string) => boolean, trackResult = true): BrokerMethodOutcome {
         const principal = origin.principal;
-        const declaration = this.declarationOf(principal?.id);
+        const declaration = this.declarationOf(principal?.id, origin.slot);
         if (!principal || !declaration) {
             return { error: { code: -32003, message: "No accepted authorization declaration for this provider: send broker/authorization/declare first." } };
         }
@@ -461,7 +476,7 @@ export class BrokerAuthority {
         // declared limits, which are the physical ones a budget exists for.
         if (decision.effect !== "allow" && decision.effect !== "allow-with-constraints")
             return { error: { code: -32003, message: "Budget authorization refused", data: decision } };
-        const declaration = this.declarationOf(origin.principal!.id)!;
+        const declaration = this.declarationOf(origin.principal!.id, origin.slot)!;
         if (!declaration.budgetUnits.includes(p.unit)) return invalidParams("unit not declared by this provider");
         const caller = this._refs.get(asked.ref!)!;
         const result = limits.reserve(
@@ -573,6 +588,7 @@ export class BrokerAuthority {
             policyVersion,
             onBehalfOf,
             nativeResource,
+            domain: declaration.domain,
             ...(intersection.sources.length ? { limitSources: intersection.sources } : {}),
             ...(check.attributes !== undefined ? { attributes: maskAttributes(check.attributes) as Record<string, unknown> } : {}),
             phase: "decision",
@@ -648,7 +664,7 @@ export class BrokerAuthority {
         }
         this._expireDecisions();
         const record = typeof p.decisionId === "string" ? this._decisionRecords.get(p.decisionId) : undefined;
-        if (!record || !origin.principal || record.providerPrincipalId !== origin.principal.id) {
+        if (!record || !origin.principal || record.providerPrincipalId !== origin.principal.id || record.event.slot !== origin.slot) {
             return unmatched("decisionId names no decision this broker still holds for this provider");
         }
         // One result per decision: a second report would rewrite history.
@@ -670,12 +686,13 @@ export class BrokerAuthority {
 
     /** Live state for `broker_diagnose`. `policyCapabilities` are the capabilities the policy grants or denies. */
     info(policyCapabilities: ReadonlySet<string> = new Set()): IBrokerAuthorityInfo {
+        const declarations = [...this._declarations.values()].flatMap((slots) => [...slots.values()]);
         const declaredBy = new Map<string, IProviderDeclaration>();
-        for (const declaration of this._declarations.values()) for (const slot of declaration.protects) declaredBy.set(slot, declaration);
+        for (const declaration of declarations) for (const slot of declaration.protects) declaredBy.set(slot, declaration);
 
         const declaredCapabilities = new Set<string>();
         const domains = new Set<string>();
-        for (const declaration of this._declarations.values()) {
+        for (const declaration of declarations) {
             domains.add(declaration.domain);
             for (const capability of declaration.capabilities) declaredCapabilities.add(capability);
         }
@@ -695,8 +712,9 @@ export class BrokerAuthority {
                 publishedBy: p.publishedBy,
                 confirmed: declaredBy.get(slot)?.principalId === p.declaredBy,
             })),
-            declarations: [...this._declarations.values()].map((d) => ({
+            declarations: declarations.map((d) => ({
                 principalId: d.principalId,
+                slot: d.slot,
                 domain: d.domain,
                 version: d.version,
                 policyVersion: d.policyVersion,

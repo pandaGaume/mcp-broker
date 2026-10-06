@@ -132,6 +132,8 @@ export interface IAuthorizationAuditEvent {
     readonly onBehalfOf?: "caller" | "provider";
     /** Only for a `broker/authorize` decision: the provider's native identifier of the resource. */
     readonly nativeResource?: string;
+    /** Authorization domain of the declaration used for this decision. */
+    readonly domain?: string;
     readonly limitSources?: readonly string[];
     /** Only for a `broker/authorize` decision: the attributes the provider sent, sensitive keys masked. */
     readonly attributes?: Readonly<Record<string, unknown>>;

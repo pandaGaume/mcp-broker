@@ -207,6 +207,81 @@ function callerOf(request: IJsonRpc): { ref: string; correlationId: string; trac
 }
 
 describe("broker/authorization/declare", () => {
+    it("keeps domains, caller references and live snapshots scoped to two slots of one identity", async () => {
+        const policy = compileAuthorizationPolicy({
+            subjectMapping: { userClaim: "sub", groupClaims: ["groups"] },
+            roles: { operator: { capabilities: ["mcp.tools.call", "broker.providers.read", "scada.control", "pompes.control"] } },
+            assignments: [{ subject: "group:operators-line1", role: "operator", resource: "**" }],
+            slotResources: { scada: "/production/site1/scada", scada2: "/production/site1/scada2", plain: "/production/site1/plain" },
+        });
+        const base = await start((b) => b.withAuth({ ...auth, authorization: policy, slotResourceResolver: policy.slotResourceResolver }));
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        const pumps = await FakeProvider.open(base, "scada2", "s-scada");
+        const plain = await FakeProvider.open(base, "plain", "s-scada");
+        const declaration = (domain: string, maxValue: number) => ({
+            version: "1",
+            domain,
+            namespace: { resource: "/production/site1" },
+            capabilities: [`${domain}.control`],
+            resources: [{ resourcePattern: "/production/site1/assets/{id}", limits: { maxValue } }],
+        });
+        expect((await scada.call("broker/authorization/declare", declaration("scada", 60))).error).toBeUndefined();
+        expect((await pumps.call("broker/authorization/declare", declaration("pompes", 30))).error).toBeUndefined();
+        for (const [provider, domain] of [
+            [scada, "scada"],
+            [pumps, "pompes"],
+        ] as const) {
+            provider.onCall = async (request) => {
+                const reply = await provider.call("broker/authorize", {
+                    principal: { type: "caller-ref", ref: callerOf(request)!.ref },
+                    checks: [{ capability: `${domain}.control`, resource: `${domain}:/production/site1/assets/A`, resourcePath: "/production/site1/assets/A" }],
+                });
+                expect(reply.error).toBeUndefined();
+                return { content: [{ type: "text", text: JSON.stringify(reply.result) }] };
+            };
+        }
+        const decisionOf = (reply: IJsonRpc) => JSON.parse((reply.result!.content as { text: string }[])[0].text).decisions[0];
+        const client = await Client.open(base, "scada", "operator");
+        const call = await client.request("tools/call", { name: "write" });
+        expect(decisionOf(call)).toMatchObject({ effect: "allow-with-constraints", obligations: { constraints: { maxValue: 60 } } });
+        const pumpClient = await Client.open(base, "scada2", "operator");
+        const pumpCall = await pumpClient.request("tools/call", { name: "write" });
+        expect(decisionOf(pumpCall)).toMatchObject({ effect: "allow-with-constraints", obligations: { constraints: { maxValue: 30 } } });
+        const plainClient = await Client.open(base, "plain", "operator");
+        await plainClient.request("tools/call", { name: "write" });
+        expect(callerOf(plain.received.find((m) => m.method === "tools/call")!)).toBeUndefined();
+        await pumps.call("broker/authorization/declare", declaration("pompes", 20));
+        expect(decisionOf(await client.request("tools/call", { name: "write" }))).toMatchObject({ obligations: { constraints: { maxValue: 60 } } });
+        const admin = await Client.open(base, "_broker", "operator");
+        const info = await admin.request("tools/call", { name: "broker_info" });
+        const authority = await admin.request("resources/read", { uri: "broker://authority" });
+        for (const reply of [info, authority]) {
+            expect(reply.error).toBeUndefined();
+            const contents = (reply.result?.content ?? reply.result?.contents) as { text: string }[];
+            const snapshot = JSON.parse(contents[0].text);
+            expect((snapshot.authority ?? snapshot).declarations).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ principalId: "mcp-scada", slot: "scada", domain: "scada" }),
+                    expect.objectContaining({ principalId: "mcp-scada", slot: "scada2", domain: "pompes" }),
+                ])
+            );
+        }
+    });
+
+    it("admits budgeted calls using the units declared on their own slot", async () => {
+        const base = await start((b) => b.withLimits({ rules: [{ id: "operations", budget: { unit: "operations", max: 5, windowMs: 60000 }, requireReservation: true }] }));
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        const other = await FakeProvider.open(base, "scada2", "s-scada");
+        await scada.call("broker/authorization/declare", { ...DECLARATION, budgetUnits: ["operations"] });
+        await other.call("broker/authorization/declare", { ...DECLARATION, budgetUnits: ["widgets"] });
+        const client = await Client.open(base, "scada", "operator");
+        expect((await client.request("tools/call", { name: "write" })).error).toBeUndefined();
+        const otherClient = await Client.open(base, "scada2", "operator");
+        const refused = await otherClient.request("tools/call", { name: "write" });
+        expect(refused.error).toMatchObject({ data: { reason: "reservation-unsupported" } });
+        expect(other.received.some((request) => request.method === "tools/call")).toBe(false);
+    });
+
     it("accepts a well-formed declaration from an identified provider", async () => {
         const base = await start();
         const scada = await FakeProvider.open(base, "scada", "s-scada");
@@ -338,6 +413,7 @@ describe("caller references", () => {
 
         // Same principal on another declared slot, presenting a live reference from the first.
         const other = await FakeProvider.open(base, "scada2", "s-scada");
+        await other.call("broker/authorization/declare", DECLARATION);
         let crossSlot: IJsonRpc | undefined;
         scada.onCall = async (request) => {
             crossSlot = await other.call("broker/authorize", { principal: { type: "caller-ref", ref: callerOf(request)!.ref }, checks: [check] });

@@ -224,12 +224,32 @@ has a single owner:
 - the first identity whose declaration of a domain is accepted owns it;
 - a declaration of that domain from any other identity is refused with
   `domain "<d>" is already declared by provider "<id>"; a domain has one owner`;
-- the owner may declare again, and its new declaration replaces the previous one;
+- declarations belong to the pair `(provider identity, slot)`. Declaring again
+  replaces only that slot's declaration. `broker/authorize`, concrete resource
+  checks, declared limit patterns, `resultsRequired` and `budgetUnits` use the
+  declaration of the slot the request arrived on;
 - ownership follows the provider identity, not the slot, and is kept for the
-  broker's lifetime, even after the owner disconnects: a network cut must not
+  broker's lifetime, even after the owner disconnects or replaces its declaration
+  with another domain: a network cut must not
   hand the domain to someone else. There is no administrative withdrawal yet,
   so moving a domain to another identity needs a broker restart;
-- an identity holds one declaration, so it owns at most one domain.
+- an identity may own several domains through several slots. It may also declare
+  the same domain on two slots, each with its own resources and limits.
+
+Different domains may use overlapping namespaces. Capability grants remain
+qualified by domain: `scada.*` grants nothing for `vannes.*`. Policy resource
+paths such as `/site/**` are shared across domains. Operator `resourceLimits`
+apply across slots; provider patterns apply only to their declaring slot.
+Each declaration retains its own `protects` confirmations, so replacing a
+sibling declaration does not remove them. Existing declarations protecting
+another configured slot remain supported.
+
+Use a domain-qualified native identifier in checks, for example
+`resource: "vannes:/site/nord/valves/V-012"`. This is a recommendation, not a
+validation requirement. `resourcePath` remains the path evaluated by policy;
+native identifiers also participate in the concrete resource escape check.
+Decision and result audit events include the declaration's `slot` and `domain`.
+`broker_info.authority` and `broker://authority` list both on each declaration.
 
 A domain is a capability vocabulary (`<domain>.*`), not a place: where a
 capability applies is the resource path, assigned by subtree. Several sites are
