@@ -1,23 +1,76 @@
 name: ci-c
 
 on:
-    push:
-        branches: [main]
-        paths:
-            - "c/**"
-            - ".github/workflows/ci-c.yml"
-            # The roundtrip drives the Node broker: a change there must keep
-            # the C client passing too.
-            - "node/packages/broker/**"
+    workflow_dispatch:
     pull_request:
         branches: [main]
         paths:
             - "c/**"
             - ".github/workflows/ci-c.yml"
-            - "node/packages/broker/**"
+            - "node/packages/broker/src/**"
+            - "node/packages/broker/package.json"
+            - "node/packages/broker/tsup.config.ts"
+            - "node/packages/broker/scripts/**"
+            - "node/packages/provider/src/**"
+            - "node/packages/provider/package.json"
+            - "node/packages/provider/tsup.config.ts"
+            - "node/package.json"
+            - "node/package-lock.json"
+            - "samples/lib/mcp-http-client.mjs"
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
 
 jobs:
+    changes:
+        runs-on: ubuntu-latest
+        outputs:
+            native: ${{ steps.filter.outputs.native }}
+            make: ${{ steps.filter.outputs.make }}
+            roundtrip: ${{ steps.filter.outputs.roundtrip }}
+            espressif: ${{ steps.filter.outputs.espressif }}
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+            - name: Select affected checks
+              id: filter
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+              run: |
+                  native=false
+                  make=false
+                  roundtrip=false
+                  espressif=false
+                  if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+                    native=true; make=true; roundtrip=true; espressif=true
+                  else
+                    git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/ci-c-paths"
+                    while IFS= read -r file; do
+                      case "$file" in
+                        .github/workflows/ci-c.yml)
+                          native=true; make=true; roundtrip=true; espressif=true ;;
+                        c/libmcpb/*)
+                          native=true; make=true; roundtrip=true; espressif=true ;;
+                        c/CMakeLists.txt|c/ports/host/*|c/ports/tls-openssl/*|c/samples/host-provider/*|c/tests/*)
+                          native=true; roundtrip=true ;;
+                        c/espressif/*|c/ports/espressif/*)
+                          espressif=true ;;
+                        node/*|samples/lib/mcp-http-client.mjs)
+                          roundtrip=true ;;
+                      esac
+                    done < "$RUNNER_TEMP/ci-c-paths"
+                  fi
+                  printf 'native=%s\nmake=%s\nroundtrip=%s\nespressif=%s\n' \
+                    "$native" "$make" "$roundtrip" "$espressif" >> "$GITHUB_OUTPUT"
+
     build:
+        needs: changes
+        if: needs.changes.outputs.native == 'true'
         runs-on: ubuntu-latest
         strategy:
             matrix:
@@ -43,6 +96,8 @@ jobs:
     # keep working too, in both configurations: without the multiplexed
     # endpoint (a one-provider firmware) and with it.
     make:
+        needs: changes
+        if: needs.changes.outputs.make == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v5
@@ -53,6 +108,8 @@ jobs:
     # Node broker of this repository, through its own slot and through _all,
     # then a broker kill and restart, then the same over wss://.
     roundtrip:
+        needs: changes
+        if: needs.changes.outputs.roundtrip == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v5
@@ -79,6 +136,8 @@ jobs:
     # IDF it targets, and that libmcpb still passes its own warning set on
     # Xtensa. Running it is the user's board's job.
     espressif:
+        needs: changes
+        if: needs.changes.outputs.espressif == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v5
