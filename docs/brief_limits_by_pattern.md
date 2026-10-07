@@ -1,30 +1,30 @@
-# Brief : limites d'ingénierie par motif de ressource, et RE2 dans le broker
+# Brief: engineering limits by resource pattern, and RE2 in the broker
 
-Statut : proposition, 2026-10-05. Demandé par mcp-open-api ; utile à mcp-scada.
+Status: proposal, 2026-10-05. Requested by mcp-open-api; useful to mcp-scada.
 
-## En une phrase
+## In one sentence
 
-Aujourd'hui, une limite d'ingénierie (`minValue`, `maxValue`, `allowedValues`, `destinations`) ne s'attache qu'à une ressource **concrète**, retrouvée par son identifiant natif exact. On propose de l'attacher aussi à un **motif** de chemin (`/nord/valves/{id}`), déclaré par le provider ou posé par l'exploitant dans le fichier de sécurité, toutes les règles applicables étant **intersectées**. Au passage, le broker évalue toutes ses expressions régulières avec RE2 (`re2js`), en temps linéaire.
+Today, an engineering limit (`minValue`, `maxValue`, `allowedValues`, `destinations`) attaches only to a **concrete** resource, looked up by its exact native identifier. We propose also attaching it to a path **pattern** (`/nord/valves/{id}`), declared by the provider or set by the operator in the security file, with all applicable rules **intersected**. Along the way, the broker evaluates all of its regular expressions with RE2 (`re2js`), in linear time.
 
-## Ce qui existe
+## What exists
 
-- Une déclaration porte des ressources concrètes : `{ resource, resourcePath, effect?, limits? }` (`authority/declaration.ts`).
-- À chaque `broker/authorize`, le broker retrouve les limites par l'identifiant natif exact de la vérification (`authority/broker.authority.ts`, `declaration.resources.get(nativeResource)`). Une ressource non déclarée mais dans le namespace est autorisée sans limites.
-- Le même identifiant natif sous un autre chemin est refusé (`undeclared-resource`) : sinon un appelant échapperait aux limites déclarées pour lui.
-- Les limites partent dans `obligations.constraints` avec `effect: "allow-with-constraints"` et `allowed: false`. **Le provider les applique** ; le broker ne voit pas la valeur écrite.
-- Les motifs de chemin existants (`ResourcePathPattern`, pour `allowedResources` et les assignations) n'acceptent que des segments entiers : `*` pour un segment, `**` en dernier segment. Pas de `V-1*`.
+- A declaration carries concrete resources: `{ resource, resourcePath, effect?, limits? }` (`authority/declaration.ts`).
+- On each `broker/authorize`, the broker looks up the limits by the check's exact native identifier (`authority/broker.authority.ts`, `declaration.resources.get(nativeResource)`). A resource that is not declared but lies within the namespace is allowed without limits.
+- The same native identifier under another path is refused (`undeclared-resource`): otherwise a caller would escape the limits declared for it.
+- The limits go out in `obligations.constraints` with `effect: "allow-with-constraints"` and `allowed: false`. **The provider applies them**; the broker does not see the written value.
+- The existing path patterns (`ResourcePathPattern`, for `allowedResources` and assignments) accept only whole segments: `*` for one segment, `**` as the last segment. No `V-1*`.
 
-## Le problème
+## The problem
 
-1. **Des instances qu'on ne peut pas énumérer.** Une API REST publiée par mcp-open-api expose des milliers de vannes (`/valves/{id}`), dont la liste change sans que le provider le sache. mcp-scada aura le même problème sur une installation de quelques milliers de tags. Les déclarer une par une est impossible, ou intenable.
-2. **Des classes d'équipements.** Les vannes `V-0xx` vont de 0 à 100 %, la série `V-1xx` est bridée à 60 %. C'est une connaissance du procédé, pas de l'API.
-3. **Un exploitant qui resserre sans republier.** Une maintenance impose 0-80 % pendant une semaine. Aujourd'hui seul le provider déclare des limites : il faut republier son manifeste, ou modifier son code. Et quand c'est le même auteur qui écrit le schéma d'entrée et les limites déclarées, celles-ci n'ajoutent rien : le provider vérifie deux fois la même chose.
+1. **Instances that cannot be enumerated.** A REST API published by mcp-open-api exposes thousands of valves (`/valves/{id}`), whose list changes without the provider knowing. mcp-scada will have the same problem on an installation with a few thousand tags. Declaring them one by one is impossible, or unsustainable.
+2. **Equipment classes.** The `V-0xx` valves go from 0 to 100%, the `V-1xx` series is capped at 60%. This is knowledge of the process, not of the API.
+3. **An operator who tightens without republishing.** A maintenance window imposes 0-80% for a week. Today only the provider declares limits: its manifest must be republished, or its code modified. And when the same author writes both the input schema and the declared limits, the latter add nothing: the provider checks the same thing twice.
 
-Le point 3 est le vrai gain : une limite posée par **une autre autorité que le provider**, tracée comme un changement de politique.
+Point 3 is the real gain: a limit set by **an authority other than the provider**, tracked as a policy change.
 
-## La proposition
+## The proposal
 
-### Une entrée par motif dans les déclarations
+### One entry per pattern in declarations
 
 ```json
 "resources": [
@@ -34,14 +34,14 @@ Le point 3 est le vrai gain : une limite posée par **une autre autorité que le
 ]
 ```
 
-- `resourcePattern` : un chemin dont les segments sont littéraux, `*` (un segment), `**` (dernier segment, zéro ou plus), ou `{nom}` (un segment, nommé). Même forme que les chemins OpenAPI et que les gabarits de mcp-open-api, qui peut déclarer ses `resourcePath` tels quels.
-- `where` : une expression RE2 par segment nommé, qui doit couvrir le segment entier (ancrage implicite). Sans `where`, `{nom}` vaut `*`.
-- Une entrée a soit `resource` et `resourcePath` (concrète, comme aujourd'hui), soit `resourcePattern` (motif). Jamais les deux.
-- Le motif doit rester dans le namespace de la déclaration, comme une ressource concrète.
+- `resourcePattern`: a path whose segments are literals, `*` (one segment), `**` (last segment, zero or more), or `{name}` (one segment, named). Same form as OpenAPI paths and as mcp-open-api's templates, so mcp-open-api can declare its `resourcePath` values as is.
+- `where`: one RE2 expression per named segment, which must cover the entire segment (implicit anchoring). Without `where`, `{name}` is equivalent to `*`.
+- An entry has either `resource` and `resourcePath` (concrete, as today), or `resourcePattern` (pattern). Never both.
+- The pattern must stay within the declaration's namespace, like a concrete resource.
 
-### Des limites posées par l'exploitant
+### Limits set by the operator
 
-Dans le fichier de sécurité, sous `authorization` :
+In the security file, under `authorization`:
 
 ```json
 "resourceLimits": [
@@ -49,77 +49,77 @@ Dans le fichier de sécurité, sous `authorization` :
 ]
 ```
 
-Même syntaxe, un `id` pour l'audit. Ces limites s'appliquent quelle que soit la déclaration du provider. Elles entrent dans le hash du fichier, donc dans `policyVersion` : ajouter ou retirer une limite est un changement de politique, tracé comme tel.
+Same syntax, with an `id` for the audit. These limits apply regardless of the provider's declaration. They are included in the file's hash, and therefore in `policyVersion`: adding or removing a limit is a policy change, tracked as such.
 
-### L'intersection, sans arbitrage
+### Intersection, without arbitration
 
-Pour une vérification, le broker réunit **toutes** les limites qui s'appliquent : l'entrée concrète de l'identifiant natif, chaque motif de la déclaration qui correspond au chemin, chaque entrée `resourceLimits` qui correspond. Il en calcule l'intersection :
+For a check, the broker gathers **all** the limits that apply: the concrete entry for the native identifier, every pattern in the declaration that matches the path, every `resourceLimits` entry that matches. It computes their intersection:
 
-| limite | intersection |
+| limit | intersection |
 | --- | --- |
-| `minValue` | le plus grand |
-| `maxValue` | le plus petit |
-| `allowedValues` | les valeurs présentes dans toutes les listes |
-| `destinations` | idem |
+| `minValue` | the largest |
+| `maxValue` | the smallest |
+| `allowedValues` | the values present in every list |
+| `destinations` | same |
 
-Pas de « motif le plus spécifique » à choisir : des limites ne font que resserrer, comme le principe que le broker applique déjà. L'ordre des entrées ne compte pas.
+There is no "most specific pattern" to choose: limits only ever tighten, consistent with the principle the broker already applies. The order of entries does not matter.
 
-Si l'intersection est vide (`minValue` au-dessus de `maxValue`, ou `allowedValues` vide), la décision est un refus, raison `empty-limits`. Une contrainte que rien ne satisfait ne doit pas partir comme un accord.
+If the intersection is empty (`minValue` above `maxValue`, or empty `allowedValues`), the decision is a denial, with reason `empty-limits`. A constraint that nothing can satisfy must not go out as an approval.
 
-### L'audit et le diagnostic
+### Audit and diagnostics
 
-- L'événement d'audit de la décision liste les sources de la contrainte : `limitSources: ["declaration:/nord/valves/{id}", "security:maintenance-nord-2026-10"]`.
-- `broker_diagnose` signale les refus `empty-limits` (avec les sources en cause), et les motifs de déclaration dont un `where` ne compile pas.
-- `broker_info` et la ressource d'autorité de `_broker` exposent les motifs déclarés et les `resourceLimits`, pour les vues de droits du brief UI SCADA.
+- The decision's audit event lists the sources of the constraint: `limitSources: ["declaration:/nord/valves/{id}", "security:maintenance-nord-2026-10"]`.
+- `broker_diagnose` reports `empty-limits` denials (with the sources involved), and declaration patterns whose `where` does not compile.
+- `broker_info` and the `_broker` authority resource expose the declared patterns and the `resourceLimits`, for the rights views of the SCADA UI brief.
 
-### Ce qui ne change pas
+### What does not change
 
-- Le provider applique toujours les contraintes ; le broker ne voit pas la valeur.
-- Une ressource concrète garde sa règle d'échappement : même identifiant natif, autre chemin, `undeclared-resource`. Les motifs sont indexés par chemin et n'ont pas d'identifiant natif, donc pas d'échappement possible par ce biais.
-- Les budgets (`broker/budget/reserve`) utilisent la même intersection que `broker/authorize`.
+- The provider still applies the constraints; the broker does not see the value.
+- A concrete resource keeps its escape rule: same native identifier, different path, `undeclared-resource`. Patterns are indexed by path and have no native identifier, so no escape is possible that way.
+- Budgets (`broker/budget/reserve`) use the same intersection as `broker/authorize`.
 
-## RE2 dans le broker
+## RE2 in the broker
 
-Le broker évalue aujourd'hui une expression régulière avec le moteur de V8, sur une entrée contrôlée par n'importe quel client : la forme `{ pattern, flags }` d'`allowedOrigins` (`bin.ts`), testée contre l'en-tête `Origin` de chaque requête HTTP. Le moteur de V8 procède par retour arrière : une expression mal écrite par l'exploitant, du genre `^(https?://)?([a-z]+)+\.exemple\.fr$`, laisse un client bloquer la boucle d'événements avec un seul en-tête piégé.
+Today the broker evaluates a regular expression with the V8 engine, on input controlled by any client: the `{ pattern, flags }` form of `allowedOrigins` (`bin.ts`), tested against the `Origin` header of each HTTP request. The V8 engine uses backtracking: a poorly written expression from the operator, such as `^(https?://)?([a-z]+)+\.exemple\.fr$`, lets a client block the event loop with a single crafted header.
 
-Mesuré dans mcp-open-api (`bench/regex.mjs`, Node 22.20, Intel Core Ultra 7 255H), `^(a+)+$` sur 29 caractères :
+Measured in mcp-open-api (`bench/regex.mjs`, Node 22.20, Intel Core Ultra 7 255H), `^(a+)+$` on 29 characters:
 
-| moteur | temps |
+| engine | time |
 | --- | --- |
-| V8 | 860 ms, et le double à chaque caractère de plus |
+| V8 | 860 ms, doubling with each additional character |
 | `re2js` | 1 µs |
 
-Sur un motif ordinaire, `re2js` coûte de 0,1 à 0,6 µs, contre quelques dizaines de nanosecondes pour V8 : rien à l'échelle d'une requête.
+On an ordinary pattern, `re2js` costs 0.1 to 0.6 µs, versus a few tens of nanoseconds for V8: negligible at the scale of a request.
 
-**Proposition : le broker évalue toutes ses expressions régulières avec `re2js`** : les `where` des motifs, et `allowedOrigins`.
+**Proposal: the broker evaluates all of its regular expressions with `re2js`**: the `where` clauses of patterns, and `allowedOrigins`.
 
-- `re2js` est du JavaScript pur, 872 Ko, sans dépendance, couvert par l'empreinte du lockfile. mcp-open-api a écarté le module natif `re2` (Node 22 et plus seulement, binaire téléchargé sans vérification, `node-gyp` sinon).
-- Il fonctionne avec `--disallow-code-generation-from-strings`, que mcp-open-api propose d'activer par défaut.
-- RE2 ne connaît ni les références arrière ni les assertions avant ou arrière. Une expression qu'il refuse fait échouer le démarrage avec un message qui le dit, comme le reste de la configuration depuis 1.4.1. **C'est le seul changement incompatible** : un `allowedOrigins.pattern` qui utilise `(?=` ne démarre plus.
+- `re2js` is pure JavaScript, 872 KB, with no dependencies, covered by the lockfile hash. mcp-open-api ruled out the native `re2` module (Node 22 and later only, binary downloaded without verification, `node-gyp` otherwise).
+- It works with `--disallow-code-generation-from-strings`, which mcp-open-api proposes enabling by default.
+- RE2 supports neither backreferences nor lookahead or lookbehind assertions. An expression it rejects makes startup fail with a message saying so, like the rest of the configuration since 1.4.1. **This is the only breaking change**: an `allowedOrigins.pattern` that uses `(?=` no longer starts.
 
 ## Performance
 
-Une vérification parcourt les motifs de la déclaration concernée et les `resourceLimits`. Les motifs sont compilés à l'acceptation de la déclaration et au chargement du fichier de sécurité, jamais pendant une décision. Pour que le coût ne croisse pas avec le nombre de motifs, ils sont indexés par leurs segments littéraux de tête.
+A check walks through the patterns of the relevant declaration and the `resourceLimits`. Patterns are compiled when the declaration is accepted and when the security file is loaded, never during a decision. So that the cost does not grow with the number of patterns, they are indexed by their leading literal segments.
 
-Cible, à mesurer dans un banc : moins de 10 µs par vérification avec 1 000 motifs déclarés.
+Target, to be measured in a benchmark: under 10 µs per check with 1,000 declared patterns.
 
 ## Lots
 
-| lot | contenu | critère d'acceptation |
+| lot | content | acceptance criterion |
 | --- | --- | --- |
-| 1 | `re2js` pour `allowedOrigins` ; erreur de démarrage si RE2 refuse l'expression | un en-tête `Origin` piégé contre un motif vulnérable répond en moins d'une milliseconde |
-| 2 | `resourcePattern` et `where` dans les déclarations ; intersection ; `empty-limits` ; `limitSources` dans l'audit | une déclaration `/nord/valves/{id}` à 0-100 et un motif `V-1\d{2}` à 60 donnent `maxValue: 60` pour `V-123`, `100` pour `V-012` |
-| 3 | `authorization.resourceLimits` dans le fichier de sécurité ; `policyVersion` ; vues dans `broker_info` et `_broker` | une limite d'exploitant resserre sans toucher la déclaration ; la retirer change `policyVersion` |
-| 4 | budgets sur la même intersection ; `broker_diagnose` ; banc de performance | le banc tient la cible avec 1 000 motifs |
+| 1 | `re2js` for `allowedOrigins`; startup error if RE2 rejects the expression | a crafted `Origin` header against a vulnerable pattern responds in under one millisecond |
+| 2 | `resourcePattern` and `where` in declarations; intersection; `empty-limits`; `limitSources` in the audit | a `/nord/valves/{id}` declaration at 0-100 and a `V-1\d{2}` pattern at 60 give `maxValue: 60` for `V-123`, `100` for `V-012` |
+| 3 | `authorization.resourceLimits` in the security file; `policyVersion`; views in `broker_info` and `_broker` | an operator limit tightens without touching the declaration; removing it changes `policyVersion` |
+| 4 | budgets on the same intersection; `broker_diagnose`; performance benchmark | the benchmark meets the target with 1,000 patterns |
 
-Le kit de test (`startTestBroker`) accepte les deux nouvelles formes dès le lot 2 (déclarations) et 3 (`policy.resourceLimits`).
+The test kit (`startTestBroker`) accepts the two new forms starting with lot 2 (declarations) and lot 3 (`policy.resourceLimits`).
 
-## Documentation à mettre à jour
+## Documentation to update
 
-`docs/authorization.md`, la section « Declared authorization » d'`AGENTS.md`, le guide `broker_guide` (topic `publish-provider`), `node/packages/broker/docs/config.md` pour `allowedOrigins` et `resourceLimits`, `node/packages/broker/docs/testing.md`.
+`docs/authorization.md`, the "Declared authorization" section of `AGENTS.md`, the `broker_guide` guide (topic `publish-provider`), `node/packages/broker/docs/config.md` for `allowedOrigins` and `resourceLimits`, `node/packages/broker/docs/testing.md`.
 
-## Questions ouvertes
+## Open questions
 
-- **Durée de validité.** Une limite d'exploitant pour une maintenance a une fin. Faut-il un `until` (date) sur les `resourceLimits`, ou laisser l'exploitant la retirer ?
-- **Limites sans déclaration.** Une entrée `resourceLimits` sur un chemin qu'aucun provider n'a déclaré : refusée au chargement, ou acceptée et appliquée dès qu'une déclaration couvre ce chemin ? La seconde permet de poser les limites avant le premier démarrage du provider.
-- **`where` sur `*`.** Faut-il permettre de contraindre un `*` anonyme, ou seulement les segments nommés ?
+- **Validity period.** An operator limit for a maintenance window has an end. Should `resourceLimits` have an `until` (date), or should the operator be left to remove it?
+- **Limits without a declaration.** A `resourceLimits` entry on a path that no provider has declared: refused at load time, or accepted and applied as soon as a declaration covers that path? The second option allows limits to be set before the provider's first startup.
+- **`where` on `*`.** Should constraining an anonymous `*` be allowed, or only named segments?
