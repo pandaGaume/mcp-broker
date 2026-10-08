@@ -3,7 +3,7 @@ import { bearerToken, buildChallengeHeader, PROTECTED_RESOURCE_METADATA_PREFIX }
 import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types";
 import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata";
 import { SubjectMappingError } from "../authorization/index";
-import { isLoopbackRequest } from "./dev.auth";
+import { DevClientFilter } from "./dev.auth";
 
 /**
  * Well-known prefix under which per-slot Protected Resource Metadata is served.
@@ -27,9 +27,12 @@ export class HttpAuthGuard {
     private readonly _auth: IResolvedAuth;
     /** The `/mcp` suffix without a leading slash, e.g. `"mcp"`. */
     private readonly _mcpSuffix: string;
+    /** The clients a `loopbackOnly` auth accepts: loopback and its `clientNetworks`. */
+    private readonly _clients: DevClientFilter | null;
 
     constructor(auth: IResolvedAuth, mcpSuffix: string) {
         this._auth = auth;
+        this._clients = auth.loopbackOnly ? new DevClientFilter(auth.clientNetworks) : null;
         this._mcpSuffix = mcpSuffix.replace(/^\//, "");
     }
 
@@ -76,8 +79,8 @@ export class HttpAuthGuard {
      * `403` insufficient scope) otherwise.
      */
     async authorize(req: IncomingMessage, slot: string): Promise<IPrincipal> {
-        if (this._auth.loopbackOnly && !isLoopbackRequest(req)) {
-            throw new AuthError(401, "invalid_token", "Development tokens are accepted from loopback clients only");
+        if (this._clients && !this._clients.allows(req)) {
+            throw new AuthError(401, "invalid_token", "Development tokens are not accepted from this client's network");
         }
         const token = bearerToken(req.headers["authorization"]);
         if (!token) {

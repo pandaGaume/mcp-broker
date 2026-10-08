@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { IAuthorizationPolicyConfig } from "./authorization/index";
 import type { IProviderCredential } from "./auth/provider.auth";
-import { resolveDevCallers, type IDevAuthConfig, type IResolvedDevCaller } from "./auth/dev.auth";
+import { resolveDevCallers, resolveDevNetworks, type IDevAuthConfig, type IResolvedDevCaller } from "./auth/dev.auth";
 import type { IProtectedSlot } from "./authority/declaration";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
@@ -371,6 +371,8 @@ export interface ILoadedSecurityConfig {
     readonly credentials: readonly IProviderCredential[];
     /** The development callers of `auth.dev`, tokens resolved; empty without development mode. */
     readonly devCallers: readonly IResolvedDevCaller[];
+    /** The networks of `auth.dev.networks`, `"lan"` expanded; empty for loopback only. */
+    readonly devNetworks: readonly string[];
 }
 
 const SECURITY_KEYS = new Set(["$schema", "description", "auth", "providers", "authorization", "limits"]);
@@ -430,7 +432,11 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
     }
 
     const devCallers: IResolvedDevCaller[] = [];
+    const devNetworks: string[] = [];
     if (security.auth?.dev !== undefined) {
+        const networks = resolveDevNetworks((security.auth.dev as { networks?: unknown } | null)?.networks);
+        problems.push(...networks.problems);
+        devNetworks.push(...networks.networks);
         if (security.auth.enabled === true) problems.push('"auth.dev" and "auth.enabled" are exclusive: development tokens or OAuth, not both');
         const dev = resolveDevCallers(security.auth.dev, env);
         problems.push(...dev.problems);
@@ -518,6 +524,7 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
         version: createHash("sha256").update(raw!).digest("hex").slice(0, 12),
         credentials,
         devCallers,
+        devNetworks,
     };
 }
 

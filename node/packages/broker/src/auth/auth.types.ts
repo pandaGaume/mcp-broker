@@ -96,6 +96,12 @@ export interface IResolvedAuth {
      * client, even on a broker bound to every interface for its providers.
      */
     loopbackOnly?: boolean;
+    /**
+     * With {@link loopbackOnly}: where else client requests are accepted from,
+     * as `auth.dev.networks` says it (`"lan"`, CIDR networks). Set by the
+     * development mode.
+     */
+    clientNetworks?: readonly string[];
 }
 
 /**

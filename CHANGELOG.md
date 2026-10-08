@@ -35,6 +35,15 @@ repository; the changes it needed for this release are listed under
   `auth.dev` in `config.json`, or `auth.dev` next to OAuth. Library:
   `WsTunnelBuilder.withDevAuth()`, `buildDevAuth`, `DevTokenValidator`,
   `resolveDevCallers`, `isLoopbackRequest`.
+- **broker** (1.8.1) `auth.dev.networks`: where else than loopback a development token
+  may come from. `"lan"` stands for every private and link-local range
+  (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`,
+  `fc00::/7`, `fe80::/10`), so a tablet or a second screen on a bench's network
+  connects without its address being known in advance; CIDR networks narrow it.
+  A network that would accept everyone (`0.0.0.0/0`, `::/0`) or does not parse
+  stops the broker. Absent, loopback only, as in 1.8.0. Library:
+  `IDevAuthOptions.networks`, `IResolvedAuth.clientNetworks`, `DevClientFilter`,
+  `resolveDevNetworks`, `DEV_LAN_NETWORKS`.
 - **broker** Optional bounded provider telemetry pipeline. The broker consumes
   `broker/telemetry` without broadcasting it to MCP clients, validates
   compact W3C-correlated spans, enriches them with the provider slot, queues

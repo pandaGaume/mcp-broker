@@ -138,7 +138,7 @@ function printHelp(): void {
             `  www.mounts[]      Several urlPrefix -> dir mappings (the env vars above mount one each)\n` +
             `  allowedOrigins    Also accepts { "pattern": "<regexp>" }; the env var takes a list only\n` +
             `  auth.*            Roles, assignments, denies, per-slot and per-provider scopes\n` +
-            `  auth.dev          Development tokens, security file only: { callers: [{ id, tokenEnv, user?, groups? }] }; loopback clients only\n` +
+            `  auth.dev          Development tokens, security file only: { callers: [{ id, tokenEnv, user?, groups? }], networks?: ["lan"] }; loopback clients unless networks says more\n` +
             `  brokerName        Library-only: no builder setter exists, so the CLI cannot forward it\n\n` +
             `RESERVED SLOTS (always present, no provider needed)\n` +
             `  _broker   Introspection: broker_info, providers_list, provider_status,\n` +
@@ -647,7 +647,7 @@ async function main(): Promise<void> {
         });
     }
 
-    // ── Development authorization (static tokens, loopback clients) ──────────
+    // ── Development authorization (static tokens, loopback and named networks) ─
     // The security file's `auth.dev`: the same policy as OAuth, with tokens
     // read from the environment. Exclusive with OAuth; refused in config.json,
     // where the loader would not resolve or check it.
@@ -663,6 +663,7 @@ async function main(): Promise<void> {
         }
         builder.withDevAuth({
             callers: devCallers,
+            networks: security?.devNetworks,
             publicBaseUrl: process.env["MCP_BROKER_PUBLIC_BASE_URL"] ?? `${useTls ? "https" : "http"}://localhost:${port}`,
             scopesSupported: authConfig?.scopesSupported,
             requiredScopes: authConfig?.requiredScopes,
@@ -747,7 +748,7 @@ async function main(): Promise<void> {
             authEnabled
                 ? "OAuth 2.1 (Bearer required)"
                 : devCallers.length > 0
-                  ? `DEVELOPMENT static tokens, loopback clients only (${devCallers.map((c) => c.id).join(", ")})`
+                  ? `DEVELOPMENT static tokens (${devCallers.map((c) => c.id).join(", ")}), clients from loopback${security?.devNetworks.length ? ` and ${security.devNetworks.join(", ")}` : " only"}`
                   : "disabled (trusted network only)"
         }`
     );

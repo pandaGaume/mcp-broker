@@ -14,13 +14,16 @@
  *
  *  - a token is read from an environment variable the security file names,
  *    never written in a file;
- *  - a token is accepted from a loopback client only (`127.0.0.0/8`, `::1`).
- *    A request from anywhere else is refused before its token is read, so a
- *    broker bound to `0.0.0.0` for its providers (a board on the LAN) still
- *    authenticates no remote client with a development token.
+ *  - a token is accepted from a loopback client (`127.0.0.0/8`, `::1`) and
+ *    from the networks the security file names in `auth.dev.networks`: the
+ *    keyword `"lan"` (every private and link-local range, for a tablet or a
+ *    second screen on the bench's network) or CIDR networks. A request from
+ *    anywhere else is refused before its token is read, so a broker bound to
+ *    `0.0.0.0` authenticates no client from the internet with one.
  */
 import { createHash } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { BlockList, isIP } from "node:net";
 import { AuthError, type IAccessTokenClaims, type IResolvedAuth, type ITokenValidator } from "./auth.types";
 import { compileAuthorizationPolicy, hasAuthorizationPolicies, type IAuthorizationPolicyConfig } from "../authorization/index";
 
@@ -51,7 +54,21 @@ export interface IDevCaller {
 /** The `auth.dev` block of the security file. */
 export interface IDevAuthConfig {
     readonly callers: readonly IDevCaller[];
+    /**
+     * Where else than loopback (always accepted) a development token may come
+     * from: `"lan"` for every private and link-local range ({@link DEV_LAN_NETWORKS}),
+     * and CIDR networks (`192.168.4.0/24`, `fd00::/8`) or single addresses.
+     * Absent: loopback only.
+     */
+    readonly networks?: readonly string[];
 }
+
+/**
+ * What `"lan"` stands for in `auth.dev.networks`: the private ranges of RFC
+ * 1918 and RFC 4193 and the link-local ranges, whatever address a bench's
+ * router hands out. Never a public address.
+ */
+export const DEV_LAN_NETWORKS: readonly string[] = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"];
 
 /** A development caller with its token resolved from the environment. */
 export interface IResolvedDevCaller extends IDevCaller {
@@ -61,6 +78,8 @@ export interface IResolvedDevCaller extends IDevCaller {
 /** Options of {@link buildDevAuth}: the callers, the policy, and the scope settings the JWT setup also takes. */
 export interface IDevAuthOptions extends Omit<IAuthorizationPolicyConfig, "subjectMapping"> {
     readonly callers: readonly IResolvedDevCaller[];
+    /** Where else than loopback a token may come from, as in {@link IDevAuthConfig.networks}. */
+    readonly networks?: readonly string[];
     /** Origin used in resource URIs and challenges. Defaults to `http://localhost`. */
     readonly publicBaseUrl?: string;
     readonly scopesSupported?: string[];
@@ -84,7 +103,7 @@ export function resolveDevCallers(dev: unknown, env: NodeJS.ProcessEnv): { calle
     const problems: string[] = [];
     const callers: IResolvedDevCaller[] = [];
     if (typeof dev !== "object" || dev === null || Array.isArray(dev)) return { callers, problems: ['"auth.dev" must be an object: { "callers": [...] }'] };
-    for (const key of Object.keys(dev)) if (key !== "callers") problems.push(`auth.dev: unknown key "${key}"`);
+    for (const key of Object.keys(dev)) if (key !== "callers" && key !== "networks") problems.push(`auth.dev: unknown key "${key}"`);
     const list = (dev as { callers?: unknown }).callers;
     if (!Array.isArray(list) || list.length === 0) {
         problems.push('"auth.dev.callers" must be a non-empty array');
@@ -143,6 +162,84 @@ export function resolveDevCallers(dev: unknown, env: NodeJS.ProcessEnv): { calle
     return { callers, problems };
 }
 
+/** A network of `auth.dev.networks`, parsed. */
+interface IDevNetwork {
+    readonly address: string;
+    readonly prefix: number;
+    readonly family: "ipv4" | "ipv6";
+}
+
+/**
+ * Parses one CIDR network or single address. Returns the network, or the
+ * problem with it. A zero-length prefix (`0.0.0.0/0`, `::/0`) is refused: it
+ * would accept every client, which is what OAuth is for.
+ */
+function parseNetwork(entry: string): IDevNetwork | string {
+    const [address, prefixText, extra] = entry.trim().split("/");
+    const version = isIP(address);
+    if (version === 0 || extra !== undefined) return `"${entry}" is not "lan", an IPv4 or IPv6 address, or a CIDR network`;
+    const max = version === 4 ? 32 : 128;
+    const prefix = prefixText === undefined ? max : /^[0-9]{1,3}$/.test(prefixText) ? Number(prefixText) : NaN;
+    if (!Number.isInteger(prefix) || prefix > max) return `"${entry}": the prefix length must be an integer from 1 to ${max}`;
+    if (prefix === 0) return `"${entry}" would accept every client, the internet included; write "lan" for the bench's network, or use OAuth`;
+    return { address, prefix, family: version === 4 ? "ipv4" : "ipv6" };
+}
+
+/**
+ * Expands and checks `auth.dev.networks`: `"lan"` becomes {@link DEV_LAN_NETWORKS},
+ * every other entry must be a CIDR network or an address. Returns the
+ * networks, normalized, and the problems.
+ */
+export function resolveDevNetworks(networks: unknown): { networks: string[]; problems: string[] } {
+    if (networks === undefined) return { networks: [], problems: [] };
+    if (!Array.isArray(networks)) return { networks: [], problems: ['"auth.dev.networks" must be an array, e.g. ["lan"] or ["192.168.4.0/24"]'] };
+    const out: string[] = [];
+    const problems: string[] = [];
+    for (const [index, entry] of networks.entries()) {
+        if (typeof entry !== "string" || entry.trim() === "") {
+            problems.push(`auth.dev.networks[${index}] must be a non-empty string`);
+            continue;
+        }
+        for (const one of entry.trim().toLowerCase() === "lan" ? DEV_LAN_NETWORKS : [entry]) {
+            const parsed = parseNetwork(one);
+            if (typeof parsed === "string") problems.push(`auth.dev.networks[${index}]: ${parsed}`);
+            else if (!out.includes(`${parsed.address}/${parsed.prefix}`)) out.push(`${parsed.address}/${parsed.prefix}`);
+        }
+    }
+    return { networks: out, problems };
+}
+
+/**
+ * The clients the development mode accepts: loopback, plus the networks
+ * given (`"lan"` included). Built once; `allows` answers per request. An
+ * unknown address is refused.
+ *
+ * @throws if a network does not parse.
+ */
+export class DevClientFilter {
+    private readonly _list = new BlockList();
+    readonly networks: readonly string[];
+
+    constructor(networks: readonly string[] = []) {
+        const resolved = resolveDevNetworks(networks);
+        if (resolved.problems.length > 0) throw new Error(resolved.problems.join("; "));
+        for (const n of resolved.networks) {
+            const parsed = parseNetwork(n) as IDevNetwork;
+            this._list.addSubnet(parsed.address, parsed.prefix, parsed.family);
+        }
+        this.networks = resolved.networks;
+    }
+
+    allows(req: IncomingMessage): boolean {
+        if (isLoopbackRequest(req)) return true;
+        const address = req.socket?.remoteAddress;
+        if (!address || this.networks.length === 0) return false;
+        const plain = address.startsWith("::ffff:") ? address.slice(7) : address;
+        const version = isIP(plain);
+        return version !== 0 && this._list.check(plain, version === 4 ? "ipv4" : "ipv6");
+    }
+}
+
 /** True when the request comes from this machine. An unknown address is not loopback. */
 export function isLoopbackRequest(req: IncomingMessage): boolean {
     const address = req.socket?.remoteAddress;
@@ -180,7 +277,10 @@ export class DevTokenValidator implements ITokenValidator {
 
 /**
  * Builds an {@link IResolvedAuth} for development mode: {@link DevTokenValidator},
- * loopback clients only, the hierarchical policy compiled exactly as for JWT.
+ * loopback clients and the networks given only, the hierarchical policy
+ * compiled exactly as for JWT.
+ *
+ * @throws if no caller is given, or a network does not parse.
  */
 export function buildDevAuth(options: IDevAuthOptions): IResolvedAuth {
     if (options.callers.length === 0) throw new Error("auth.dev: at least one caller is required.");
@@ -191,6 +291,8 @@ export function buildDevAuth(options: IDevAuthOptions): IResolvedAuth {
         validator: new DevTokenValidator(options.callers),
         loopbackOnly: true,
     };
+    const networks = new DevClientFilter(options.networks).networks;
+    if (networks.length > 0) resolved.clientNetworks = networks;
     if (options.scopesSupported) resolved.scopesSupported = options.scopesSupported;
     if (options.requiredScopes) resolved.requiredScopes = options.requiredScopes;
     if (options.perSlotScopes) resolved.perSlotScopes = options.perSlotScopes;

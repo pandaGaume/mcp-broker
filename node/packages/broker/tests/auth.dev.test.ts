@@ -4,7 +4,7 @@ import type { IncomingMessage } from "http";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { AuthError, HttpAuthGuard, WsTunnelBuilder, buildDevAuth, resolveDevCallers, type IResolvedDevCaller, type WsTunnel } from "../src/index";
+import { AuthError, HttpAuthGuard, WsTunnelBuilder, buildDevAuth, resolveDevCallers, resolveDevNetworks, type IResolvedDevCaller, type WsTunnel } from "../src/index";
 import { BrokerConfigError, loadSecurityConfig, type ILoadedBrokerConfig } from "../src/config";
 import { mcpCall } from "./streamable.helper";
 
@@ -105,6 +105,38 @@ describe("development tokens are for loopback clients only", () => {
     });
 });
 
+describe("auth.dev.networks: the bench's LAN, without knowing its addresses", () => {
+    const req = (remoteAddress: string): IncomingMessage => ({ headers: { authorization: `Bearer ${AGENT_TOKEN}` }, socket: { remoteAddress } }) as unknown as IncomingMessage;
+
+    it('"lan" accepts every private and link-local client, loopback still, and no public one', async () => {
+        const guard = new HttpAuthGuard(buildDevAuth({ callers: CALLERS, networks: ["lan"], ...POLICY }), "/mcp");
+        for (const address of ["127.0.0.1", "192.168.4.23", "::ffff:192.168.1.10", "10.12.0.4", "172.20.3.3", "169.254.7.7", "fe80::1c2b", "fd12:3456::9"]) {
+            const principal = await guard.authorize(req(address), "scrubber");
+            expect(principal.subject?.ids).toContain("group:agents");
+        }
+        for (const address of ["8.8.8.8", "::ffff:52.1.2.3", "172.32.0.1", "2001:db8::1", ""]) {
+            await expect(guard.authorize(req(address), "scrubber")).rejects.toMatchObject({ status: 401 });
+        }
+    });
+
+    it("a CIDR network narrows it to one subnet", async () => {
+        const guard = new HttpAuthGuard(buildDevAuth({ callers: CALLERS, networks: ["192.168.4.0/24"], ...POLICY }), "/mcp");
+        await expect(guard.authorize(req("192.168.4.200"), "scrubber")).resolves.toBeTruthy();
+        await expect(guard.authorize(req("192.168.5.1"), "scrubber")).rejects.toMatchObject({ status: 401 });
+    });
+
+    it("refuses what would open it to the internet, and what is not a network", () => {
+        const problems = resolveDevNetworks(["0.0.0.0/0", "::/0", "wifi", "192.168.4.0/40", ""]).problems.join("; ");
+        expect(problems).toMatch(/0\.0\.0\.0\/0" would accept every client/);
+        expect(problems).toMatch(/::\/0" would accept every client/);
+        expect(problems).toMatch(/"wifi" is not "lan"/);
+        expect(problems).toMatch(/from 1 to 32/);
+        expect(problems).toMatch(/must be a non-empty string/);
+        expect(resolveDevNetworks(["LAN", "192.168.0.0/16"]).networks).toEqual(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"]);
+        expect(() => buildDevAuth({ callers: CALLERS, networks: ["0.0.0.0/0"] })).toThrow(/every client/);
+    });
+});
+
 describe("auth.dev in the security file", () => {
     let dir: string;
     beforeEach(() => {
@@ -117,6 +149,13 @@ describe("auth.dev in the security file", () => {
         write({ auth: { dev: { callers: [{ id: "agent", tokenEnv: "T_AGENT", groups: ["agents"] }] }, ...POLICY } });
         const security = loadSecurityConfig(loaded(), { T_AGENT: AGENT_TOKEN })!;
         expect(security.devCallers).toEqual([{ id: "agent", tokenEnv: "T_AGENT", groups: ["agents"], token: AGENT_TOKEN }]);
+    });
+
+    it('expands "lan" from the file and fails closed on a bad network', () => {
+        write({ auth: { dev: { callers: [{ id: "agent", tokenEnv: "T_AGENT" }], networks: ["lan"] } } });
+        expect(loadSecurityConfig(loaded(), { T_AGENT: AGENT_TOKEN })!.devNetworks).toContain("192.168.0.0/16");
+        write({ auth: { dev: { callers: [{ id: "agent", tokenEnv: "T_AGENT" }], networks: ["0.0.0.0/0"] } } });
+        expect(() => loadSecurityConfig(loaded(), { T_AGENT: AGENT_TOKEN })).toThrow(/every client/);
     });
 
     it("fails closed on a token in clear, an unset or short token, a shared token, a twice-declared id, and OAuth alongside", () => {

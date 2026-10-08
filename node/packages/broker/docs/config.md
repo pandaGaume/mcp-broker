@@ -730,7 +730,7 @@ compatibility, is in
 | `auth.toolCapabilities` | `Record<string,string>` | (file-only) | Global tool to functional capability mapping |
 | `auth.providerToolCapabilities` | `Record<path,Record<tool,capability>>` | (file-only) | Resource-qualified tool mapping |
 | `auth.audit.logAllowed` | `boolean` | (file-only) | Logs allowed decisions when true. Default false |
-| `auth.dev` | `object` | (security file only) | Development tokens instead of OAuth, loopback clients only. See [`auth.dev`](#authdev-development-tokens-no-authorization-server) |
+| `auth.dev` | `object` | (security file only) | Development tokens instead of OAuth, from loopback and the networks named (`"lan"`). See [`auth.dev`](#authdev-development-tokens-no-authorization-server) |
 
 `providerSecret` is independent of client auth, and is **not gated by
 `auth.enabled`**: setting it alone turns provider authentication on. That is
@@ -827,18 +827,23 @@ refusals are the production ones.
 | `auth.dev.callers[].service` | `string` | `service:<s>` subject |
 | `auth.dev.callers[].client` | `string` | `client:<c>` subject |
 | `auth.dev.callers[].scopes` | `string[]` | Scopes, for `requiredScopes` and `perSlotScopes` |
+| `auth.dev.networks` | `string[]` | Where else than loopback clients may come from: `"lan"` (every private and link-local range) and CIDR networks or addresses. Absent: loopback only |
 
 It fails closed, like the rest of the security file: `auth.dev` in
 `config.json`, a `token` written in clear, an unset or short token, two
 callers sharing a token or an id, an unknown key, or `auth.dev` next to
-`auth.enabled` (or `MCP_BROKER_AUTH_ENABLED`) stop the broker.
+`auth.enabled` (or `MCP_BROKER_AUTH_ENABLED`), or a network that does not
+parse or that would accept everyone (`0.0.0.0/0`, `::/0`) stop the broker.
 
-**Loopback clients only.** A client request from anywhere but `127.0.0.0/8`
-or `::1` is refused with `401` before its token is read. A broker bound to
-`0.0.0.0` so that boards on the LAN can occupy their slots still
-authenticates no remote client with a development token; providers are not
-affected (they authenticate through `providers` or `providerSecret`). The
-banner says `DEVELOPMENT static tokens, loopback clients only (<ids>)`.
+**Which clients.** Loopback (`127.0.0.0/8`, `::1`) always; then what
+`auth.dev.networks` names. `"lan"` stands for every private and link-local
+range (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`,
+`fc00::/7`, `fe80::/10`): a tablet or a second screen on the bench's network
+connects whatever address the router gave it, and nothing from a public
+address does. A CIDR network (`192.168.4.0/24`) narrows it to one subnet. A
+client from anywhere else is refused with `401` before its token is read.
+Providers are not affected (they authenticate through `providers` or
+`providerSecret`). The banner names the callers and the networks.
 
 ```json
 {
@@ -847,7 +852,8 @@ banner says `DEVELOPMENT static tokens, loopback clients only (<ids>)`.
             "callers": [
                 { "id": "agent", "tokenEnv": "BROKER_TOKEN_AGENT", "groups": ["agents"] },
                 { "id": "operator", "tokenEnv": "BROKER_TOKEN_OPERATOR", "user": "guillaume", "groups": ["operators"] }
-            ]
+            ],
+            "networks": ["lan"]
         },
         "roles": {
             "agent": { "capabilities": ["mcp.tools.list", "mcp.tools.actuate"] },
