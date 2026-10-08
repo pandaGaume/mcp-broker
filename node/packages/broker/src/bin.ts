@@ -138,6 +138,7 @@ function printHelp(): void {
             `  www.mounts[]      Several urlPrefix -> dir mappings (the env vars above mount one each)\n` +
             `  allowedOrigins    Also accepts { "pattern": "<regexp>" }; the env var takes a list only\n` +
             `  auth.*            Roles, assignments, denies, per-slot and per-provider scopes\n` +
+            `  auth.dev          Development tokens, security file only: { callers: [{ id, tokenEnv, user?, groups? }] }; loopback clients only\n` +
             `  brokerName        Library-only: no builder setter exists, so the CLI cannot forward it\n\n` +
             `RESERVED SLOTS (always present, no provider needed)\n` +
             `  _broker   Introspection: broker_info, providers_list, provider_status,\n` +
@@ -646,6 +647,36 @@ async function main(): Promise<void> {
         });
     }
 
+    // ── Development authorization (static tokens, loopback clients) ──────────
+    // The security file's `auth.dev`: the same policy as OAuth, with tokens
+    // read from the environment. Exclusive with OAuth; refused in config.json,
+    // where the loader would not resolve or check it.
+    const devCallers = security?.devCallers ?? [];
+    if (config.auth?.dev !== undefined) {
+        console.error('[mcp-broker] "auth.dev" belongs in the security file (securityFile / MCP_BROKER_SECURITY_FILE), not in the config file.');
+        process.exit(1);
+    }
+    if (devCallers.length > 0) {
+        if (authEnabled) {
+            console.error("[mcp-broker] auth.dev and OAuth (MCP_BROKER_AUTH_ENABLED / auth.enabled) are exclusive: development tokens or OAuth, not both.");
+            process.exit(1);
+        }
+        builder.withDevAuth({
+            callers: devCallers,
+            publicBaseUrl: process.env["MCP_BROKER_PUBLIC_BASE_URL"] ?? `${useTls ? "https" : "http"}://localhost:${port}`,
+            scopesSupported: authConfig?.scopesSupported,
+            requiredScopes: authConfig?.requiredScopes,
+            perSlotScopes: authConfig?.perSlotScopes,
+            roles: authConfig?.roles,
+            assignments: authConfig?.assignments,
+            denies: authConfig?.denies,
+            slotResources: authConfig?.slotResources,
+            toolCapabilities: authConfig?.toolCapabilities,
+            providerToolCapabilities: authConfig?.providerToolCapabilities,
+            audit: authConfig?.audit,
+        });
+    }
+
     // ── Provider authentication (independent of client OAuth) ────────────────
     // Requires every provider connecting to /provider/<slot> or /providers to
     // present the shared secret, closes off slot occupation by strangers.
@@ -711,7 +742,15 @@ async function main(): Promise<void> {
     if (hasLocalGrammars) {
         console.log(`🌐  Local grammars        ${localGrammarsDir}`);
     }
-    console.log(`🔐  Authorization         ${authEnabled ? "OAuth 2.1 (Bearer required)" : "disabled (trusted network only)"}`);
+    console.log(
+        `🔐  Authorization         ${
+            authEnabled
+                ? "OAuth 2.1 (Bearer required)"
+                : devCallers.length > 0
+                  ? `DEVELOPMENT static tokens, loopback clients only (${devCallers.map((c) => c.id).join(", ")})`
+                  : "disabled (trusted network only)"
+        }`
+    );
     const providerIdentities = security?.credentials.length ?? 0;
     console.log(
         `🛡️   Provider auth         ${providerIdentities > 0 ? `${providerIdentities} provider identit${providerIdentities === 1 ? "y" : "ies"}${providerSecret ? " + shared secret" : ""}` : providerSecret ? "shared secret required" : "disabled"}`

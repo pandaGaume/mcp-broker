@@ -7,9 +7,11 @@ import { OtlpHttpTraceExporter, type IOtlpHttpTraceExporterOptions, type IProvid
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
 import {
+    buildDevAuth,
     buildJwtAuth,
     ProviderTableAuthenticator,
     SharedSecretProviderAuthenticator,
+    type IDevAuthOptions,
     type IJwtAuthOptions,
     type IResolvedAuth,
     type IProviderAuthenticator,
@@ -357,6 +359,19 @@ export class WsTunnelBuilder {
      */
     withJwtAuth(options: IJwtAuthOptions): this {
         this._auth = buildJwtAuth(options);
+        return this;
+    }
+
+    /**
+     * Enables development authorization: static bearer tokens bound to
+     * subjects, accepted from loopback clients only, in front of the same
+     * hierarchical policy as {@link withJwtAuth}. For a bench or a demo with
+     * no authorization server; never for a deployment.
+     *
+     * @throws if no caller is given.
+     */
+    withDevAuth(options: IDevAuthOptions): this {
+        this._auth = buildDevAuth(options);
         return this;
     }
 

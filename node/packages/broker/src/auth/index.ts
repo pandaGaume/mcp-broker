@@ -21,6 +21,8 @@ export { buildResourceMetadata } from "./resource.metadata";
 export type { IProtectedResourceMetadata, ProtectedResourceMetadata } from "./resource.metadata";
 export { HttpAuthGuard } from "./http.auth";
 export { buildJwtAuth } from "./auth.config";
+export { buildDevAuth, DevTokenValidator, isLoopbackRequest, resolveDevCallers, DEV_ISSUER, DEV_TOKEN_MIN_LENGTH } from "./dev.auth";
+export type { IDevAuthConfig, IDevAuthOptions, IDevCaller, IResolvedDevCaller } from "./dev.auth";
 export type { IJwtAuthOptions, JwtAuthOptions } from "./auth.config";
 export { ProviderTableAuthenticator, SharedSecretProviderAuthenticator } from "./provider.auth";
 export { compileProviderAllowedResources, normalizeProviderAuthentication, providerMayPublish, providerPublishDecision } from "./provider.auth";

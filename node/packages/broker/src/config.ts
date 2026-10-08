@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { IAuthorizationPolicyConfig } from "./authorization/index";
 import type { IProviderCredential } from "./auth/provider.auth";
+import { resolveDevCallers, type IDevAuthConfig, type IResolvedDevCaller } from "./auth/dev.auth";
 import type { IProtectedSlot } from "./authority/declaration";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
@@ -34,6 +35,13 @@ export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
      * of client authorization.
      */
     providerSecret?: string;
+    /**
+     * Development mode: static bearer tokens, one per caller, read from the
+     * environment variables named here and bound to the subjects the policy
+     * reasons about; accepted from loopback clients only. Security file only,
+     * and exclusive with `enabled` (one way to authenticate clients).
+     */
+    dev?: IDevAuthConfig;
 }
 
 /**
@@ -361,6 +369,8 @@ export interface ILoadedSecurityConfig {
     readonly version: string;
     /** The `providers` table, secrets resolved. */
     readonly credentials: readonly IProviderCredential[];
+    /** The development callers of `auth.dev`, tokens resolved; empty without development mode. */
+    readonly devCallers: readonly IResolvedDevCaller[];
 }
 
 const SECURITY_KEYS = new Set(["$schema", "description", "auth", "providers", "authorization", "limits"]);
@@ -417,6 +427,14 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
     }
     if (security.auth?.providerSecret !== undefined) {
         problems.push('"auth.providerSecret" would put a secret in clear in the file; set MCP_BROKER_PROVIDER_SECRET instead, or give each provider an entry in "providers"');
+    }
+
+    const devCallers: IResolvedDevCaller[] = [];
+    if (security.auth?.dev !== undefined) {
+        if (security.auth.enabled === true) problems.push('"auth.dev" and "auth.enabled" are exclusive: development tokens or OAuth, not both');
+        const dev = resolveDevCallers(security.auth.dev, env);
+        problems.push(...dev.problems);
+        devCallers.push(...dev.callers);
     }
 
     const credentials: IProviderCredential[] = [];
@@ -499,6 +517,7 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
         sourcePath,
         version: createHash("sha256").update(raw!).digest("hex").slice(0, 12),
         credentials,
+        devCallers,
     };
 }
 

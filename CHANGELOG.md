@@ -23,6 +23,18 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** Development authorization, `auth.dev` in the security file: static
+  bearer tokens, one per caller, read from the environment variables the file
+  names and bound to user, group, service or client subjects, in front of the
+  same hierarchical policy as OAuth (roles, assignments, denies, `-32001`).
+  A bench or a demo can now show a real policy deny without an authorization
+  server. Tokens are accepted from loopback clients only (`IResolvedAuth.loopbackOnly`,
+  refused with `401` before the token is read), so a broker bound to every
+  interface for its LAN providers authenticates no remote client with one. Fails
+  closed on a token in clear, an unset, short or shared token, a duplicate id,
+  `auth.dev` in `config.json`, or `auth.dev` next to OAuth. Library:
+  `WsTunnelBuilder.withDevAuth()`, `buildDevAuth`, `DevTokenValidator`,
+  `resolveDevCallers`, `isLoopbackRequest`.
 - **broker** Optional bounded provider telemetry pipeline. The broker consumes
   `broker/telemetry` without broadcasting it to MCP clients, validates
   compact W3C-correlated spans, enriches them with the provider slot, queues

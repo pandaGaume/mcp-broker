@@ -730,6 +730,7 @@ compatibility, is in
 | `auth.toolCapabilities` | `Record<string,string>` | (file-only) | Global tool to functional capability mapping |
 | `auth.providerToolCapabilities` | `Record<path,Record<tool,capability>>` | (file-only) | Resource-qualified tool mapping |
 | `auth.audit.logAllowed` | `boolean` | (file-only) | Logs allowed decisions when true. Default false |
+| `auth.dev` | `object` | (security file only) | Development tokens instead of OAuth, loopback clients only. See [`auth.dev`](#authdev-development-tokens-no-authorization-server) |
 
 `providerSecret` is independent of client auth, and is **not gated by
 `auth.enabled`**: setting it alone turns provider authentication on. That is
@@ -806,6 +807,66 @@ during migration, must pass in addition to the hierarchical policy.
     }
 }
 ```
+
+### `auth.dev` (development tokens, no authorization server)
+
+Client OAuth is the only way the broker learns who a caller is, and without a
+caller the hierarchical policy grants nothing. For a bench, a lab or a demo
+that must show a real deny without running an authorization server,
+`auth.dev` replaces the JWT check with static bearer tokens, one per caller,
+each bound to the subjects the policy reasons about. Roles, assignments,
+denies, `slotResources`, `toolCapabilities`, the audit and the `-32001`
+refusals are the production ones.
+
+| Field | Type | Notes |
+|---|---|---|
+| `auth.dev.callers[].id` | `string` | Unique. Names the caller in errors and the banner; the user subject unless `user` is given |
+| `auth.dev.callers[].tokenEnv` | `string` | Environment variable holding the token. At least 16 characters; one token per caller |
+| `auth.dev.callers[].user` | `string` | `user:<user>` subject. Defaults to `id` |
+| `auth.dev.callers[].groups` | `string[]` | `group:<g>` subjects |
+| `auth.dev.callers[].service` | `string` | `service:<s>` subject |
+| `auth.dev.callers[].client` | `string` | `client:<c>` subject |
+| `auth.dev.callers[].scopes` | `string[]` | Scopes, for `requiredScopes` and `perSlotScopes` |
+
+It fails closed, like the rest of the security file: `auth.dev` in
+`config.json`, a `token` written in clear, an unset or short token, two
+callers sharing a token or an id, an unknown key, or `auth.dev` next to
+`auth.enabled` (or `MCP_BROKER_AUTH_ENABLED`) stop the broker.
+
+**Loopback clients only.** A client request from anywhere but `127.0.0.0/8`
+or `::1` is refused with `401` before its token is read. A broker bound to
+`0.0.0.0` so that boards on the LAN can occupy their slots still
+authenticates no remote client with a development token; providers are not
+affected (they authenticate through `providers` or `providerSecret`). The
+banner says `DEVELOPMENT static tokens, loopback clients only (<ids>)`.
+
+```json
+{
+    "auth": {
+        "dev": {
+            "callers": [
+                { "id": "agent", "tokenEnv": "BROKER_TOKEN_AGENT", "groups": ["agents"] },
+                { "id": "operator", "tokenEnv": "BROKER_TOKEN_OPERATOR", "user": "guillaume", "groups": ["operators"] }
+            ]
+        },
+        "roles": {
+            "agent": { "capabilities": ["mcp.tools.list", "mcp.tools.actuate"] },
+            "operator": { "capabilities": ["*"] }
+        },
+        "assignments": [
+            { "id": "agents-habitat", "subject": "group:agents", "role": "agent", "resource": "/habitat/**" },
+            { "id": "operators", "subject": "group:operators", "role": "operator", "resource": "/**" }
+        ],
+        "denies": [{ "id": "agent-never-power", "subject": "group:agents", "capabilities": ["mcp.tools.power"], "resource": "/habitat/**" }],
+        "slotResources": { "scrubber": "/habitat/cabin-1/eclss/scrubber-1" },
+        "toolCapabilities": { "motor.set_speed": "mcp.tools.actuate", "scrubber.power": "mcp.tools.power" }
+    }
+}
+```
+
+A client sends `Authorization: Bearer <token>`. When embedding, the same
+setup is `WsTunnelBuilder.withDevAuth({ callers, ...policy })`, with each
+caller's `token` resolved by the host. Never for a deployment: use OAuth.
 
 ---
 

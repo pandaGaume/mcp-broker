@@ -3,6 +3,7 @@ import { bearerToken, buildChallengeHeader, PROTECTED_RESOURCE_METADATA_PREFIX }
 import { AuthError, scopesOf, type IPrincipal, type IResolvedAuth } from "./auth.types";
 import { buildResourceMetadata, type IProtectedResourceMetadata } from "./resource.metadata";
 import { SubjectMappingError } from "../authorization/index";
+import { isLoopbackRequest } from "./dev.auth";
 
 /**
  * Well-known prefix under which per-slot Protected Resource Metadata is served.
@@ -75,6 +76,9 @@ export class HttpAuthGuard {
      * `403` insufficient scope) otherwise.
      */
     async authorize(req: IncomingMessage, slot: string): Promise<IPrincipal> {
+        if (this._auth.loopbackOnly && !isLoopbackRequest(req)) {
+            throw new AuthError(401, "invalid_token", "Development tokens are accepted from loopback clients only");
+        }
         const token = bearerToken(req.headers["authorization"]);
         if (!token) {
             throw new AuthError(401, "invalid_token", "Missing bearer token");

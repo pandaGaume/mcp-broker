@@ -89,6 +89,13 @@ export interface IResolvedAuth {
     authorization?: IPolicyAuthorization;
     /** Optional resolver usable for provider namespace checks without policies. */
     slotResourceResolver?: ISlotResourceResolver;
+    /**
+     * Accept client requests from loopback addresses only, refused with `401`
+     * before the token is read. Set by the development mode
+     * (`buildDevAuth`), whose static tokens must never authenticate a remote
+     * client, even on a broker bound to every interface for its providers.
+     */
+    loopbackOnly?: boolean;
 }
 
 /**
