@@ -5,6 +5,7 @@
         { "name": "🔌 provider", "path": "node/packages/provider" },
         { "name": "🔷 dotnet", "path": "dotnet" },
         { "name": "🪼 c", "path": "c" },
+        { "name": "🐍 python", "path": "python" },
         { "name": "⚡ espressif", "path": "c/espressif" },
         // The ESP-IDF extension only shows its status bar and commands for a
         // workspace folder that IS an IDF project root (a CMakeLists.txt with
@@ -47,7 +48,8 @@
             "esbenp.prettier-vscode",
             "ms-dotnettools.csharp",
             "ms-dotnettools.csdevkit",
-            "editorconfig.editorconfig"
+            "editorconfig.editorconfig",
+            "ms-python.python"
         ]
     }
 }
