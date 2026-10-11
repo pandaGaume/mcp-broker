@@ -38,6 +38,7 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | Several MCP servers from one page/process | `@cyanmycelium/mcp-broker-provider` | `MultiplexTransport` | `ws://<host>/providers` |
 | An MCP server in the **same process** as the broker | `@cyanmycelium/mcp-core` | `LoopbackTransport` + `tunnel.registerLoopbackProvider(name, transport)` | no socket at all |
 | An MCP client | nothing of ours | any spec-compliant MCP client | `http://<host>/<slot>/mcp` |
+| Python functions published into a slot | [`python/`](python/) + its CMake native build | `mcp_provider.Provider` + `@provider.tool` | `ws://<host>/provider/<name>`, through `c/libmcpb` and `ctypes` |
 | A local stdio MCP server the broker should run | nothing | config key `stdioUpstreams[]` | broker spawns it |
 | A remote MCP server the broker should front | nothing | config key `mcpServers[]` | broker dials out |
 | A signed `.mcpb` bundle the broker should run | nothing | config key `mcpbBundles[]` | broker verifies, unpacks, spawns |
@@ -281,6 +282,7 @@ Start with **[`samples/`](samples/)**. Every sample starts what it needs, proves
 | [`samples/provider-lifecycle/`](samples/provider-lifecycle/) | connect, 1008 refusal, release, broker crash, reconnect, narrated |
 | [`samples/app-host/`](samples/app-host/) | the broker as your app's HTTP host: two mounts, `www.open` on a sub-path, the origin list |
 | [`samples/embedded/`](samples/embedded/) | `WsTunnelBuilder` in-process, with a loopback provider and no socket |
+| [`python/examples/`](python/examples/) | Python tools through the native C99 transport; `node python/examples/complete.mjs` starts the broker, provider and clients, verifies direct and `_all` calls, then stops them |
 | `node/packages/broker/.mcp-broker.example/` | a complete config template plus per-key guides in [EN](node/packages/broker/.mcp-broker.example/CONFIGURATION-EN.md) and [FR](node/packages/broker/.mcp-broker.example/CONFIGURATION-FR.md); `config.stdio-bridge.json` is the `stdioProvider: "_all"` pairing |
 | `node/packages/broker/web/demos/provider-tunnel/` | a browser page hosting an MCP server and tunnelling it to a slot |
 | `node/packages/broker/web/demos/broker-explorer/` | a browser MCP **client** driving `_broker`, `_all` or any slot |
