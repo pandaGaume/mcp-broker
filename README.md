@@ -48,8 +48,9 @@ Both publish to the same broker, under the same slot names, with the same tool s
 The C side is transport only: libmcpb carries JSON-RPC bytes and never interprets them, so the MCP layer stays whatever the host already has (a C++ server on the board and in the engine, mcp-core in Node or a browser). See [`c/README.md`](c/README.md) for why that boundary is where it is.
 
 Python tools use that same C99 transport through a native shared library and
-`ctypes`: [`python/`](python/) exposes `Provider` and `@provider.tool`, with
-JSON conversion, bounded execution and native polling during long tool calls.
+`ctypes`: [`python/`](python/) exposes tools, resources and prompts through
+`Provider`, with TLS, `Multiplex` groups, subscriptions, JSON conversion,
+bounded execution and native polling during long handler calls.
 
 ## Repository layout
 

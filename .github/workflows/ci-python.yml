@@ -8,6 +8,8 @@ on:
       - "python/**"
       - "c/libmcpb/**"
       - "c/ports/host/**"
+      - "c/ports/tls-openssl/**"
+      - "c/tests/tls/**"
       - "node/**"
       - "samples/lib/mcp-http-client.mjs"
       - ".github/workflows/ci-python.yml"
@@ -33,7 +35,20 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: node/package-lock.json
-      - run: cmake -S python -B python/build
+      - name: Install OpenSSL on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows'
+      - name: Configure native library on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S python -B python/build "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Configure native library on macOS
+        if: runner.os == 'macOS'
+        run: cmake -S python -B python/build -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+      - name: Configure native library on Linux
+        if: runner.os == 'Linux'
+        run: cmake -S python -B python/build
       - run: cmake --build python/build --config Release
       - run: python -m unittest discover -s python/tests -v
       - run: npm ci
@@ -41,4 +56,6 @@ jobs:
       - run: npm run build
         working-directory: node
       - run: node python/tests/roundtrip.mjs
+      - run: node python/tests/features.mjs
       - run: node python/examples/complete.mjs
+      - run: node python/examples/complete.mjs --tls

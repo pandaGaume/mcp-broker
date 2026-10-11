@@ -52,7 +52,7 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("expected failure", result["content"][0]["text"])
 
     def test_reject_invalid_configuration(self):
-        for url in ["wss://localhost", "ws://localhost/provider/test", "ws://x?token=y", "ws://u:p@x"]:
+        for url in ["http://localhost", "ws://localhost/provider/test", "ws://x?token=y", "ws://u:p@x"]:
             with self.assertRaises(ValueError):
                 self.provider.connect(url)
         for name in ["_all", "_broker", "", "a" * 64, "a\0b"]:

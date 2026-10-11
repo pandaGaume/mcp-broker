@@ -40,7 +40,7 @@ try {
     assert.ok(ready, `Provider never connected: ${diagnostics}`);
     const direct = await connect("python-slot");
     const tools = await direct.listTools();
-    assert.equal(tools.tools.length, 3);
+    assert.equal(tools.tools.length, 4);
     const message = 'été 🐍 "\\\n';
     assert.deepEqual((await direct.callTool("echo", { message })).structuredContent, { message });
     await assert.rejects(direct.callTool("echo", { message: 123 }), /Invalid type/);

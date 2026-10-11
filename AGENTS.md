@@ -39,6 +39,7 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 | An MCP server in the **same process** as the broker | `@cyanmycelium/mcp-core` | `LoopbackTransport` + `tunnel.registerLoopbackProvider(name, transport)` | no socket at all |
 | An MCP client | nothing of ours | any spec-compliant MCP client | `http://<host>/<slot>/mcp` |
 | Python functions published into a slot | [`python/`](python/) + its CMake native build | `mcp_provider.Provider` + `@provider.tool` | `ws://<host>/provider/<name>`, through `c/libmcpb` and `ctypes` |
+| Several Python MCP servers on one connection | [`python/`](python/) + OpenSSL | `mcp_provider.Multiplex` with `Provider` catalogs (tools, resources, prompts) | `ws[s]://<host>/providers`, through `c/libmcpb` |
 | A local stdio MCP server the broker should run | nothing | config key `stdioUpstreams[]` | broker spawns it |
 | A remote MCP server the broker should front | nothing | config key `mcpServers[]` | broker dials out |
 | A signed `.mcpb` bundle the broker should run | nothing | config key `mcpbBundles[]` | broker verifies, unpacks, spawns |

@@ -10,6 +10,8 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from urllib.parse import urlsplit
 
 from ._native import Transport
+from ._catalog import Catalog, invoke
+from .errors import RpcError
 
 log = logging.getLogger(__name__)
 
@@ -53,11 +55,6 @@ class _Worker:
         self.thread.join()
 
 
-class RpcError(Exception):
-    def __init__(self, code, message):
-        self.code, self.message = code, message
-
-
 def _schema(annotation):
     if annotation in (inspect.Signature.empty, Any):
         return {}
@@ -99,10 +96,10 @@ def _validate(value, schema):
     return True
 
 
-class Provider:
-    """A dedicated slot. run() owns all C operations; tools execute in one worker.
+class Provider(Catalog):
+    """An MCP slot. run() owns all C operations; handlers execute in one worker.
 
-    stop() is safe from another thread. Register tools before connect().
+    stop() is safe from another thread. Register handlers before connect().
     A native tool that holds the GIL must release it to let the polling loop run.
     """
     def __init__(self, name, *, aggregate=False, secret=None, library=None,
@@ -121,13 +118,11 @@ class Provider:
         self._connection = None
         self._stop = threading.Event()
         self._lifecycle = threading.Lock()
+        self._init_catalog()
 
     def tool(self, name=None, *, description=None):
         def register(fn):
-            if self._connection is not None:
-                raise RuntimeError("Register tools before connect()")
-            if inspect.iscoroutinefunction(fn):
-                raise TypeError("Tools must be synchronous functions")
+            self._registration_allowed()
             tool_name = name or fn.__name__
             if not isinstance(tool_name, str) or not 1 <= len(tool_name) <= 64 or any(
                     not (c.isascii() and (c.isalnum() or c in "_.-")) for c in tool_name):
@@ -150,24 +145,30 @@ class Provider:
             return fn
         return register
 
-    def connect(self, url="ws://localhost:3000"):
+    def connect(self, url="ws://localhost:3000", *, ca_file=None):
         """Configure the broker base URL. The first poll performs the connection."""
         if not self._lifecycle.acquire(blocking=False):
             raise RuntimeError("Provider is running")
         try:
             parsed = urlsplit(url)
-            if (parsed.scheme != "ws" or not parsed.hostname or parsed.path not in ("", "/")
+            if (parsed.scheme not in ("ws", "wss") or not parsed.hostname or parsed.path not in ("", "/")
                     or parsed.query or parsed.fragment or parsed.username or parsed.password
                     or "\0" in parsed.hostname):
-                raise ValueError("Use a ws://host:port base URL; this build has no TLS port")
-            self._connection = (parsed.hostname, parsed.port or 80)
+                raise ValueError("Use a ws:// or wss://host:port base URL")
+            if self._group is not None:
+                raise RuntimeError("Provider belongs to a Multiplex group")
+            self._connection = (parsed.hostname, parsed.port or (443 if parsed.scheme == "wss" else 80))
+            self._tls, self._ca_file = parsed.scheme == "wss", ca_file
             self._stop.clear()
         finally:
             self._lifecycle.release()
         return self
 
     def stop(self):
-        self._stop.set()
+        if self._group is not None:
+            self._group.stop()
+        else:
+            self._stop.set()
 
     def _call(self, params):
         if not isinstance(params, dict):
@@ -187,7 +188,7 @@ class Provider:
             if not _validate(value, metadata["inputSchema"]["properties"][key]):
                 raise RpcError(-32602, f"Invalid type for argument {key}")
         try:
-            result = fn(**arguments)
+            result = invoke(fn, **arguments)
             text = json.dumps(result, ensure_ascii=False, allow_nan=False)
             structured = result if isinstance(result, dict) else {"result": result}
             return {"content": [{"type": "text", "text": text}], "structuredContent": structured}
@@ -202,14 +203,15 @@ class Provider:
             supported = ("2024-11-05", "2025-03-26", "2025-06-18")
             version = params["protocolVersion"]
             return {"protocolVersion": version if version in supported else supported[-1],
-                    "capabilities": {"tools": {}}, "serverInfo": {"name": self.name, "version": "0.1.0"}}
+                    "capabilities": {"tools": {}, "resources": {"subscribe": True}, "prompts": {}},
+                    "serverInfo": {"name": self.name, "version": "0.1.0"}}
         if method == "ping":
             return {}
         if method == "tools/list":
-            return {"tools": [v[2] for v in self._tools.values()]}
+            return self._page([v[2] for v in self._tools.values()], params, "tools")
         if method == "tools/call":
             return self._call(params)
-        raise RpcError(-32601, "Method not found")
+        return self._catalog_dispatch(method, params)
 
     def _reply(self, request):
         reply = {"jsonrpc": "2.0", "id": request["id"]}
@@ -223,69 +225,19 @@ class Provider:
         return reply
 
     def run(self):
-        """Poll until stop() or Ctrl+C; release the slot, then wait for running tools."""
+        """Poll until stop() or Ctrl+C; release the slot before joining workers."""
+        from ._session import serve
         if not self._lifecycle.acquire(blocking=False):
             raise RuntimeError("Provider is already running")
-        transport, worker = None, None
         try:
+            if self._group is not None:
+                raise RuntimeError("Run the Multiplex group instead of an individual provider")
             if self._connection is None:
                 raise RuntimeError("Call connect() before run()")
             transport = Transport(*self._connection, self.name, self.aggregate, self.secret,
-                                  self.buffer_size, self.library)
-            worker = _Worker(self)
-            pending = []
-            while not self._stop.is_set():
-                rc, data = transport.poll()
-                if rc not in (0, -2):
-                    log.warning("Provider %s: %s", self.name, transport.diagnostic(rc))
-                generation = transport.generation
-                # Replies are sent only on the connection that received the request.
-                for future, received_generation in pending[:]:
-                    if future.done():
-                        pending.remove((future, received_generation))
-                        if received_generation == generation and transport.connected:
-                            self._send(transport, future.result())
-                    elif received_generation != generation or not transport.connected:
-                        future.cancel()
-                        pending.remove((future, received_generation))
-                if data is None:
-                    continue
-                try:
-                    request = json.loads(data, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
-                except (ValueError, UnicodeDecodeError):
-                    self._send(transport, {"jsonrpc": "2.0", "id": None,
-                                           "error": {"code": -32700, "message": "Parse error"}})
-                    continue
-                if (not isinstance(request, dict) or request.get("jsonrpc") != "2.0"
-                        or not isinstance(request.get("method"), str)
-                        or ("id" in request and type(request["id"]) not in (str, int, type(None)))):
-                    # Server-request replies are not MCP requests and need no response.
-                    if isinstance(request, dict) and ("result" in request or "error" in request):
-                        continue
-                    self._send(transport, {"jsonrpc": "2.0", "id": None,
-                                           "error": {"code": -32600, "message": "Invalid Request"}})
-                    continue
-                if "id" not in request:
-                    continue
-                if request["method"] == "tools/call":
-                    if len(pending) >= self.max_pending:
-                        self._send(transport, {"jsonrpc": "2.0", "id": request["id"],
-                                               "error": {"code": -32000, "message": "Tool queue is full"}})
-                    else:
-                        try:
-                            pending.append((worker.submit(request), generation))
-                        except queue.Full:
-                            self._send(transport, {"jsonrpc": "2.0", "id": request["id"],
-                                                   "error": {"code": -32000, "message": "Tool queue is full"}})
-                else:
-                    self._send(transport, self._reply(request))
-        except KeyboardInterrupt:
-            self.stop()
+                self.buffer_size, self.library, tls=self._tls, ca_file=self._ca_file)
+            serve([self], transport, self._stop)
         finally:
-            if transport is not None:
-                transport.close()
-            if worker is not None:
-                worker.close()
             self._lifecycle.release()
 
     @staticmethod

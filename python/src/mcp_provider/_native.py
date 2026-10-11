@@ -24,12 +24,18 @@ def load_library(path=None):
     lib = C.CDLL(str(found.resolve()))  # Releases the GIL during blocking C calls.
     signatures = {
         "create": ([C.c_char_p, C.c_ushort, C.c_char_p, C.c_int, C.c_char_p, C.c_size_t], C.c_void_p),
+        "create_ex": ([C.c_char_p, C.c_ushort, C.POINTER(C.c_char_p), C.POINTER(C.c_int),
+                       C.c_size_t, C.c_int, C.c_char_p, C.c_size_t, C.c_int, C.c_char_p], C.c_void_p),
         "destroy": ([C.c_void_p], None),
         "poll": ([C.c_void_p, C.POINTER(C.c_void_p), C.POINTER(C.c_size_t), C.c_int], C.c_int),
         "send": ([C.c_void_p, C.c_char_p, C.c_size_t], C.c_int),
         "generation": ([C.c_void_p], C.c_ulong), "connected": ([C.c_void_p], C.c_int),
         "error": ([C.c_int], C.c_char_p), "detail": ([C.c_void_p], C.c_char_p),
         "reason": ([C.c_void_p], C.c_char_p),
+        "poll_slot": ([C.c_void_p, C.POINTER(C.c_size_t), C.POINTER(C.c_void_p),
+                       C.POINTER(C.c_size_t), C.c_int], C.c_int),
+        "send_slot": ([C.c_void_p, C.c_size_t, C.c_char_p, C.c_size_t], C.c_int),
+        "refused": ([C.c_void_p, C.c_size_t], C.c_int),
     }
     for name, (args, result) in signatures.items():
         fn = getattr(lib, "mcp_py_" + name)
@@ -38,13 +44,21 @@ def load_library(path=None):
 
 
 class Transport:
-    def __init__(self, host, port, name, aggregate, secret, capacity, library):
+    def __init__(self, host, port, name, aggregate, secret, capacity, library,
+                 *, tls=False, ca_file=None, slots=None):
         self.lib = load_library(library)
         headers = f"X-Provider-Token: {secret}\r\n" if secret else ""
+        self.multiplex = slots is not None
+        slots = slots or [(name, aggregate)]
+        names = (C.c_char_p * len(slots))(*(n.encode() for n, _ in slots))
+        aggregates = (C.c_int * len(slots))(*(int(a) for _, a in slots))
+        ca = Path(ca_file).read_bytes() if ca_file is not None else None
+        if ca is not None and b"\0" in ca:
+            raise ValueError("CA PEM must not contain NUL bytes")
         # The host port initializes process-wide Winsock state on first use.
         with _CREATE_LOCK:
-            self.handle = self.lib.mcp_py_create(host.encode(), port, name.encode(),
-                                                int(aggregate), headers.encode(), capacity)
+            self.handle = self.lib.mcp_py_create_ex(host.encode(), port, names, aggregates,
+                len(slots), int(self.multiplex), headers.encode(), capacity, int(tls), ca)
         if not self.handle:
             raise RuntimeError("Native provider initialization failed")
 
@@ -66,6 +80,19 @@ class Transport:
         rc = self.lib.mcp_py_send(self.handle, data, len(data))
         if rc < 0:
             raise OSError(self.lib.mcp_py_error(rc).decode())
+
+    def poll_slot(self, timeout=50):
+        ptr, length, slot = C.c_void_p(), C.c_size_t(), C.c_size_t()
+        rc = self.lib.mcp_py_poll_slot(self.handle, C.byref(slot), C.byref(ptr), C.byref(length), timeout)
+        return rc, slot.value, C.string_at(ptr, length.value) if rc == 0 else None
+
+    def send_slot(self, slot, data):
+        rc = self.lib.mcp_py_send_slot(self.handle, slot, data, len(data))
+        if rc < 0:
+            raise OSError(self.lib.mcp_py_error(rc).decode())
+
+    def refused(self, slot):
+        return bool(self.lib.mcp_py_refused(self.handle, slot))
 
     def diagnostic(self, rc):
         return ": ".join(s.decode("utf-8", "replace") for s in [
