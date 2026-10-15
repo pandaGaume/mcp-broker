@@ -569,6 +569,10 @@ Second, **all three report `transport: "stdio"`** in `providers_list` and
 `transport: "stdio"` slot is therefore not necessarily a child process; it may
 be a remote URL.
 
+### `plugins` and `pluginsDirectory`
+
+Trusted local plugins are loaded after the broker starts. Each entry selects a module, an existing security-file provider identity and plugin-owned configuration. See [the plugin contract and Docker deployment](plugins.md). No plugin package is a dependency of the broker.
+
 ### `stdioUpstreams`
 
 Each entry spawns a child process at broker start and talks newline-delimited

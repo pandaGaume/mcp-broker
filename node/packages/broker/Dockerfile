@@ -1,52 +1,42 @@
 # syntax=docker/dockerfile:1.7
+# Build from node/: docker build -f packages/broker/Dockerfile -t mcp-broker .
 
-# ---------------------------------------------------------------------------
-# Build stage, compiles TypeScript, copies grammar JSON resources to dist/
-# ---------------------------------------------------------------------------
-FROM node:20-alpine AS build
+# The deployment owns this manifest. No slot packages are built into the broker.
+FROM node:22-alpine AS plugins
+WORKDIR /opt/mcp-broker-plugins
+COPY packages/broker/plugins/ ./
+RUN npm ci --omit=dev
 
-WORKDIR /app
-
-# Dependencies first so Docker can cache the install layer.
-COPY package.json package-lock.json* .npmrc* ./
+FROM node:22-alpine AS build
+WORKDIR /build
+COPY package.json package-lock.json ./
+COPY packages/broker/package.json ./packages/broker/package.json
+COPY packages/provider/package.json ./packages/provider/package.json
 RUN npm ci
-
-# Source + build tooling.
-COPY tsconfig.json tsconfig.build.json ./
-COPY src ./src
-COPY scripts ./scripts
-
+COPY packages/broker/src ./packages/broker/src
+COPY packages/broker/scripts ./packages/broker/scripts
+COPY packages/broker/tsconfig.json packages/broker/tsup.config.ts ./packages/broker/
+COPY packages/provider/src ./packages/provider/src
+COPY packages/provider/tsconfig.json packages/provider/tsup.config.ts ./packages/provider/
 RUN npm run build
-
-# Drop dev dependencies from node_modules so we can copy a slim folder.
 RUN npm prune --omit=dev
 
-
-# ---------------------------------------------------------------------------
-# Runtime stage, only what `node dist/bin.js` needs to start.
-# ---------------------------------------------------------------------------
-FROM node:20-alpine AS runtime
-
+FROM node:22-alpine AS runtime
 ENV NODE_ENV=production \
     MCP_BROKER_HOST=0.0.0.0 \
-    MCP_BROKER_PORT=3000
-
+    MCP_BROKER_PORT=3000 \
+    MCP_BROKER_PLUGINS_DIR=/opt/mcp-broker-plugins
 WORKDIR /app
-
-# Bring over the package manifest, the production node_modules, and the
-# compiled output (which already includes the JSON grammar resources).
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-
-# Run as a non-root user.
-RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
+COPY --from=plugins /opt/mcp-broker-plugins /opt/mcp-broker-plugins
+COPY --from=build /build/package.json ./package.json
+COPY --from=build /build/node_modules ./node_modules
+COPY --from=build /build/packages/broker/package.json ./packages/broker/package.json
+COPY --from=build /build/packages/broker/dist ./packages/broker/dist
+COPY --from=build /build/packages/provider/package.json ./packages/provider/package.json
+COPY --from=build /build/packages/provider/dist ./packages/provider/dist
+RUN addgroup -S app && adduser -S app -G app
 USER app
-
-# Lightweight TCP probe, succeeds when the broker is listening.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "require('net').createConnection({host:'127.0.0.1',port:Number(process.env.MCP_BROKER_PORT||3000)}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
-
 EXPOSE 3000
-
-CMD ["node", "dist/bin.js"]
+CMD ["node", "packages/broker/dist/bin.js"]

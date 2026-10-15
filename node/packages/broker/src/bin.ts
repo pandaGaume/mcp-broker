@@ -66,6 +66,7 @@ import open from "open";
 import { WsTunnelBuilder, VERSION, PACKAGE_NAME, BROKER_PROVIDER_NAME, BROKER_AGGREGATE_NAME, type ProviderTakeoverMode } from "./index";
 import { BrokerConfigError, loadBrokerConfig, loadSecurityConfig, resolveOpenTarget, type ILoadedBrokerConfig, type ILoadedSecurityConfig } from "./config";
 import { loadMcpbBundle } from "./mcpb/mcpb.loader";
+import { startBrokerPlugins } from "./plugins";
 
 // ---------------------------------------------------------------------------
 // CLI flags
@@ -106,6 +107,7 @@ function printHelp(): void {
             `  MCP_BROKER_LOCALE           Locale for _broker tool descriptions (default en)\n` +
             `  MCP_BROKER_ALLOWED_ORIGINS  Comma-separated browser origins allowed on /<slot>/mcp,\n` +
             `                              /<slot>/sse and /<slot>/messages (default: none pass)\n` +
+            `  MCP_BROKER_PLUGINS_DIR      Directory of installed plugin packages\n` +
             `  MCP_BROKER_WWW_DIR          Serve this directory at "/"\n` +
             `  MCP_BROKER_BUNDLE_DIR       Serve this directory at "/bundle"\n` +
             `  MCP_BROKER_OPEN             "1" to open the root in a browser, or a path such as /app/\n\n` +
@@ -707,6 +709,29 @@ async function main(): Promise<void> {
         process.exit(1);
     }
     await tunnel.start();
+    let plugins: Awaited<ReturnType<typeof startBrokerPlugins>>;
+    try {
+        const pluginsDirectory = process.env["MCP_BROKER_PLUGINS_DIR"] ?? config.pluginsDirectory;
+        if (pluginsDirectory !== undefined && typeof pluginsDirectory !== "string") throw new Error("pluginsDirectory must be a string");
+        plugins = await startBrokerPlugins(config.plugins === undefined ? [] : config.plugins, {
+            tunnel,
+            baseDir,
+            moduleDirectory: pluginsDirectory ? path.resolve(baseDir, pluginsDirectory) : baseDir,
+            principals: new Map(
+                (security?.credentials ?? []).map((credential) => [
+                    credential.id,
+                    {
+                        id: credential.id,
+                        subjects: credential.subjects,
+                        allowedResources: credential.allowedResources,
+                    },
+                ])
+            ),
+        });
+    } catch (error) {
+        await tunnel.stop();
+        throw error;
+    }
 
     // ── Startup banner ──────────────────────────────────────────────────────
     const httpScheme = useTls ? "https" : "http";
@@ -802,14 +827,25 @@ async function main(): Promise<void> {
     }
 
     // ── Signal handlers ─────────────────────────────────────────────────────
+    let shuttingDown = false;
     const shutdown = async (signal: string): Promise<void> => {
+        if (shuttingDown) return;
+        shuttingDown = true;
         console.log(`\n⛔  ${signal} received, shutting down…`);
-        await tunnel.stop();
+        try {
+            await plugins.stop();
+        } finally {
+            await tunnel.stop();
+        }
         process.exit(0);
     };
 
-    process.on("SIGINT", () => void shutdown("SIGINT"));
-    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+    const shutdownFailed = (error: unknown): void => {
+        console.error(`[mcp-broker] shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+    };
+    process.on("SIGINT", () => void shutdown("SIGINT").catch(shutdownFailed));
+    process.on("SIGTERM", () => void shutdown("SIGTERM").catch(shutdownFailed));
 }
 
 main().catch((err: unknown) => {
