@@ -780,7 +780,11 @@ export class WsTunnel implements IBrokerContext {
      * loopback, or if the slot is protected and the principal is not the one
      * allowed to publish into it.
      */
-    public registerLoopbackProvider(name: string, transport: IMessageTransport, options: { readonly principal?: IProviderPrincipal } = {}): ILoopbackProviderHandle {
+    public registerLoopbackProvider(
+        name: string,
+        transport: IMessageTransport,
+        options: { readonly principal?: IProviderPrincipal; readonly aggregate?: boolean } = {}
+    ): ILoopbackProviderHandle {
         if (this._loopbackProviders.has(name)) {
             throw new Error(`Loopback provider "${name}" is already registered.`);
         }
@@ -816,6 +820,7 @@ export class WsTunnel implements IBrokerContext {
 
         // The handle speaks for this registration only: once the slot was
         // released, or taken by another loopback, it has nobody to speak for.
+        if (options.aggregate) void this._aggregateServer?.addProvider(name);
         const call = (method: string, params: unknown): Promise<BrokerMethodOutcome> =>
             Promise.resolve(
                 this._loopbackProviders.get(name) === transport

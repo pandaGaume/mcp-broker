@@ -228,6 +228,8 @@ export type {
 
 // JSON config file used by `bin.ts` at startup. Exported so a programmatic
 // embedder can re-use the same loader against a custom path.
+export { startBrokerPlugins } from "./plugins";
+export type { IBrokerPlugin, IBrokerPluginConfig, IBrokerPluginContext, IBrokerPluginHandle, IBrokerPluginOptions } from "./plugins";
 export { BrokerConfigError, loadBrokerConfig, loadSecurityConfig, resolveOpenTarget, DEFAULT_CONFIG_FILENAME } from "./config";
 export type {
     IBrokerAuthConfig,

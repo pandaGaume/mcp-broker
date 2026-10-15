@@ -726,13 +726,17 @@ tunnel is built, so a wrong path fails before the port is bound.
 
 The generated certificate covers `localhost`, `127.0.0.1`, `::1` for 365 days. Browsers will warn about an untrusted issuer on first visit. Click "Advanced → Proceed". MCP clients (Claude, Inspector) ignore certificate validation by default.
 
+## Deployment plugins
+
+Load local plugins through `plugins[]` without adding their packages to the broker dependencies. Deployments provide a separate plugin manifest and lockfile. See [the plugin API, configuration and Docker composition](docs/plugins.md).
+
 ## Docker
 
 A multi-stage `Dockerfile` ships with the package: build stage compiles TypeScript and copies grammar JSON, runtime stage carries only the compiled `dist/`, production `node_modules`, and runs as a non-root user.
 
 ```sh
 # From the node/ directory
-docker build -t cyanmycelium/mcp-broker:0.1.0 .
+docker build -f packages/broker/Dockerfile -t cyanmycelium/mcp-broker:0.1.0 .
 
 # Run on host port 3000
 docker run --rm -p 3000:3000 cyanmycelium/mcp-broker:0.1.0

@@ -7,6 +7,7 @@ import type { IAuthorizationPolicyConfig } from "./authorization/index";
 import type { IProviderCredential } from "./auth/provider.auth";
 import { resolveDevCallers, resolveDevNetworks, type IDevAuthConfig, type IResolvedDevCaller } from "./auth/dev.auth";
 import type { IProtectedSlot } from "./authority/declaration";
+import type { IBrokerPluginConfig } from "./plugins";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
     /** Master switch. Absent/`false` keeps the broker unauthenticated. */
@@ -62,6 +63,11 @@ export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
  * ```
  */
 export interface IBrokerConfig {
+    /** Trusted local plugins, loaded after broker startup. */
+    plugins?: IBrokerPluginConfig[];
+    /** Directory for installed plugin packages, relative to this config file. */
+    pluginsDirectory?: string;
+
     /** TCP port. Maps to `MCP_BROKER_PORT`. */
     port?: number;
 

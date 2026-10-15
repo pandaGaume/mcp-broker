@@ -294,3 +294,7 @@ Start with **[`samples/`](samples/)**. Every sample starts what it needs, proves
 | [`c/tests/roundtrip/`](c/tests/roundtrip/) and [`c/tests/soak/`](c/tests/soak/) | the C client against the Node broker: slots, `_all`, broker kill and restart; and an overnight load with the numbers a leak would move |
 
 Reference docs, deepest last: [broker README](node/packages/broker/README.md) → [config reference](node/packages/broker/docs/config.md) → [endpoints](docs/endpoints.md) → [protocol](docs/protocol.md) → [architecture](docs/architecture.md) → [authorization](docs/authorization.md). For the device side: [c/README.md](c/README.md) → [libmcpb](c/libmcpb/README.md) → [ESP-IDF](c/espressif/README.md) → [Unreal](c/unreal/README.md).
+
+## Deployment plugins
+
+The CLI supports `plugins[]`: trusted ESM modules supplied by the deployment, not dependencies of the broker. See `node/packages/broker/docs/plugins.md` for API version 1, provider identities, lifecycle and Docker composition. Required plugins roll startup back on failure. Plugins stop before the tunnel. Never add a dependency on a particular slot implementation to the broker package. Build Docker from `node/` with `docker build -f packages/broker/Dockerfile -t mcp-broker .`.
