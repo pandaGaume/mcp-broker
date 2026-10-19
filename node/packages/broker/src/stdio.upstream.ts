@@ -68,6 +68,9 @@ export class StdioUpstream implements IUpstream {
         this._proc = spawn(command, args, {
             env: { ...process.env, ...env },
             stdio: ["pipe", "pipe", "inherit"],
+            // A console server started from a process without a console (a desktop application, a service) would
+            // open its own console window on Windows: it talks over stdio, so it never needs one.
+            windowsHide: true,
         });
 
         this._proc.on("error", (err: Error) => {
