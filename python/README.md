@@ -253,6 +253,14 @@ library during pip installation or publish portable binary wheels.
 
 ## Verification
 
+The Windows GitHub Actions job uses the full OpenSSL SDK already installed in
+`C:/Program Files/OpenSSL` on the hosted runner. It passes that location to
+CMake with `OPENSSL_ROOT_DIR` and links the dynamic libraries. It does not
+install or rebuild OpenSSL through vcpkg on every pull request. A runtime-only
+`openssl.exe` is insufficient: the development headers and import libraries
+must be present. The native provider itself is still compiled and tested on
+each run. No compilation time limit is added by this configuration.
+
 With `PYTHONPATH` set to `python/src`:
 
 ```sh
