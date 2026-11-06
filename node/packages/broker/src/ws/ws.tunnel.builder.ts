@@ -1,4 +1,5 @@
 import type { ILimitsConfig } from "../limits/controller";
+import type { IBrokerMdnsOptions } from "../discovery/mdns";
 import * as fs from "fs";
 import { WsTunnel } from "./ws.tunnel";
 import type { AllowedOrigins, IStaticMount, IWsTunnelOptions, ProviderTakeoverMode } from "./ws.interfaces";
@@ -45,6 +46,7 @@ import {
  * ```
  */
 export class WsTunnelBuilder {
+    private _mdns?: IBrokerMdnsOptions;
     private _port = 3000;
     private _host: string | undefined;
     private _providerPath = "/provider";
@@ -82,6 +84,12 @@ export class WsTunnelBuilder {
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
         this._port = port;
+        return this;
+    }
+
+    /** Announce an introspection entry point on explicitly named LAN interfaces. Off by default. */
+    withMdns(options: IBrokerMdnsOptions): this {
+        this._mdns = options;
         return this;
     }
 
@@ -476,6 +484,7 @@ export class WsTunnelBuilder {
         const baseAuthorization = this._authorization ?? this._auth?.authorization;
         const authorization = baseAuthorization && this._slotResourceResolver ? { ...baseAuthorization, slotResourceResolver: this._slotResourceResolver } : baseAuthorization;
         const options: IWsTunnelOptions = {
+            mdns: this._mdns,
             port: this._port,
             host: this._host,
             providerPath: this._providerPath,

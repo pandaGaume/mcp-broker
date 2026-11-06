@@ -1,4 +1,5 @@
 import type { ILimitsConfig } from "../limits/controller";
+import type { IBrokerMdnsOptions } from "../discovery/mdns";
 import type { ServerResponse } from "http";
 import type { WebSocket } from "ws";
 import type { GrammarResolverOptions, IMessageTransport } from "@cyanmycelium/mcp-core";
@@ -259,6 +260,8 @@ export interface IInternalClient {
  * Configuration options for a {@link WsTunnel} instance.
  */
 export interface IWsTunnelOptions {
+    /** Optional LAN discovery; disabled unless explicitly enabled on named interfaces. */
+    mdns?: IBrokerMdnsOptions;
     readonly limits?: ILimitsConfig;
     /** TCP port to listen on. */
     port: number;

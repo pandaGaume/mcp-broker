@@ -139,6 +139,7 @@ function printHelp(): void {
             `  mcpbBundles[]     Signed .mcpb bundles, verified then spawned. In _all unless "aggregate": false\n` +
             `  www.mounts[]      Several urlPrefix -> dir mappings (the env vars above mount one each)\n` +
             `  allowedOrigins    Also accepts { "pattern": "<regexp>" }; the env var takes a list only\n` +
+            `  mdns              Opt-in LAN discovery: { enabled: true, interfaces: ["Ethernet"] }; HTTPS + client auth required unless allowInsecureDev\n` +
             `  auth.*            Roles, assignments, denies, per-slot and per-provider scopes\n` +
             `  auth.dev          Development tokens, security file only: { callers: [{ id, tokenEnv, user?, groups? }], networks?: ["lan"] }; loopback clients unless networks says more\n` +
             `  brokerName        Library-only: no builder setter exists, so the CLI cannot forward it\n\n` +
@@ -476,6 +477,8 @@ async function main(): Promise<void> {
     if (host) {
         builder.withHost(host);
     }
+
+    if (config.mdns !== undefined) builder.withMdns(config.mdns);
 
     if (providerHeartbeatIntervalMs !== undefined) {
         builder.withProviderHeartbeat(providerHeartbeatIntervalMs);

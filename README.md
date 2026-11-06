@@ -129,6 +129,8 @@ In both cases the broker is this repository's, started from a checkout with `npm
 
 ## Documentation
 
+- [HOWTO.md](HOWTO.md): local development with `openGuard()`, policy tests with `auth.dev`, production with OAuth, and opt-in LAN discovery through mDNS.
+
 Start with **[AGENTS.md](AGENTS.md)** if you want one file that covers the decisions, or **[samples/](samples/)** if you would rather run something first: five self-contained integrations that start what they need and prove themselves end to end, indexed for agents in [samples/index.json](samples/index.json). Then, by depth:
 
 - [docs/packages.md](docs/packages.md): the packages, what belongs in each, and why `client` was split into `provider` and `consumer`
