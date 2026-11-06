@@ -8,6 +8,8 @@
 
 # @cyanmycelium/mcp-broker
 
+For local development, policy tests, production setup and opt-in mDNS/DNS-SD discovery, see the [HOWTO](https://github.com/pandaGaume/mcp-broker/blob/main/HOWTO.md). LAN discovery is disabled by default and never establishes trust in a server.
+
 WebSocket-based [Model Context Protocol](https://modelcontextprotocol.io/) broker. Aggregates multiple MCP providers behind a single endpoint, with WebSocket, Streamable HTTP, SSE, and stdio client transports.
 
 > This is the Node/TypeScript implementation of the broker. Architecture, wire protocol, and endpoints are documented language-neutrally in the [repository `docs/` folder](https://github.com/pandaGaume/mcp-broker/tree/main/docs), which is not shipped in the npm package. Every link out of this file is therefore absolute.

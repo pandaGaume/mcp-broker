@@ -1,5 +1,22 @@
 # Broker configuration
 
+## Optional LAN discovery (1.11.0)
+
+`mdns` is a config-file-only object, also available through `WsTunnelBuilder.withMdns()` and `IWsTunnelOptions.mdns`. It is off by default and opens no discovery sockets while disabled.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mdns.enabled` | `false` | Explicitly enable the `_mcp-broker._tcp.local.` announcement |
+| `mdns.interfaces` | none | Required when enabled: 1 to 8 exact OS interface names, each with a non-loopback IPv4 address |
+| `mdns.name` | random opaque label per start | Optional instance label, 48 ASCII letters/digits/hyphens maximum |
+| `mdns.hostname` | generated instance label | Optional single hostname label without `.local`, same bounds |
+| `mdns.publicBaseUrl` | native listener | Optional HTTP(S) proxy origin and mount prefix, no credentials/query/fragment, at most 200 characters |
+| `mdns.allowInsecureDev` | `false` | Explicitly permit announcing HTTP or an unauthenticated development listener |
+
+Normal activation requires client authentication and an HTTPS endpoint. Public proxy reachability and its TLS certificate remain the operator's responsibility. Only protocol version, scheme, effective introspection path and optional configured proxy origin are published in TXT. No credentials, provider inventory or software version is advertised. IPv4 only in this release. Discovery grants no trust or authorization.
+
+See the repository [HOWTO](../../../../HOWTO.md#5-découverte-lan-par-mdns-depuis-1110) for the complete convention, reverse proxy setup, security boundaries and mcp-network-discovery calls.
+
 `mcp-broker` reads its configuration from three sources, applied in this order
 (highest priority first):
 

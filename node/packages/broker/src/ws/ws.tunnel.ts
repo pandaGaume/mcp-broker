@@ -1,5 +1,6 @@
 import { compileRegex } from "../authority/resource.limits";
 import { LimitController } from "../limits/controller";
+import { BrokerMdnsAdvertiser, parseMdnsOptions } from "../discovery/mdns";
 import { AsyncLocalStorage } from "async_hooks";
 import * as fs from "fs";
 import * as http from "http";
@@ -348,6 +349,7 @@ function correlationHeaderOf(req: IncomingMessage): string | undefined {
 export class WsTunnel implements IBrokerContext {
     private readonly _options: IWsTunnelOptions;
     private _httpServer: http.Server | https.Server | null = null;
+    private _mdns: BrokerMdnsAdvertiser | undefined;
     private _wss: WebSocketServer | null = null;
 
     /**
@@ -512,7 +514,7 @@ export class WsTunnel implements IBrokerContext {
     private readonly _requestEpoch = randomUUID();
 
     constructor(options: IWsTunnelOptions) {
-        this._options = options;
+        this._options = { ...options, mdns: parseMdnsOptions(options.mdns) };
         this._authGuard = options.auth ? new HttpAuthGuard(options.auth, options.mcpPath ?? "/mcp") : null;
         this._providerAuth = options.providerAuth ?? null;
         this._allowedOrigins = originPredicate(options.allowedOrigins);
@@ -923,7 +925,7 @@ export class WsTunnel implements IBrokerContext {
      * any caller's `await` and outside any `catch` the caller wrote.
      */
     start(): Promise<void> {
-        return new Promise((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
             const handler = (req: IncomingMessage, res: ServerResponse) => this._handleHttp(req, res);
             this._httpServer = this._options.tls ? https.createServer({ cert: this._options.tls.cert, key: this._options.tls.key }, handler) : http.createServer(handler);
             // Disable perMessageDeflate: payloads may be large base64-encoded blobs
@@ -1068,6 +1070,25 @@ export class WsTunnel implements IBrokerContext {
                     }
                 );
             });
+        }).then(async () => {
+            const mdns = this._options.mdns;
+            if (!mdns?.enabled) return;
+            this._mdns = new BrokerMdnsAdvertiser();
+            try {
+                const address = this._httpServer!.address();
+                if (!address || typeof address === "string") throw new Error("mDNS requires a listening TCP server");
+                await this._mdns.start(mdns, {
+                    host: this._options.host ?? "0.0.0.0",
+                    port: address.port,
+                    tls: this.tls,
+                    authenticated: !!this._options.auth,
+                    brokerProviderEnabled: !!this._brokerServer,
+                    mcpPath: this.paths.mcp,
+                });
+            } catch (error) {
+                await this.stop();
+                throw error;
+            }
         });
     }
 
@@ -1171,6 +1192,13 @@ export class WsTunnel implements IBrokerContext {
         this._stopHeartbeat();
         this._stopRequestTimeoutSweep();
         this._stopCallerRefSweep();
+        const mdns = this._mdns;
+        this._mdns = undefined;
+        try {
+            await mdns?.stop();
+        } catch {
+            console.warn("[broker] mDNS shutdown failed");
+        }
         this._providerSockets.clear();
 
         // Forgotten without an upstream unsubscribe each: every provider is

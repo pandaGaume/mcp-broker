@@ -1,5 +1,7 @@
 export { WsTunnel } from "./ws/ws.tunnel";
 export { WsTunnelBuilder } from "./ws/ws.tunnel.builder";
+export { BROKER_MDNS_TYPE } from "./discovery/mdns";
+export type { IBrokerMdnsOptions } from "./discovery/mdns";
 export type {
     AllowedOrigins,
     IInternalClient,

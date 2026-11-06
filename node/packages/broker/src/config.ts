@@ -1,5 +1,6 @@
 import { compileResourceLimits, type IResourceLimitRule } from "./authority/resource.limits";
 import { validateLimitsConfig, type ILimitsConfig } from "./limits/controller";
+import type { IBrokerMdnsOptions } from "./discovery/mdns";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -63,6 +64,8 @@ export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
  * ```
  */
 export interface IBrokerConfig {
+    /** Opt-in mDNS/DNS-SD announcement on explicit LAN interfaces. */
+    mdns?: IBrokerMdnsOptions;
     /** Trusted local plugins, loaded after broker startup. */
     plugins?: IBrokerPluginConfig[];
     /** Directory for installed plugin packages, relative to this config file. */

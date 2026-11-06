@@ -20,7 +20,6 @@ repository; the changes it needed for this release are listed under
 
 ## [Unreleased]
 
-
 ### Added
 
 - **broker** Development authorization, `auth.dev` in the security file: static
@@ -181,6 +180,28 @@ repository; the changes it needed for this release are listed under
   argument, `IMcpRequestContext` (`requestId`, `method`, `params._meta`
   frozen). This is how a provider reads the broker's caller reference
   (`request?.meta`). Adapters written without it are unchanged.
+
+## [1.11.0] - 2026-11-06
+
+### Added
+
+- **broker** Opt-in IPv4 mDNS/DNS-SD discovery on explicitly selected interfaces,
+  configured with `mdns` or `WsTunnelBuilder.withMdns()`. The private
+  `_mcp-broker._tcp.local.` convention publishes only an introspection entry
+  point, protocol metadata and an optional configured proxy origin. Effective
+  paths and proxy prefixes are respected; no provider inventory, credentials
+  or software version is announced. Normal activation requires client auth
+  and HTTPS; insecure development announcements require a separate explicit
+  option. Announcement failures close the new listener, and shutdown withdraws
+  the service. Includes unit tests and an explicitly enabled real-LAN test
+  covering the legacy unicast query used by mcp-network-discovery.
+- **broker** Repository `HOWTO.md`: openGuard development, auth.dev policy
+  testing, production OAuth configuration, and the discovery trust boundary.
+
+### Security
+
+- **broker** Require `re2js` 2.8.7 or later to fix the quadratic-time lookbehind
+  matching denial of service reported as GHSA-gg6h-894w-4m9c.
 
 ## [broker 1.7.0] - 2026-10-05
 
