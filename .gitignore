@@ -49,3 +49,6 @@ node/packages/broker/mcpb/build/
 # Written at the repository root by the ESP-IDF VS Code extension when its
 # active folder is wrong; the IDF sample carries its own, ignored, .vscode.
 .clangd
+
+# ── Website staging (node/scripts/build-site.mjs --stage) ───────────────────
+site-build/

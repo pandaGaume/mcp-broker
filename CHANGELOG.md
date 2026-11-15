@@ -171,6 +171,24 @@ repository; the changes it needed for this release are listed under
   provider's peer range is unchanged. 1.4.1 fixes the Streamable HTTP endpoint
   behind every `/<slot>/mcp`: one GET stream per session, and a POST whose
   connection breaks is settled instead of left pending.
+- **docs** One canonical description in `docs/positioning.md`, repeated by the
+  npm `description`, the `.mcpb` manifest, the README and the website. npm and
+  `.mcpb` `homepage` (and `documentation`) point to the website. The broker's
+  `version` lifecycle script runs `node/scripts/sync-versions.mjs --write`, so a
+  release rewrites the `.mcpb` manifest version and the website badges; the
+  `ci-docs` workflow fails a pull request whose README, website or metadata
+  contradict the package version, `MCPB_VERSION_STRING` or the canonical text.
+  The two design briefs moved to `docs/design/` with a "not the reference"
+  banner; the `consumer` package is marked planned; HOWTO.md is marked French.
+- **docs** The website is readable by agents that cannot reach GitHub.
+  `docs/agents/architecture.md` maps every layer to its specification and its
+  source. `docs/guide/` holds the six `broker_guide` pages, generated from
+  `broker.guides.ts`. `node/scripts/build-site.mjs --stage` mirrors the
+  repository documents (AGENTS.md, the broker docs, `c/`, `python/`, `samples/`)
+  at their paths with relative links rewritten, and writes `llms.txt`,
+  `llms-full.txt`, `sitemap.xml` and `robots.txt`; the homepage gains a
+  canonical URL, JSON-LD and links for agents. `npm run docs:sync` and
+  `npm run docs:check` from `node/`.
 
 ### Coordinated releases
 

@@ -16,6 +16,8 @@ A **running** broker documents itself over MCP on the reserved `_broker` slot (a
 
 The guide is generated from the broker's own source (`node/packages/broker/src/broker/broker.guides.ts`), and it injects the deployment's *effective* configuration into every page. When it disagrees with this file, it wins. When something is broken, call `broker_diagnose` before reading anything.
 
+No broker to ask, or no access to GitHub? The website publishes every document as Markdown: start at [llms.txt](https://pandagaume.github.io/mcp-broker/llms.txt) or at the [architecture page for agents](docs/agents/architecture.md) ([on the site](https://pandagaume.github.io/mcp-broker/agents/architecture.md)), which maps every layer to its specification and its source. The six guide pages are also in [docs/guide/](docs/guide/index.md), regenerated from `broker.guides.ts`.
+
 ## 1. What this is, and the one decision
 
 One process that puts N MCP servers behind one host and one port. Each server occupies a named **slot**. Servers reach a slot from the inside as *providers*; MCP clients reach a slot from the outside. Slots are lazy: any name works, nothing is declared in advance.

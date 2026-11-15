@@ -4,7 +4,46 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>@cyanmycelium/mcp-broker - one MCP surface, from the simulator to the field</title>
-  <meta name="description" content="Routes MCP clients to multiple Model Context Protocol providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides." />
+  <meta name="description" content="Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio." />
+  <link rel="canonical" href="https://pandagaume.github.io/mcp-broker/" />
+  <link rel="alternate" type="text/plain" title="llms.txt" href="llms.txt" />
+  <link rel="alternate" type="text/markdown" title="Architecture for agents" href="agents/architecture.md" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "mcp-broker",
+    "alternateName": "@cyanmycelium/mcp-broker",
+    "description": "Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio.",
+    "url": "https://pandagaume.github.io/mcp-broker/",
+    "codeRepository": "https://github.com/pandaGaume/mcp-broker",
+    "programmingLanguage": [
+      "TypeScript",
+      "C",
+      "Python"
+    ],
+    "runtimePlatform": "Node.js",
+    "license": "https://www.apache.org/licenses/LICENSE-2.0",
+    "softwareVersion": "1.11.0",
+    "keywords": [
+      "Model Context Protocol",
+      "MCP",
+      "broker",
+      "WebSocket",
+      "ESP32",
+      "Unreal Engine",
+      "authorization"
+    ],
+    "author": {
+      "@type": "Person",
+      "name": "Guillaume Pelletier"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "CyanMycelium"
+    }
+  }
+  </script>
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,6 +116,7 @@
       <a href="#install">Install</a>
       <a class="news-link" href="mhs.html">MHS</a>
       <a href="demo-motor.html">Demo</a>
+      <a href="agents/architecture.html">For agents</a>
       <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">GitHub →</a>
     </nav>
   </div>
@@ -89,7 +129,7 @@
   <div class="shell">
     <div class="hero-mark"><img src="assets/logo.png" alt="" /></div>
 
-    <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · v1.3</div>
+    <div class="eyebrow"><span class="dot"></span>model context protocol · websocket broker · <span data-version="broker-minor">v1.11</span></div>
 
     <a class="newsflash" href="mhs.html">
       <span class="nf-tag">New</span>
@@ -101,14 +141,11 @@
       <span class="at">@</span>cyanmycelium<span class="sl">/</span>mcp-broker
     </h1>
 
-    <p class="hero-sub">
-      Routes MCP clients to multiple Model Context Protocol providers through a
-      single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides.
-    </p>
+    <p class="hero-sub">Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio.</p>
 
     <div class="badges">
-      <span class="badge accent"><span class="k">status</span><span class="v">v1.3</span></span>
-      <span class="badge"><span class="k">npm</span><span class="v">v1.3.1</span></span>
+      <span class="badge accent"><span class="k">status</span><span class="v" data-version="broker-minor">v1.11</span></span>
+      <span class="badge"><span class="k">npm</span><span class="v" data-version="broker">v1.11.0</span></span>
       <span class="badge"><span class="k">device</span><span class="v">ESP32 · UE5 · C99</span></span>
       <span class="badge"><span class="k">license</span><span class="v">Apache-2.0</span></span>
       <span class="badge"><span class="k">node</span><span class="v">≥&nbsp;20.11</span></span>
@@ -763,6 +800,8 @@
       <a href="https://github.com/pandaGaume/mcp-broker" target="_blank" rel="noopener">github.com/pandaGaume/mcp-broker</a>
       <a href="https://npmjs.com/package/@cyanmycelium/mcp-broker" target="_blank" rel="noopener">npmjs.com/package/@cyanmycelium/mcp-broker</a>
       <a href="https://github.com/pandaGaume/mcp-broker/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+      <a href="agents/architecture.html">Architecture for agents</a>
+      <a href="llms.txt">llms.txt</a>
     </div>
     <div>© CyanMycelium · Apache-2.0</div>
   </div>

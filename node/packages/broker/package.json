@@ -1,7 +1,7 @@
 {
     "name": "@cyanmycelium/mcp-broker",
     "version": "1.11.0",
-    "description": "WebSocket-based Model Context Protocol broker. Aggregates multiple MCP providers behind a single endpoint with stdio, SSE, and Streamable HTTP client transports.",
+    "description": "Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio.",
     "type": "module",
     "license": "Apache-2.0",
     "author": "Guillaume Pelletier (CyanMycelium)",
@@ -10,7 +10,7 @@
         "url": "git+https://github.com/pandaGaume/mcp-broker.git",
         "directory": "node/packages/broker"
     },
-    "homepage": "https://github.com/pandaGaume/mcp-broker#readme",
+    "homepage": "https://pandagaume.github.io/mcp-broker/",
     "bugs": {
         "url": "https://github.com/pandaGaume/mcp-broker/issues"
     },
@@ -72,7 +72,8 @@
         "format": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
         "format:fix": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
         "gen-cert": "node scripts/gen-cert.mjs",
-        "prepublishOnly": "npm run lint && npm run build && npm test"
+        "prepublishOnly": "npm run lint && npm run build && npm test",
+        "version": "node ../../scripts/sync-versions.mjs --write && git add mcpb/manifest.json ../../../README.md ../../../docs"
     },
     "dependencies": {
         "@cyanmycelium/mcp-core": "^1.4.1",

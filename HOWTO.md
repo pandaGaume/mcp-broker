@@ -1,5 +1,7 @@
 # Du développement ouvert à la production
 
+> **This guide is in French.** It covers local development with `openGuard()`, policy tests with `auth.dev`, moving to production with OAuth, and opt-in LAN discovery over mDNS. The English references for the same topics are [authorization.md](docs/authorization.md), [testing.md](node/packages/broker/docs/testing.md) and the `mdns` section of [config.md](node/packages/broker/docs/config.md).
+
 Ce guide explique comment démarrer un provider de la famille CyanMycelium sans politique locale, tester ensuite les autorisations sans serveur OAuth, puis passer en production. Les exemples utilisent le slot `persistence`. Le nom `--dev` appartient au lanceur de mcp-persistence ; ce n'est pas une option CLI universelle de mcp-broker.
 
 ## Choisir le mode
