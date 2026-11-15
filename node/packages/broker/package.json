@@ -1,6 +1,6 @@
 {
     "name": "@cyanmycelium/mcp-broker",
-    "version": "1.12.0",
+    "version": "1.13.0",
     "description": "Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio.",
     "type": "module",
     "license": "Apache-2.0",
@@ -85,7 +85,7 @@
         "ws": "^8.18.0"
     },
     "devDependencies": {
-        "@cyanmycelium/mcp-broker-provider": "^0.4.1",
+        "@cyanmycelium/mcp-broker-provider": "^0.5.0",
         "@types/dns-packet": "^5.6.5",
         "@types/node": "^20.11.0",
         "@types/ws": "^8.5.0",

@@ -3,7 +3,7 @@
     "manifest_version": "0.3",
     "name": "mcp-broker",
     "display_name": "MCP Broker",
-    "version": "1.12.0",
+    "version": "1.13.0",
     "description": "One host and one port for many MCP servers: browsers, devices, simulators and stdio tools.",
     "long_description": "Packages @cyanmycelium/mcp-broker as an installable MCP bundle. On launch the broker starts and the host is bridged over stdio to the reserved `_all` aggregate slot, which unions the tools and prompts of every opted-in provider into a single MCP server. The broker also keeps listening on its configured port, so other MCP servers can tunnel in over WebSocket and become reachable to clients on the Streamable HTTP, SSE and raw WebSocket transports. The stdio host therefore sees the live aggregate of all connected providers.",
     "author": {
