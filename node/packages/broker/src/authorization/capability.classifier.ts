@@ -101,6 +101,8 @@ export class ConfiguredCapabilityClassifier implements ICapabilityClassifier {
                 if (tool && BROKER_READ_TOOLS.has(tool)) return { capability: "broker.providers.read", tool };
                 // Acts on execution limits: never the generic mcp.tools.call.
                 if (tool === "broker_limits_release") return { capability: "broker.limits.admin", tool };
+                // Frees an authorization domain: never the generic mcp.tools.call either.
+                if (tool === "broker_declaration_withdraw") return { capability: "broker.authorization.admin", tool };
             }
         }
 

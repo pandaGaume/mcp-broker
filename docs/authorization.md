@@ -229,10 +229,19 @@ has a single owner:
   checks, declared limit patterns, `resultsRequired` and `budgetUnits` use the
   declaration of the slot the request arrived on;
 - ownership follows the provider identity, not the slot, and is kept for the
-  broker's lifetime, even after the owner disconnects or replaces its declaration
-  with another domain: a network cut must not
-  hand the domain to someone else. There is no administrative withdrawal yet,
-  so moving a domain to another identity needs a broker restart;
+  broker's lifetime unless it is withdrawn, even after the owner disconnects or
+  replaces its declaration with another domain: a network cut must not hand the
+  domain to someone else;
+- a declaration is withdrawn by its owner, `broker/authorization/withdraw` with
+  no parameter, on the slot it declared from (a clean shutdown, or handing the
+  domain to a new identity), or by an operator with
+  `broker_declaration_withdraw({ principal, slot? })` on `_broker`, which needs
+  `broker.authorization.admin` and is audited with the operator's subjects. The
+  domain is free once no slot of its owner declares it any more. Protected slots
+  stay closed: they belong to the security file. A declaring provider that stays
+  disconnected past the threshold (5 minutes by default,
+  `withDeclarationOfflineThreshold()`) shows up in `broker_diagnose` as
+  `declaration-owner-offline`;
 - an identity may own several domains through several slots. It may also declare
   the same domain on two slots, each with its own resources and limits.
 

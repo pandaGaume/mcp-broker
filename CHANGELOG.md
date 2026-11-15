@@ -22,6 +22,26 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** Withdrawing an authorization declaration. A provider sends
+  `broker/authorization/withdraw`, with no parameter, to drop the declaration it
+  made on its own slot: at a clean shutdown, or before another identity takes
+  the domain over. The domain is free once no slot of that identity still
+  declares it; caller references of the slot are dropped; `policyVersion`
+  moves on. Idempotent (`withdrawn: false`). An operator withdraws the
+  declarations of a provider that is gone with `broker_declaration_withdraw({
+  principal, slot? })` on `_broker`, which needs `broker.authorization.admin`.
+  Both are written to the authorization audit stream (`phase: "withdraw"`,
+  `withdrawnBy`, the provider's or the operator's subjects). A disconnection
+  still withdraws nothing, so a network cut cannot hand a domain over;
+  `broker_diagnose` reports a declaring provider offline past
+  `withDeclarationOfflineThreshold()` (5 min by default) as
+  `declaration-owner-offline`, with the withdrawal as the fix. Protected slots
+  stay closed in every case: they belong to the security file. Library:
+  `BROKER_WITHDRAW_METHOD`, `ILoopbackProviderHandle.withdraw()`,
+  `WsTunnel.withdrawDeclarations()`.
+- **provider** `BrokerClient.withdraw()` (`transport.broker.withdraw()`) sends
+  `broker/authorization/withdraw` and resolves with `IDeclarationWithdrawn`.
+
 - **broker** Development authorization, `auth.dev` in the security file: static
   bearer tokens, one per caller, read from the environment variables the file
   names and bound to user, group, service or client subjects, in front of the

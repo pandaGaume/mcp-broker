@@ -121,7 +121,7 @@ Specified in: [authorization.md](../authorization.md), [HOWTO.md](../../HOWTO.md
 The broker can be the authorization decision point for providers that govern their own kind of resource (SCADA first).
 
 1. **Policy** (operator, security file): subjects, roles of capabilities, assignments on hierarchical resource paths (ISA-95 aligned), explicit denies. `authorize(subject, capability, resourcePath) -> allow | deny`.
-2. **Declaration** (provider, `broker/authorization/declare`): its domain, namespace, capabilities and resources, with optional engineering `limits` and resource patterns. One owner identity per domain, one declaration per `(identity, slot)`. It grants nothing.
+2. **Declaration** (provider, `broker/authorization/declare`): its domain, namespace, capabilities and resources, with optional engineering `limits` and resource patterns. One owner identity per domain, one declaration per `(identity, slot)`. It grants nothing. Withdrawn by its owner (`broker/authorization/withdraw`) or by an operator (`broker_declaration_withdraw`), never by a disconnection.
 3. **Decision** (provider asks, `broker/authorize`, about a caller reference or about itself): one audited decision per check. A resource with limits returns `allow-with-constraints`, with `allowed: false` so a provider that ignores obligations refuses rather than oversteps.
 4. **Execution limits and budgets:** concurrency and budget reservations, released on answer or by an operator.
 5. **Result** (provider, `broker/audit/result`): audited next to the decision; unreported results of required capabilities show up in `broker_diagnose`.

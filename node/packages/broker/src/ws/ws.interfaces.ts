@@ -580,6 +580,15 @@ export interface IWsTunnelOptions {
      * @default 60000
      */
     authorizationResultTimeoutMs?: number;
+
+    /**
+     * How long the provider behind an accepted declaration may stay
+     * disconnected before `broker_diagnose` reports it
+     * (`declaration-owner-offline`). A disconnection never withdraws the
+     * declaration; the report points at `broker_declaration_withdraw`.
+     * @default 300000
+     */
+    declarationOfflineThresholdMs?: number;
 }
 
 /**
@@ -594,6 +603,8 @@ export interface ILoopbackProviderHandle {
     declare(params: unknown): Promise<BrokerMethodOutcome>;
     /** `broker/authorize`. */
     authorize(params: unknown): Promise<BrokerMethodOutcome>;
+    /** `broker/authorization/withdraw`: drops the declaration this handle made, if any. */
+    withdraw(): Promise<BrokerMethodOutcome>;
     /** `broker/audit/result`: a notification, so nothing is returned; an unmatched report is counted. */
     reportResult(params: unknown): void;
 }

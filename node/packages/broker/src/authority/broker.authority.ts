@@ -15,6 +15,15 @@ export const BROKER_METHOD_PREFIX = "broker/";
 /** A provider declares its resources, capabilities and protected slots. */
 export const BROKER_DECLARE_METHOD = "broker/authorization/declare";
 
+/**
+ * A provider withdraws the declaration it made on the slot it speaks from.
+ * Takes no parameter: a provider can only ever withdraw its own.
+ */
+export const BROKER_WITHDRAW_METHOD = "broker/authorization/withdraw";
+
+/** Default delay after which a declaring provider still disconnected is reported by `broker_diagnose`. */
+export const DEFAULT_DECLARATION_OFFLINE_THRESHOLD_MS = 300_000;
+
 /** A provider asks for one or more decisions. */
 export const BROKER_AUTHORIZE_METHOD = "broker/authorize";
 
@@ -99,7 +108,15 @@ export interface IBrokerAuthorityInfo {
         readonly resourceCount: number;
         readonly resourcePatterns?: readonly ReturnType<import("./resource.limits").LimitPattern["info"]>[];
         readonly protects: readonly string[];
+        /**
+         * `Date.now()` when the provider serving the declaration's slot went
+         * away, absent while it is connected. A disconnection never withdraws
+         * a declaration; this is what `broker_diagnose` reports on.
+         */
+        readonly ownerOfflineSinceMs?: number;
     }[];
+    /** Past this delay offline, a declaration's owner is reported by `broker_diagnose` (`declaration-owner-offline`). */
+    readonly declarationOfflineThresholdMs: number;
     /** Domain-prefixed capabilities the policy grants that no accepted declaration covers. */
     readonly undeclaredCapabilities: readonly string[];
     readonly liveCallerRefs: number;
@@ -137,6 +154,34 @@ export interface IBrokerAuthorityOptions {
     readonly decisionRetentionMs?: number;
     /** Upper bound on decisions kept for their result; the oldest go first. @default 10000 */
     readonly maxTrackedDecisions?: number;
+    /** Past this delay offline, a declaration's owner is reported by `broker_diagnose`. @default 300000 */
+    readonly declarationOfflineThresholdMs?: number;
+}
+
+/** Who withdrew a declaration. */
+export type DeclarationWithdrawnBy = "provider" | "administrator";
+
+/** One declaration an administrative withdrawal removed. */
+export interface IWithdrawnDeclaration {
+    readonly principalId: string;
+    readonly slot: string;
+    readonly domain: string;
+    readonly version: string;
+}
+
+/** What a withdrawal writes to the authorization audit stream. */
+export interface IDeclarationAuditEvent {
+    readonly timestamp: string;
+    readonly phase: "withdraw";
+    readonly withdrawnBy: DeclarationWithdrawnBy;
+    /** The provider's subjects when it withdrew its own, the operator's otherwise. */
+    readonly subjectIds: readonly string[];
+    readonly principalId: string;
+    readonly slot: string;
+    readonly domain: string;
+    readonly version: string;
+    /** The policy version in force once the declaration is gone. */
+    readonly policyVersion: string;
 }
 
 /** What a client may send as `X-Correlation-Id` and see reused in the audit. Anything else is replaced. */
@@ -205,6 +250,9 @@ export class BrokerAuthority {
     private readonly _domainOwners = new Map<string, string>();
     private readonly _refs = new Map<string, ICallerRef>();
     private readonly _principals = new Map<string, IProviderPrincipal>();
+    /** Slot to `Date.now()` of its provider's departure, for slots that went away. */
+    private readonly _slotOfflineSince = new Map<string, number>();
+    private readonly _offlineThresholdMs: number;
     private _declarationCount = 0;
 
     constructor(options: IBrokerAuthorityOptions) {
@@ -218,6 +266,7 @@ export class BrokerAuthority {
         this._resultTimeoutMs = Math.max(1, options.resultTimeoutMs ?? 60_000);
         this._decisionRetentionMs = Math.max(this._resultTimeoutMs, options.decisionRetentionMs ?? 600_000);
         this._maxTrackedDecisions = Math.max(1, options.maxTrackedDecisions ?? 10_000);
+        this._offlineThresholdMs = Math.max(0, options.declarationOfflineThresholdMs ?? DEFAULT_DECLARATION_OFFLINE_THRESHOLD_MS);
         for (const principal of options.knownPrincipals ?? []) this._principals.set(principal.id, principal);
     }
 
@@ -324,6 +373,86 @@ export class BrokerAuthority {
                 `${declaration.capabilities.size} capabilities, ${declaration.resources.size} resources, protects [${declaration.protects.join(", ")}], policyVersion ${declaration.policyVersion}`
         );
         return { result: { accepted: true, version: declaration.version, policyVersion: declaration.policyVersion } };
+    }
+
+    /**
+     * Handles `broker/authorization/withdraw`: the provider drops the
+     * declaration it made on this slot, typically at a clean shutdown or
+     * before a new version declares the domain from another identity.
+     *
+     * Takes no parameter, so a provider can withdraw nothing but its own.
+     * Idempotent: with no declaration left on the slot, it answers
+     * `withdrawn: false` and changes nothing. Protected slots stay closed:
+     * they come from the security file, never from the declaration.
+     */
+    withdraw(params: unknown, origin: IBrokerMethodOrigin): BrokerMethodOutcome {
+        const empty = params === undefined || params === null || (typeof params === "object" && !Array.isArray(params) && Object.keys(params).length === 0);
+        if (!empty) return invalidParams(`${BROKER_WITHDRAW_METHOD} takes no parameter: a provider withdraws only the declaration it made on its own slot.`);
+        const principal = origin.principal;
+        if (!principal) return { error: { code: -32003, message: "An anonymous provider has no declaration to withdraw." } };
+        const declaration = this.declarationOf(principal.id, origin.slot);
+        if (!declaration) return { result: { withdrawn: false, policyVersion: this.policyVersion } };
+        this._removeDeclaration(declaration, "provider", principal.subjects ?? []);
+        return { result: { withdrawn: true, domain: declaration.domain, version: declaration.version, policyVersion: this.policyVersion } };
+    }
+
+    /**
+     * Administrative withdrawal, what `broker_declaration_withdraw` calls: an
+     * operator removes the declarations of a provider that is gone and will
+     * not withdraw them itself. Every declaration of `principalId`, or only
+     * the one on `slot`. Audited with the operator's subjects in `by`.
+     */
+    withdrawDeclarations(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[] {
+        const declarations = this._declarations.get(principalId);
+        if (!declarations) return [];
+        const targets = [...declarations.values()].filter((d) => slot === undefined || d.slot === slot);
+        for (const declaration of targets) this._removeDeclaration(declaration, "administrator", by);
+        return targets.map((d) => ({ principalId: d.principalId, slot: d.slot, domain: d.domain, version: d.version }));
+    }
+
+    /** Removes one accepted declaration, frees its domain when nothing else of its owner holds it, and audits. */
+    private _removeDeclaration(declaration: IProviderDeclaration, withdrawnBy: DeclarationWithdrawnBy, subjectIds: readonly string[]): void {
+        const declarations = this._declarations.get(declaration.principalId);
+        if (!declarations || declarations.get(declaration.slot) !== declaration) return;
+        declarations.delete(declaration.slot);
+        if (declarations.size === 0) this._declarations.delete(declaration.principalId);
+        // One owner may hold its domain from several slots: the domain is free
+        // only once none of them still declares it.
+        const stillHeld = [...declarations.values()].some((d) => d.domain === declaration.domain);
+        if (!stillHeld && this._domainOwners.get(declaration.domain) === declaration.principalId) this._domainOwners.delete(declaration.domain);
+        // References on this slot can no longer be decided on: drop them now.
+        for (const [ref, entry] of this._refs) if (entry.slot === declaration.slot && entry.providerPrincipalId === declaration.principalId) this._refs.delete(ref);
+        this._declarationCount += 1;
+        const event: IDeclarationAuditEvent = {
+            timestamp: new Date().toISOString(),
+            phase: "withdraw",
+            withdrawnBy,
+            subjectIds,
+            principalId: declaration.principalId,
+            slot: declaration.slot,
+            domain: declaration.domain,
+            version: declaration.version,
+            policyVersion: this.policyVersion,
+        };
+        console.error(`[broker] authorization ${JSON.stringify(event)}`);
+        console.info(
+            `[broker] authorization declaration withdrawn by the ${withdrawnBy}: principal "${declaration.principalId}", slot "${declaration.slot}", domain "${declaration.domain}"` +
+                `${stillHeld ? " (the domain stays owned through another slot)" : ", the domain is free"}; policyVersion ${this.policyVersion}`
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Provider presence, for declarations whose owner went away
+    // -------------------------------------------------------------------------
+
+    /** The provider serving `slot` went away. Withdraws nothing: a disconnection must not reopen a domain. */
+    noteSlotDisconnected(slot: string, now = Date.now()): void {
+        if (!this._slotOfflineSince.has(slot)) this._slotOfflineSince.set(slot, now);
+    }
+
+    /** A provider serves `slot` again. */
+    noteSlotConnected(slot: string): void {
+        this._slotOfflineSince.delete(slot);
     }
 
     // -------------------------------------------------------------------------
@@ -723,7 +852,9 @@ export class BrokerAuthority {
                 resourceCount: d.resources.size,
                 resourcePatterns: d.resourcePatterns.patterns.map((p) => p.info()),
                 protects: d.protects,
+                ...(this._slotOfflineSince.has(d.slot) ? { ownerOfflineSinceMs: this._slotOfflineSince.get(d.slot)! } : {}),
             })),
+            declarationOfflineThresholdMs: this._offlineThresholdMs,
             undeclaredCapabilities: undeclared,
             liveCallerRefs: this._refs.size,
             results: this._resultsInfo(),

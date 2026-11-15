@@ -1,4 +1,4 @@
-import type { IBrokerAuthorityInfo } from "../authority/broker.authority";
+import type { IBrokerAuthorityInfo, IWithdrawnDeclaration } from "../authority/broker.authority";
 import type { IEventSource } from "@cyanmycelium/mcp-core";
 import type { IProviderTelemetryStats } from "../telemetry/telemetry.types";
 
@@ -93,6 +93,14 @@ export interface IBrokerContext {
 
     /** Releases the limit slots a call still holds, on behalf of `by`. `false` when no such call is held. */
     releaseLimitCall?(slot: string, requestId: string, by: readonly string[]): boolean;
+
+    /**
+     * Withdraws, on behalf of `by`, the declarations of provider `principalId`
+     * (only the one on `slot` when given). Returns what was withdrawn, empty
+     * when nothing matched. `broker_declaration_withdraw` exists only when the
+     * host implements this.
+     */
+    withdrawDeclarations?(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[];
 
     /** Bounded provider telemetry counters, or `undefined` when unsupported. */
     getTelemetryStats?(): IProviderTelemetryStats | undefined;

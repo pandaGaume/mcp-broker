@@ -30,6 +30,13 @@
                 "slot": "Slot of the held call, as broker_diagnose lists it.",
                 "requestId": "requestId of the held call, as broker_diagnose lists it."
             }
+        },
+        "broker_declaration_withdraw": {
+            "description": "Withdraws the authorization declarations of a provider that is gone, so its domain can be declared again from another identity. Needs broker.authorization.admin; audited with your identity. Protected slots stay closed. broker_diagnose lists declarations whose owner is offline.",
+            "properties": {
+                "principal": "Provider identity whose declarations to withdraw (principalId, as broker_diagnose lists it).",
+                "slot": "Withdraw only the declaration made on this slot. Omit to withdraw all of that provider's declarations."
+            }
         }
     },
     "resources": {

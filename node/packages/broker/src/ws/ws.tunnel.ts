@@ -53,10 +53,12 @@ import {
     BROKER_AUTHORIZE_METHOD,
     BROKER_DECLARE_METHOD,
     BROKER_METHOD_PREFIX,
+    BROKER_WITHDRAW_METHOD,
     CALLER_META_KEY,
     OPERATOR_META_KEY,
     type BrokerMethodOutcome,
     type IBrokerAuthorityInfo,
+    type IWithdrawnDeclaration,
 } from "../authority/broker.authority";
 import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
 import { ProviderTelemetryDispatcher, TELEMETRY_NOTIFICATION_METHOD, ensureTraceparent, type IProviderTelemetryStats } from "../telemetry/index";
@@ -582,6 +584,7 @@ export class WsTunnel implements IBrokerContext {
             securityVersion: options.securityVersion,
             authorizeBatchLimit: options.authorizeBatchLimit,
             resultTimeoutMs: options.authorizationResultTimeoutMs,
+            declarationOfflineThresholdMs: options.declarationOfflineThresholdMs,
             knownPrincipals: options.knownProviderPrincipals,
             callerRefMaxAgeMs: (options.providerRequestTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS) || DEFAULT_CALLER_REF_MAX_AGE_MS,
         });
@@ -641,6 +644,15 @@ export class WsTunnel implements IBrokerContext {
      */
     public releaseLimitCall(provider: string, requestId: string, by: readonly string[]): boolean {
         return this._limits?.release(provider, requestId, by) ?? false;
+    }
+
+    /**
+     * Withdraws, on behalf of `by` (the operator's subjects), the declarations
+     * of a provider that is gone: all of them, or only the one on `slot`.
+     * What `broker_declaration_withdraw` calls. Protected slots stay closed.
+     */
+    public withdrawDeclarations(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[] {
+        return this._authority.withdrawDeclarations(principalId, slot, by);
     }
 
     /** The authorization state providers declared, for `broker_diagnose`. */
@@ -875,6 +887,7 @@ export class WsTunnel implements IBrokerContext {
             settleBudget: (params: unknown) => call("broker/budget/settle", params),
             declare: (params: unknown) => call(BROKER_DECLARE_METHOD, params),
             authorize: (params: unknown) => call(BROKER_AUTHORIZE_METHOD, params),
+            withdraw: () => call(BROKER_WITHDRAW_METHOD, undefined),
             reportResult: (params: unknown) => {
                 if (this._loopbackProviders.get(name) === transport) this._authority.recordResult(params, { slot: name, principal });
             },
@@ -3193,10 +3206,17 @@ export class WsTunnel implements IBrokerContext {
                 return this._limits ? this._authority.settleBudget(params, origin, this._limits) : { error: { code: -32029, message: "No budget policy configured" } };
             case BROKER_DECLARE_METHOD:
                 return this._authority.declare(params, origin);
+            case BROKER_WITHDRAW_METHOD:
+                return this._authority.withdraw(params, origin);
             case BROKER_AUTHORIZE_METHOD:
                 return this._authority.authorize(params, origin, (slot, brokerId) => this._providers.get(slot)?.pending.has(brokerId) ?? false);
             default:
-                return { error: { code: -32601, message: `Method not found: ${method}. The broker answers ${BROKER_DECLARE_METHOD} and ${BROKER_AUTHORIZE_METHOD}.` } };
+                return {
+                    error: {
+                        code: -32601,
+                        message: `Method not found: ${method}. The broker answers ${BROKER_DECLARE_METHOD}, ${BROKER_WITHDRAW_METHOD} and ${BROKER_AUTHORIZE_METHOD}.`,
+                    },
+                };
         }
     }
 
@@ -3339,6 +3359,7 @@ export class WsTunnel implements IBrokerContext {
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
         state.connectedSinceMs = null;
+        this._authority.noteSlotDisconnected(name);
         this._subscriptions.providerDisconnected(name);
         this._emitProviderChanged(name);
         // Echoing the **client's** id rather than `null` or the broker's: a
@@ -3560,6 +3581,7 @@ export class WsTunnel implements IBrokerContext {
 
     /** A provider now serves `name`: announce it, and restore the subscriptions it should hold. */
     private _onProviderAttached(name: string): void {
+        this._authority.noteSlotConnected(name);
         this._emitProviderChanged(name);
         if (this._subscriptions.hasSubscriptions(name)) {
             void this._replaySubscriptions(name).catch((error: unknown) => {

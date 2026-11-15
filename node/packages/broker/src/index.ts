@@ -20,11 +20,22 @@ export {
     BROKER_AUTHORIZE_METHOD,
     BROKER_DECLARE_METHOD,
     BROKER_METHOD_PREFIX,
+    BROKER_WITHDRAW_METHOD,
     CALLER_META_KEY,
     CORRELATION_ID_PATTERN,
     DEFAULT_AUTHORIZE_BATCH_LIMIT,
+    DEFAULT_DECLARATION_OFFLINE_THRESHOLD_MS,
 } from "./authority/broker.authority";
-export type { BrokerMethodOutcome, IBrokerAuthorityInfo, IBrokerAuthorityOptions, IBrokerMethodOrigin, IOverdueDecision } from "./authority/broker.authority";
+export type {
+    BrokerMethodOutcome,
+    DeclarationWithdrawnBy,
+    IBrokerAuthorityInfo,
+    IBrokerAuthorityOptions,
+    IBrokerMethodOrigin,
+    IDeclarationAuditEvent,
+    IOverdueDecision,
+    IWithdrawnDeclaration,
+} from "./authority/broker.authority";
 export type { IDeclaredResource, IProtectedSlot, IProviderDeclaration, IResourceLimits } from "./authority/declaration";
 export { StdioUpstream } from "./stdio.upstream";
 export type { IStdioUpstreamConfig, StdioUpstreamConfig } from "./stdio.upstream";

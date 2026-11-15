@@ -30,6 +30,13 @@
                 "slot": "卡住调用所在的 slot，按 broker_diagnose 列出的值填写。",
                 "requestId": "卡住调用的 requestId，按 broker_diagnose 列出的值填写。"
             }
+        },
+        "broker_declaration_withdraw": {
+            "description": "撤回已离线 provider 的授权声明，使其域可由另一身份重新声明。需要 broker.authorization.admin；以您的身份记录审计。受保护的 slot 保持关闭。用 broker_diagnose 查看所有者离线的声明。",
+            "properties": {
+                "principal": "要撤回其声明的 provider 身份（principalId，按 broker_diagnose 列出的值填写）。",
+                "slot": "仅撤回在该 slot 上的声明。省略则撤回该 provider 的全部声明。"
+            }
         }
     },
     "resources": {

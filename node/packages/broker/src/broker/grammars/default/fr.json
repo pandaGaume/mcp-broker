@@ -30,6 +30,13 @@
                 "slot": "Slot de l'appel bloqué, tel que broker_diagnose le liste.",
                 "requestId": "requestId de l'appel bloqué, tel que broker_diagnose le liste."
             }
+        },
+        "broker_declaration_withdraw": {
+            "description": "Retire les déclarations d'autorisation d'un provider disparu, pour que son domaine puisse être déclaré depuis une autre identité. Exige broker.authorization.admin ; audité avec votre identité. Les slots protégés restent fermés. broker_diagnose liste les déclarations dont le propriétaire est hors ligne.",
+            "properties": {
+                "principal": "Identité du provider dont retirer les déclarations (principalId, tel que broker_diagnose le liste).",
+                "slot": "Ne retirer que la déclaration faite sur ce slot. Omis : toutes les déclarations de ce provider."
+            }
         }
     },
     "resources": {
