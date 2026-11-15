@@ -69,6 +69,7 @@ run("git", [
     packagePath,
     "package-lock.json",
     "packages/broker/mcpb/manifest.json",
+    "packages/broker/server.json",
     "../README.md",
     "../docs",
 ]);

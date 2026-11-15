@@ -1,6 +1,7 @@
 name: release-node
 
-# Publishes @cyanmycelium/mcp-broker only. The provider side of the tunnel
+# Publishes @cyanmycelium/mcp-broker only, then lists it in the official MCP
+# registry (job mcp-registry). The provider side of the tunnel
 # lives in the same workspace but ships on its own `provider-v*` tag series,
 # see release-provider.yml.
 on:
@@ -65,3 +66,68 @@ jobs:
             - uses: softprops/action-gh-release@v2
               with:
                   generate_release_notes: true
+
+    # Lists the release in the official MCP registry as
+    # io.github.pandaGaume/mcp-broker, from node/packages/broker/server.json.
+    # A job of its own so that a registry failure leaves npm and the GitHub
+    # release intact and can be re-run alone. The registry verifies ownership
+    # by reading `mcpName` in the published package.json, so it must run after
+    # npm publish, and it may need a moment before the new version is visible.
+    mcp-registry:
+        needs: publish
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            id-token: write # GitHub OIDC grants the io.github.pandaGaume/* namespace
+        env:
+            MCP_PUBLISHER_VERSION: v1.8.9
+        defaults:
+            run:
+                working-directory: node/packages/broker
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Check server.json against the tag
+              run: |
+                  set -euo pipefail
+                  tag_version="${GITHUB_REF_NAME#node-v}"
+                  for field in .version '.packages[0].version'; do
+                      value="$(jq -r "$field" server.json)"
+                      if [ "$value" != "$tag_version" ]; then
+                          echo "::error::server.json $field is $value, the tag is $GITHUB_REF_NAME"
+                          exit 1
+                      fi
+                  done
+                  test "$(jq -r .name server.json)" = "$(jq -r .mcpName package.json)"
+
+            - name: Install cosign
+              uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+            - name: Download and verify mcp-publisher
+              run: |
+                  set -euo pipefail
+                  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+                  arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+                  archive="mcp-publisher_${os}_${arch}.tar.gz"
+                  base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+                  curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+                  curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+                  cosign verify-blob \
+                      --bundle "$archive.sigstore.json" \
+                      --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+                      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+                      "$archive"
+                  tar xzf "$archive" mcp-publisher
+                  rm -f "$archive" "$archive.sigstore.json"
+
+            - name: Authenticate to the MCP registry
+              run: ./mcp-publisher login github-oidc
+
+            - name: Publish to the MCP registry
+              run: |
+                  for attempt in 1 2 3 4 5; do
+                      if ./mcp-publisher publish; then exit 0; fi
+                      echo "publish attempt $attempt failed; npm may not serve the new version yet, retrying in 30 s"
+                      sleep 30
+                  done
+                  exit 1
