@@ -66,10 +66,7 @@ describe("declarations belong to a provider identity and slot", () => {
         a.declare(manifest("replaced", 10), valves);
         a.declare(manifest("pompes", 30), pumps);
         const other = { slot: "other", principal: { ...principal, id: "other" } };
-        expect(a.declare(manifest("vannes", 90), other)).toHaveProperty(
-            "error.data.errors",
-            expect.arrayContaining([expect.stringContaining('already declared by provider "api"')])
-        );
+        expect(a.declare(manifest("vannes", 90), other)).toHaveProperty("error.data.errors", expect.arrayContaining([expect.stringContaining('owned by provider "api"')]));
     });
 
     it("keeps concrete resource escape checks scoped to their declaration", () => {

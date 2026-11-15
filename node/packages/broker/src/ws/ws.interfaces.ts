@@ -554,6 +554,15 @@ export interface IWsTunnelOptions {
     protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
 
     /**
+     * Owners of authorization domains fixed by the operators, keyed by domain
+     * (`authorization.domains` in the security file). A listed domain may only
+     * be declared by its listed identities, each on its subtree or below; two
+     * owners of a domain must hold disjoint subtrees. Unlisted domains go to
+     * whoever declares them first, per subtree. Requires {@link providerAuth}.
+     */
+    domains?: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>>;
+
+    /**
      * Provider principals known from configuration (without their secrets).
      * Their `subjects` admit callers to the slots they protect even before
      * they connect.

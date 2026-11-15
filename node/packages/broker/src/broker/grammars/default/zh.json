@@ -48,6 +48,10 @@
             "name": "Broker Providers",
             "description": "Broker 已知的所有 provider 槽位列表，包括未连接的。"
         },
+        "broker://domains": {
+            "name": "授权域",
+            "description": "每个授权域、其 capability 词汇表，以及由哪个 provider 和 slot 为每个子树做决策。仅列出您持有该域某项 capability 的子树。"
+        },
         "broker://guide/index": {
             "name": "指南索引",
             "description": "broker 是什么、最容易搞错且代价最高的传输与路径配对规则，以及接下来该读哪一页指南。"

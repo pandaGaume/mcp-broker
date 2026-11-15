@@ -195,6 +195,12 @@ export interface IDeclarationWithdrawn {
     readonly domain?: string;
     /** The version of the withdrawn declaration. */
     readonly version?: string;
+    /**
+     * Every domain whose subtree this slot no longer owns: the one declared
+     * now, and any it replaced earlier, which stayed owned until this call.
+     * Absent from brokers before domain ownership by subtree.
+     */
+    readonly domains?: readonly string[];
     readonly policyVersion: string;
 }
 

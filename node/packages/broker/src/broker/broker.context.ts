@@ -1,4 +1,4 @@
-import type { IBrokerAuthorityInfo, IWithdrawnDeclaration } from "../authority/broker.authority";
+import type { IBrokerAuthorityInfo, IDomainInfo, IWithdrawnDeclaration } from "../authority/broker.authority";
 import type { IEventSource } from "@cyanmycelium/mcp-core";
 import type { IProviderTelemetryStats } from "../telemetry/telemetry.types";
 
@@ -101,6 +101,14 @@ export interface IBrokerContext {
      * host implements this.
      */
     withdrawDeclarations?(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[];
+
+    /**
+     * The authorization domains and the owner of each subtree, as `subjects`
+     * may see them: a subtree is kept when the policy grants them one of the
+     * domain's capabilities on it, or `broker.authorization.admin` on `_broker`.
+     * `null` subjects mean no policy: everything is listed.
+     */
+    getDomainsInfo?(subjects: readonly string[] | null): readonly IDomainInfo[];
 
     /** Bounded provider telemetry counters, or `undefined` when unsupported. */
     getTelemetryStats?(): IProviderTelemetryStats | undefined;

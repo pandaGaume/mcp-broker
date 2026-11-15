@@ -48,6 +48,10 @@
             "name": "Providers du broker",
             "description": "Liste de tous les emplacements de providers connus du broker, y compris les déconnectés."
         },
+        "broker://domains": {
+            "name": "Domaines d'autorisation",
+            "description": "Chaque domaine d'autorisation, son vocabulaire de capabilities, et quel provider, sur quel slot, décide pour chaque sous-arbre. Ne liste que les sous-arbres sur lesquels vous détenez une capability du domaine."
+        },
         "broker://guide/index": {
             "name": "Index du guide",
             "description": "Ce qu'est le broker, la règle d'appariement transport/chemin qui coûte le plus cher quand on la rate, et quelle page du guide lire ensuite."

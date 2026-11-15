@@ -22,11 +22,34 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** One domain, one owner per subtree. A domain is a capability
+  vocabulary, not a place: several identities may now declare it, each on its
+  own UNS subtree (a historian per site, `/production/site1` and
+  `/production/site2`). A subtree that contains, or lies inside, another
+  identity's is refused, naming that owner (`namespace "<n>" overlaps "<m>",
+  owned by provider "<id>"`), since one resource would have two decision
+  makers. Every owner of a domain declares the same `capabilities` and
+  `resultsRequired` (`capability vocabulary differs from the domain's`
+  otherwise), so a role holds on the whole domain. `broker/authorize` stays
+  bounded to the asking provider's subtree.
+- **broker** `authorization.domains` in the security file
+  (`{ "<domain>": [{ "owner", "namespace" }] }`, `withDomains()`, and
+  `domains` in `startTestBroker`): fixes a domain's owners from startup, so no
+  provider can race for it. A listed domain may only be declared by its listed
+  identities, each on its subtree or below; overlapping subtrees of two owners,
+  an owner missing from the providers table, or no provider authentication
+  stop the broker at start. Unlisted domains keep first come, first served. It
+  only restricts, and grants no caller anything.
+- **broker** `broker://domains` on `_broker`: each domain, its vocabulary and,
+  for every subtree, its owner, slot, `declared`, `configured` and `connected`.
+  A reader sees only the subtrees the policy grants it one of the domain's
+  capabilities on, or all of them with `broker.authorization.admin`.
+  `broker_info` and `broker://authority` carry the unfiltered `domains` list.
 - **broker** Withdrawing an authorization declaration. A provider sends
   `broker/authorization/withdraw`, with no parameter, to drop the declaration it
   made on its own slot: at a clean shutdown, or before another identity takes
-  the domain over. The domain is free once no slot of that identity still
-  declares it; caller references of the slot are dropped; `policyVersion`
+  the domain over. It frees every subtree the slot owned, including domains it
+  replaced earlier (`domains` in the answer); caller references of the slot are dropped; `policyVersion`
   moves on. Idempotent (`withdrawn: false`). An operator withdraws the
   declarations of a provider that is gone with `broker_declaration_withdraw({
   principal, slot? })` on `_broker`, which needs `broker.authorization.admin`.

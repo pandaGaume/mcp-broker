@@ -623,7 +623,7 @@ describe("hardening found in review", () => {
 
         const other = await FakeProvider.open(base, "scada2", "s-other");
         const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
-        expect(taken.error?.data?.errors?.join("\n")).toContain('already declared by provider "mcp-scada"');
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
         const reserved = await other.call("broker/authorization/declare", { ...DECLARATION, domain: "mcp", capabilities: ["mcp.tools.call"], protects: [] });
         expect(reserved.error?.data?.errors?.join("\n")).toContain("reserved");
         const root = await other.call("broker/authorization/declare", {
@@ -1040,7 +1040,7 @@ describe("E8: withdrawing a declaration", () => {
 
         const other = await FakeProvider.open(base, "plain", "s-other");
         const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
-        expect(taken.error?.data?.errors?.join("\n")).toContain('already declared by provider "mcp-scada"');
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
     });
 
     it("withdraws through the loopback handle too", async () => {
@@ -1109,7 +1109,7 @@ describe("E8: withdrawing a declaration", () => {
         expect(problem!.fix).toContain("broker_declaration_withdraw");
         const other = await FakeProvider.open(base, "scada2", "s-other");
         const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
-        expect(taken.error?.data?.errors?.join("\n")).toContain('already declared by provider "mcp-scada"');
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
 
         // Back online: the declaration is still there and the report goes away.
         await FakeProvider.open(base, "scada", "s-scada");

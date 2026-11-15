@@ -7,7 +7,8 @@ import { dirname, resolve } from "node:path";
 import type { IAuthorizationPolicyConfig } from "./authorization/index";
 import type { IProviderCredential } from "./auth/provider.auth";
 import { resolveDevCallers, resolveDevNetworks, type IDevAuthConfig, type IResolvedDevCaller } from "./auth/dev.auth";
-import type { IProtectedSlot } from "./authority/declaration";
+import type { IConfiguredDomainOwner, IProtectedSlot } from "./authority/declaration";
+import { compileConfiguredDomains } from "./authority/domains";
 import type { IBrokerPluginConfig } from "./plugins";
 
 export interface IBrokerAuthConfig extends IAuthorizationPolicyConfig {
@@ -366,6 +367,12 @@ export interface ISecurityConfig {
         /** Slots only one provider may call and one may publish, keyed by slot name. */
         resourceLimits?: readonly IResourceLimitRule[];
         protectedSlots?: Record<string, IProtectedSlot>;
+        /**
+         * Owners of authorization domains, keyed by domain: only the listed
+         * identities may declare a listed domain, each on its subtree or
+         * below. Overlapping subtrees of two owners refuse the start.
+         */
+        domains?: Record<string, IConfiguredDomainOwner[]>;
     };
 }
 
@@ -503,7 +510,9 @@ export function loadSecurityConfig(loaded: ILoadedBrokerConfig, env: NodeJS.Proc
     if (authorization !== undefined) {
         if (typeof authorization !== "object" || authorization === null || Array.isArray(authorization)) problems.push('"authorization" must be an object');
         else {
-            for (const key of Object.keys(authorization)) if (key !== "protectedSlots" && key !== "resourceLimits") problems.push(`authorization: unknown key "${key}"`);
+            for (const key of Object.keys(authorization))
+                if (key !== "protectedSlots" && key !== "resourceLimits" && key !== "domains") problems.push(`authorization: unknown key "${key}"`);
+            problems.push(...compileConfiguredDomains(authorization.domains).problems);
             try {
                 compileResourceLimits(authorization.resourceLimits);
             } catch (error) {

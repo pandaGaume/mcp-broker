@@ -43,9 +43,10 @@ import {
     type IAuthorizationDecision,
     type IAuthorizationSubject,
     type IPolicyAuthorization,
-    type ResourcePath,
+    ResourcePath,
     type ISlotResourceResolver,
 } from "../authorization/index";
+import { compileConfiguredDomains } from "../authority/domains";
 import { VERSION, PACKAGE_NAME } from "../version";
 import {
     BrokerAuthority,
@@ -58,6 +59,7 @@ import {
     OPERATOR_META_KEY,
     type BrokerMethodOutcome,
     type IBrokerAuthorityInfo,
+    type IDomainInfo,
     type IWithdrawnDeclaration,
 } from "../authority/broker.authority";
 import { ResourceSubscriptionRegistry, type ClientKey, type SubscriptionOutcome } from "../subscriptions/resource.subscription.registry";
@@ -576,8 +578,10 @@ export class WsTunnel implements IBrokerContext {
         );
         this._telemetry = options.telemetry ? new ProviderTelemetryDispatcher(options.telemetry) : null;
         this._validateProtectedSlots();
+        this._validateDomains();
         this._authority = new BrokerAuthority({
             protectedSlots: options.protectedSlots,
+            domains: options.domains,
             resourceLimits: options.resourceLimits,
             slotResources: this._slotResourceResolver,
             authorization: this._authorization,
@@ -589,6 +593,23 @@ export class WsTunnel implements IBrokerContext {
             callerRefMaxAgeMs: (options.providerRequestTimeoutMs ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS) || DEFAULT_CALLER_REF_MAX_AGE_MS,
         });
         this._limits = options.limits ? new LimitController(options.limits) : undefined;
+    }
+
+    /**
+     * Refuses, at construction, domain owners that could not be enforced: no
+     * provider identities to match them against, an owner the providers table
+     * does not hold, or two owners of one domain on nested subtrees.
+     */
+    private _validateDomains(): void {
+        const domains = this._options.domains;
+        if (!domains || Object.keys(domains).length === 0) return;
+        const problems: string[] = [];
+        if (!this._options.providerAuth) {
+            problems.push("provider authentication is off, so the broker cannot tell which provider is declaring. Configure the providers table (or withProviderAuth)");
+        }
+        const known = this._options.knownProviderPrincipals ? new Set(this._options.knownProviderPrincipals.map((p) => p.id)) : undefined;
+        problems.push(...compileConfiguredDomains(domains, known).problems);
+        if (problems.length > 0) throw new Error(`authorization.domains cannot be enforced: ${problems.join("; ")}.`);
     }
 
     /**
@@ -653,6 +674,30 @@ export class WsTunnel implements IBrokerContext {
      */
     public withdrawDeclarations(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[] {
         return this._authority.withdrawDeclarations(principalId, slot, by);
+    }
+
+    /**
+     * The authorization domains as `subjects` may see them, for
+     * `broker://domains`. A subtree is listed when the policy grants them one
+     * of the domain's capabilities on it (the subtree's root, which an
+     * assignment on `<subtree>/**` covers), or `broker.authorization.admin` on
+     * `_broker`, which shows everything. `null` subjects: no policy, all of it.
+     */
+    public getDomainsInfo(subjects: readonly string[] | null): readonly IDomainInfo[] {
+        const all = this._authority.domainsInfo();
+        const engine = this._authorization?.engine;
+        if (subjects === null || !engine) return all;
+        const subject = { ids: [...subjects] };
+        const may = (capability: string, path: string): boolean => {
+            try {
+                return engine.authorize({ subject, capability, resource: ResourcePath.parse(path), provider: BROKER_PROVIDER_NAME }).allowed;
+            } catch {
+                return false;
+            }
+        };
+        const brokerPath = this._slotResourceResolver.resolve(BROKER_PROVIDER_NAME)?.value ?? "/_system/broker";
+        if (may("broker.authorization.admin", brokerPath)) return all;
+        return all.map((d) => ({ ...d, owners: d.owners.filter((o) => d.capabilities.some((capability) => may(capability, o.namespace))) })).filter((d) => d.owners.length > 0);
     }
 
     /** The authorization state providers declared, for `broker_diagnose`. */
@@ -1610,10 +1655,11 @@ export class WsTunnel implements IBrokerContext {
         if (message.method === CANCELLED_METHOD) return this._rewriteCancellation(state, providerName, message, sink) ? JSON.stringify(message) : "";
 
         // The broker's own tools that act (releasing a held limit slot) must
-        // audit who acted. `_broker` is in process, so it is told directly.
+        // audit who acted, and `broker://domains` lists only what its reader
+        // may see. `_broker` is in process, so it is told directly.
         if (
             providerName === BROKER_PROVIDER_NAME &&
-            message.method === "tools/call" &&
+            (message.method === "tools/call" || message.method === "resources/read") &&
             typeof message.params === "object" &&
             message.params !== null &&
             !Array.isArray(message.params)

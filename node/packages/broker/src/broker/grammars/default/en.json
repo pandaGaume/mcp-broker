@@ -48,6 +48,10 @@
             "name": "Broker providers",
             "description": "List of every provider slot known to the broker, including disconnected ones."
         },
+        "broker://domains": {
+            "name": "Authorization domains",
+            "description": "Each authorization domain, its capability vocabulary, and which provider and slot decide for each subtree. Lists only the subtrees you hold one of the domain's capabilities on."
+        },
         "broker://guide/index": {
             "name": "Guide index",
             "description": "What the broker is, the transport/path pairing rule that costs the most time to get wrong, and which guide page to read next."

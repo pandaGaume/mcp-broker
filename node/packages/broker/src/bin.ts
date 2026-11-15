@@ -703,6 +703,8 @@ async function main(): Promise<void> {
             if (resourceLimits) builder.withResourceLimits(resourceLimits);
             const protectedSlots = security.security.authorization?.protectedSlots;
             if (protectedSlots && Object.keys(protectedSlots).length > 0) builder.withProtectedSlots(protectedSlots);
+            const domains = security.security.authorization?.domains;
+            if (domains && Object.keys(domains).length > 0) builder.withDomains(domains);
             if (security.security.limits) builder.withLimits(security.security.limits);
             builder.withSecurityVersion(security.version);
         }
@@ -786,7 +788,10 @@ async function main(): Promise<void> {
     );
     if (security) {
         const protectedCount = Object.keys(security.security.authorization?.protectedSlots ?? {}).length;
-        console.log(`🔏  Security file         ${security.sourcePath} (version ${security.version}${protectedCount > 0 ? `, ${protectedCount} protected slot(s)` : ""})`);
+        const domainCount = Object.keys(security.security.authorization?.domains ?? {}).length;
+        console.log(
+            `🔏  Security file         ${security.sourcePath} (version ${security.version}${protectedCount > 0 ? `, ${protectedCount} protected slot(s)` : ""}${domainCount > 0 ? `, ${domainCount} domain(s) with fixed owners` : ""})`
+        );
     }
     console.log(`🌍  Browser origins       ${describeAllowedOrigins()}`);
     console.log(`                          enforced on /<name>/${mcpSuffix}, /<name>/${sseSuffix} and /<name>/${messagesSuffix}`);

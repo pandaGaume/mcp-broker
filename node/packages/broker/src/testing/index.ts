@@ -83,6 +83,9 @@ export interface ITestBrokerOptions {
     /** Protected slots, as in the security file. Needs `providers`. */
     readonly protectedSlots?: Readonly<Record<string, IProtectedSlot>>;
 
+    /** Domain owners, as `authorization.domains` in the security file. Needs `providers`. */
+    readonly domains?: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>>;
+
     /** Enables a bounded in-memory telemetry exporter for end-to-end trace assertions. */
     readonly telemetry?: boolean;
 
@@ -197,6 +200,7 @@ export async function startTestBroker(options: ITestBrokerOptions = {}): Promise
     if (credentials.length > 0) builder.withProviderPrincipals(credentials);
     if (options.policy?.resourceLimits) builder.withResourceLimits(options.policy.resourceLimits);
     if (options.protectedSlots) builder.withProtectedSlots(options.protectedSlots);
+    if (options.domains) builder.withDomains(options.domains);
     options.configure?.(builder);
 
     const tunnel = builder.build();

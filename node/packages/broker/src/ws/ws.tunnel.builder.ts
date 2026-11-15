@@ -81,6 +81,7 @@ export class WsTunnelBuilder {
     private _authorizeBatchLimit: number | undefined = undefined;
     private _authorizationResultTimeoutMs: number | undefined = undefined;
     private _declarationOfflineThresholdMs: number | undefined = undefined;
+    private _domains: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>> | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -451,6 +452,16 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /**
+     * Fixes the owners of authorization domains, as `authorization.domains`
+     * does in the security file: a listed domain may only be declared by its
+     * listed identities, each on its subtree or below.
+     */
+    withDomains(domains: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>>): this {
+        this._domains = { ...domains };
+        return this;
+    }
+
     /** Stamps every `policyVersion` with this identifier of the security configuration. */
     withSecurityVersion(version: string): this {
         this._securityVersion = version;
@@ -529,6 +540,7 @@ export class WsTunnelBuilder {
             authorizeBatchLimit: this._authorizeBatchLimit,
             authorizationResultTimeoutMs: this._authorizationResultTimeoutMs,
             declarationOfflineThresholdMs: this._declarationOfflineThresholdMs,
+            domains: this._domains,
         };
         return new WsTunnel(options);
     }

@@ -101,6 +101,7 @@ a JSON file holding what decides who may do what:
 | `auth` | the same block as `auth` above, minus `providerSecret` |
 | `providers` | `[{ "id", "secretEnv", "subjects"?, "allowedResources"? }]`, one identity and secret per provider; `secretEnv` names the environment variable holding the secret |
 | `authorization.protectedSlots` | `{ "<slot>": { "declaredBy", "publishedBy" } }`, slots only the declarer's client identity may call and only `publishedBy` may publish |
+| `authorization.domains` | `{ "<domain>": [{ "owner", "namespace" }] }`, the identities that alone may declare a domain, each on its subtree or below. Two owners of one domain need disjoint subtrees, or the broker refuses to start. Unlisted domains go to whoever declares them first, per subtree |
 
 It fails closed: a named file that is missing, unreadable or not a JSON object,
 an unset `secretEnv` variable, a secret written in clear, `auth` in both files,
