@@ -154,10 +154,10 @@ Specified in: [c/README.md](../../c/README.md), [c/libmcpb/README.md](../../c/li
 ## Three paths through the broker
 
 **A browser page publishes a tool.**
-The page builds an `McpServer` with `DirectTransport("ws://<host>/provider/my-slot", { aggregate: true })`, starts it, and closes the transport on `pagehide`. `start()` resolving means the socket opened, not that the slot was accepted: a refusal arrives later as a `1008` close. The page needs a bundler, and cannot authenticate as a provider. Runnable: [samples/browser-provider](https://github.com/pandaGaume/mcp-broker/tree/main/samples/browser-provider).
+The page builds an `McpServer` with `DirectTransport("ws://<host>/provider/my-slot", { aggregate: true })`, starts it, and closes the transport on `pagehide`. `start()` resolving means the socket opened, not that the slot was accepted: a refusal arrives later as a `1008` close. The page needs a bundler, and cannot authenticate as a provider. Runnable: [samples/browser-provider](../../samples/browser-provider/README.md).
 
 **An agent calls it.**
-The agent's MCP client points at `http://<host>/my-slot/mcp`, or at `http://<host>/_all/mcp` and calls `my-slot-<tool>` exactly as `tools/list` spelled it. A stdio host uses the broker with `MCP_BROKER_STDIO_PROVIDER=_all`. Runnable: [samples/host-config](https://github.com/pandaGaume/mcp-broker/tree/main/samples/host-config).
+The agent's MCP client points at `http://<host>/my-slot/mcp`, or at `http://<host>/_all/mcp` and calls `my-slot-<tool>` exactly as `tools/list` spelled it. A stdio host uses the broker with `MCP_BROKER_STDIO_PROVIDER=_all`. Runnable: [samples/host-config](../../samples/host-config/README.md).
 
 **A governed write.**
 A declaring provider receives `tools/call` with a caller reference, asks `broker/authorize` with that reference, applies `obligations.constraints` when the effect is `allow-with-constraints`, acts, then reports the outcome with `broker/audit/result`. Tests: `startTestBroker()` from `@cyanmycelium/mcp-broker/testing` ([testing.md](../../node/packages/broker/docs/testing.md)).
