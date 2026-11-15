@@ -22,6 +22,9 @@
         "lint": "npm run lint --workspaces --if-present",
         "lint:fix": "npm run lint:fix --workspaces --if-present",
         "bump:minor": "node scripts/bump-broker-minor.mjs",
+        "//docs": "docs:sync rewrites version mentions and regenerates docs/guide from broker.guides.ts; docs:check is what ci-docs runs.",
+        "docs:sync": "node scripts/sync-versions.mjs --write && node scripts/build-site.mjs --guides",
+        "docs:check": "node scripts/sync-versions.mjs --check && node scripts/build-site.mjs --check",
         "format": "npm run format --workspaces --if-present",
         "format:fix": "npm run format:fix --workspaces --if-present"
     }

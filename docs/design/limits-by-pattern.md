@@ -1,5 +1,7 @@
 # Brief : limites d'ingénierie par motif de ressource, et RE2 dans le broker
 
+> **Design note, in French. Not the reference.** This brief records a proposal as it was written before it was built. It shipped in broker 1.7.0, possibly with differences. For the behaviour that ships, read [authorization.md](../authorization.md), [execution-limits.md](../../node/packages/broker/docs/execution-limits.md) and the "Engineering limits by resource pattern" section of [AGENTS.md](../../AGENTS.md#engineering-limits-by-resource-pattern-170).
+
 Statut : proposition, 2026-10-05. Demandé par mcp-open-api ; utile à mcp-scada.
 
 ## En une phrase

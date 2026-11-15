@@ -3,8 +3,22 @@ name: pages
 on:
     push:
         branches: [main]
+        # Everything build-site.mjs publishes: docs/ and the mirrored documents.
         paths:
             - "docs/**"
+            - "AGENTS.md"
+            - "README.md"
+            - "HOWTO.md"
+            - "CHANGELOG.md"
+            - "node/packages/*/README.md"
+            - "node/packages/broker/docs/**"
+            - "node/packages/broker/src/broker/broker.guides.ts"
+            - "c/**/README.md"
+            - "python/README.md"
+            - "samples/README.md"
+            - "samples/*/README.md"
+            - "samples/index.json"
+            - "node/scripts/build-site.mjs"
             - ".github/workflows/pages.yml"
     workflow_dispatch:
 
@@ -22,10 +36,21 @@ jobs:
         steps:
             - uses: actions/checkout@v5
             - uses: actions/configure-pages@v5
+              id: pages
+            # Node 22.18+ imports broker.guides.ts straight from its source.
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 22.x
+            # docs/ plus the repository documents mirrored at their paths,
+            # relative links rewritten for the site, llms.txt, llms-full.txt,
+            # sitemap.xml and robots.txt. See node/scripts/build-site.mjs.
+            - run: node node/scripts/build-site.mjs --stage site-build
+              env:
+                  SITE_URL: ${{ steps.pages.outputs.base_url }}
             # Preserve the existing branch-based site's Markdown rendering.
             - uses: actions/jekyll-build-pages@v1
               with:
-                  source: docs
+                  source: site-build
                   destination: _site
             - uses: actions/upload-pages-artifact@v4
               with:

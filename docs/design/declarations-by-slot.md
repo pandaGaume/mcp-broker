@@ -1,5 +1,7 @@
 # Brief : une identité, plusieurs déclarations, une par slot
 
+> **Design note, in French. Not the reference.** This brief records a proposal as it was written before it was built. It shipped in broker 1.7.0, possibly with differences. For the behaviour that ships, read [authorization.md](../authorization.md) and the "Declared authorization" section of [AGENTS.md](../../AGENTS.md#declared-authorization-150).
+
 Statut : proposition, 2026-10-06. Demandé par mcp-open-api, après le banc de son moteur.
 
 ## En une phrase

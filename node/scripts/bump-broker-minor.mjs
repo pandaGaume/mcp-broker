@@ -60,7 +60,18 @@ if (updated !== next) {
     throw new Error(`Expected broker version ${next}, found ${updated}`);
 }
 
-run("git", ["add", packagePath, "package-lock.json"]);
+// The `version` lifecycle script already ran it; running it again keeps this
+// helper correct even with --ignore-scripts.
+run(process.execPath, ["scripts/sync-versions.mjs", "--write"]);
+
+run("git", [
+    "add",
+    packagePath,
+    "package-lock.json",
+    "packages/broker/mcpb/manifest.json",
+    "../README.md",
+    "../docs",
+]);
 run("git", ["commit", "-m", `release broker ${next}`]);
 run("git", ["tag", tag]);
 

@@ -10,7 +10,7 @@
         "url": "git+https://github.com/pandaGaume/mcp-broker.git",
         "directory": "node/packages/provider"
     },
-    "homepage": "https://github.com/pandaGaume/mcp-broker#readme",
+    "homepage": "https://pandagaume.github.io/mcp-broker/",
     "bugs": {
         "url": "https://github.com/pandaGaume/mcp-broker/issues"
     },

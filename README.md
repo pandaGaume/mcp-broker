@@ -10,7 +10,7 @@
 
 # mcp-broker
 
-Routes MCP clients to multiple [Model Context Protocol](https://modelcontextprotocol.io/) providers through a single host. WebSocket, Streamable HTTP, SSE, and stdio transports on both sides. The broker registers itself as an MCP server under the reserved slot `_broker`, so any client can discover what is routable through standard MCP tools, and read the integration guide the broker serves about itself.
+Puts many MCP servers behind one host and one port: browsers, ESP32 boards, Unreal Engine simulations and stdio tools publish into named slots, and any standard MCP client reaches each one, or all of them aggregated, over Streamable HTTP, SSE, WebSocket or stdio. MCP is the [Model Context Protocol](https://modelcontextprotocol.io/). The broker registers itself as an MCP server under the reserved slot `_broker`, so any client can discover what is routable through standard MCP tools, and read the integration guide the broker serves about itself.
 
 > **Working with an AI coding agent?** Point it at **[AGENTS.md](AGENTS.md)** first. It is the single self-contained file: topology table, the transport/path pairing rule, copy-pasteable configurations, the reserved slots, and a symptom-to-fix table. A *running* broker documents itself over MCP through `broker_guide` and `broker_diagnose` on the `_broker` slot, which is better still.
 
@@ -89,7 +89,7 @@ Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the r
 |---|---|---|---|
 | [node/packages/broker/](node/packages/broker/) | published | `@cyanmycelium/mcp-broker` on npm | `node-v*` |
 | [node/packages/provider/](node/packages/provider/) | published | `@cyanmycelium/mcp-broker-provider` on npm | `provider-v*` |
-| [c/libmcpb/](c/libmcpb/) | 0.3.0, consumed from the repository | none: C99 sources, compiled into the firmware or the engine module | `c-v*` |
+| [c/libmcpb/](c/libmcpb/) | 0.4.2, consumed from the repository | none: C99 sources, compiled into the firmware or the engine module | `c-v*` |
 | [c/espressif/](c/espressif/) | validated on an Arduino Nano ESP32, built for the S3 in CI | ESP-IDF component `mcpb_esp` | with `c-v*` |
 | [c/unreal/](c/unreal/) | built and run on UE 5.7 | plugin `McpBroker` | with `c-v*` |
 | [dotnet/](dotnet/) | planned | `CyanMycelium.Mcp.Broker` on NuGet | `dotnet-v*` |
@@ -129,7 +129,9 @@ In both cases the broker is this repository's, started from a checkout with `npm
 
 ## Documentation
 
-- [HOWTO.md](HOWTO.md): local development with `openGuard()`, policy tests with `auth.dev`, production with OAuth, and opt-in LAN discovery through mDNS.
+- [HOWTO.md](HOWTO.md) (in French): local development with `openGuard()`, policy tests with `auth.dev`, production with OAuth, and opt-in LAN discovery through mDNS.
+
+The website, [pandagaume.github.io/mcp-broker](https://pandagaume.github.io/mcp-broker/), publishes every document below as Markdown, indexed for agents in [llms.txt](https://pandagaume.github.io/mcp-broker/llms.txt). [docs/agents/architecture.md](docs/agents/architecture.md) is the map: every layer of the broker, its key rule, its specification and its source.
 
 Start with **[AGENTS.md](AGENTS.md)** if you want one file that covers the decisions, or **[samples/](samples/)** if you would rather run something first: five self-contained integrations that start what they need and prove themselves end to end, indexed for agents in [samples/index.json](samples/index.json). Then, by depth:
 

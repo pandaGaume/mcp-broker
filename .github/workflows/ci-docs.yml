@@ -1,0 +1,49 @@
+name: ci-docs
+
+# Fails a pull request when a public surface (README, website, npm and .mcpb
+# metadata) states a version or a description that its source contradicts,
+# when docs/guide/ no longer matches broker.guides.ts, or when a document the
+# website publishes has a broken relative link.
+# The sources are node/packages/broker/package.json, c/libmcpb's mcpb.h and
+# docs/positioning.md; see node/scripts/sync-versions.mjs.
+
+on:
+    workflow_dispatch:
+    pull_request:
+        branches: [main]
+        paths:
+            - "docs/**"
+            - "AGENTS.md"
+            - "README.md"
+            - "HOWTO.md"
+            - "CHANGELOG.md"
+            - "node/packages/*/README.md"
+            - "node/packages/broker/docs/**"
+            - "node/packages/broker/src/broker/broker.guides.ts"
+            - "c/**/README.md"
+            - "python/README.md"
+            - "samples/README.md"
+            - "samples/*/README.md"
+            - "samples/index.json"
+            - "node/scripts/build-site.mjs"
+            - "node/packages/broker/package.json"
+            - "node/packages/broker/mcpb/manifest.json"
+            - "c/libmcpb/include/mcpb/mcpb.h"
+            - "node/scripts/sync-versions.mjs"
+            - ".github/workflows/ci-docs.yml"
+
+permissions:
+    contents: read
+
+jobs:
+    consistency:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 22.x
+            - run: node node/scripts/sync-versions.mjs --check
+            # Guides regenerated from broker.guides.ts, no broken relative link
+            # in any published document.
+            - run: node node/scripts/build-site.mjs --check

@@ -19,7 +19,7 @@ A package named `broker-client` would have to mean one or the other, and readers
 |---|---|---|---|
 | server | `@cyanmycelium/mcp-broker` | The broker process: routing, sessions, auth, aggregation, MCP endpoints | Node |
 | provider | `@cyanmycelium/mcp-broker-provider` | Publishing an MCP server to a broker slot, and the tunnel wire contract under `./protocol` | Browser and Node |
-| consumer | `@cyanmycelium/mcp-broker-consumer` | Reaching providers through a broker, and introspecting the broker itself | Browser and Node |
+| consumer | `@cyanmycelium/mcp-broker-consumer` (**planned, not published**) | Reaching providers through a broker, and introspecting the broker itself | Browser and Node |
 
 The broker itself keeps the unsuffixed name it was published under: it is the artifact users install, and `npx @cyanmycelium/mcp-broker` must keep working.
 
@@ -55,6 +55,8 @@ Everything an application needs to expose its MCP server through a broker: the t
 This is where a browser application that embeds `McpServer` looks, and it should stay small enough that embedding it in a 3D engine bundle is uncontroversial.
 
 ### consumer
+
+> **Planned.** No such package exists on npm or in this repository yet. A plain MCP client needs nothing of ours.
 
 The mirror image: reaching a provider through a broker rather than publishing one.
 
