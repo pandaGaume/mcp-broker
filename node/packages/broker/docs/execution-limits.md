@@ -39,7 +39,7 @@ These numbers are an example, not a certified OT operating profile. The provider
 
 All matching rules apply atomically. If one refuses, none of the rules is debited. Selectors `subject`, `provider` and `capability` are exact matches; `resource` uses the existing hierarchical resource patterns. Omitted selectors match everyone. Counters are shared by every matching caller by default. Optional `groupBy` partitions a rule by subject, provider, capability or resource. Subject grouping uses the stable user identity, then service or client identity, then a shared anonymous bucket. It does not partition by mutable group memberships.
 
-`onTimeout` decides what a request deadline (`providerRequestTimeoutMs`) does to the concurrency slot a rule holds: `"hold"` (default) keeps it, since a deadline does not prove the native work stopped; `"release"` frees it, which is right for reads. It is only valid on a rule with `concurrency`.
+`onTimeout` decides what a request deadline (`providerRequestTimeoutMs`) does to the concurrency slot a rule holds: `"hold"` (default) keeps it, since a deadline does not prove the native work stopped; `"release"` frees it, which is right for reads. It is only valid on a rule with `concurrency`. A client's `notifications/cancelled` is treated the same way, for the same reason, and audited as `cancel`.
 
 `rate` and `calls` both use sliding windows, not calendar boundaries or token-bucket bursts. A rate permits up to `max` starts in any `windowMs`; it does not space those starts evenly. Window lengths are bounded to one day. A provider's scheduler enforces physical pacing.
 

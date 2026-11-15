@@ -116,7 +116,7 @@ export interface ILimitsInfo {
 }
 export interface ILimitAuditEvent {
     readonly timestamp: string;
-    readonly action: "admit" | "reserve" | "settle" | "complete" | "timeout" | "release";
+    readonly action: "admit" | "reserve" | "settle" | "complete" | "timeout" | "cancel" | "release";
     readonly allowed: boolean;
     readonly requestId?: string;
     readonly correlationId?: string;
@@ -125,7 +125,7 @@ export interface ILimitAuditEvent {
     readonly error?: ILimitFailure;
     /** For `release`: who released it, as the operator's subjects. */
     readonly by?: readonly string[];
-    /** For `timeout`: the rules whose slot the deadline freed. */
+    /** For `timeout` and `cancel`: the rules whose slot was freed. */
     readonly releasedRules?: readonly string[];
 }
 
@@ -447,6 +447,20 @@ export class LimitController {
      * answers or an operator releases them.
      */
     timedOut(provider: string, requestId: string): void {
+        this._abandon(provider, requestId, "timeout");
+    }
+
+    /**
+     * The client withdrew the call (`notifications/cancelled`). A cancellation
+     * proves no more than a deadline that the native work stopped, so it frees
+     * exactly what {@link timedOut} would: the slots of rules that say
+     * `onTimeout: "release"`. A late answer from the provider frees the rest.
+     */
+    cancelled(provider: string, requestId: string): void {
+        this._abandon(provider, requestId, "cancel");
+    }
+
+    private _abandon(provider: string, requestId: string, action: "timeout" | "cancel"): void {
         const found = this.state.entries.find((e) => e.kind === "call" && e.context.provider === provider && e.context.requestId === requestId && !e.finished);
         if (!found || !found.activeRules) return;
         const releasing = new Set(this.config.rules.filter((r) => r.onTimeout === "release").map((r) => r.id));
@@ -459,7 +473,7 @@ export class LimitController {
         if (this.commit(this.state.entries.map((e) => (e === found ? next : e))))
             this.audit({
                 timestamp: new Date(this.clock()).toISOString(),
-                action: "timeout",
+                action,
                 allowed: true,
                 requestId,
                 correlationId: found.context.correlationId,

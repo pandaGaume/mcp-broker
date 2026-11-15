@@ -119,13 +119,13 @@ export class ProviderClientSession {
      * client: the one session this class holds per provider is shared by every
      * caller of `_all`, so the frame alone would not say who is asking.
      */
-    callTool(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
-        return this._request("tools/call", { name, arguments: args }, caller);
+    callTool(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null, signal?: AbortSignal): Promise<IRpcOutcome> {
+        return this._request("tools/call", { name, arguments: args }, caller, signal);
     }
 
-    /** Forwards a `prompts/get` to the provider, relaying the raw outcome. See {@link callTool} for `caller`. */
-    getPrompt(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
-        return this._request("prompts/get", { name, arguments: args }, caller);
+    /** Forwards a `prompts/get` to the provider, relaying the raw outcome. See {@link callTool} for `caller` and `signal`. */
+    getPrompt(name: string, args: Record<string, unknown>, caller: IPrincipal | null = null, signal?: AbortSignal): Promise<IRpcOutcome> {
+        return this._request("prompts/get", { name, arguments: args }, caller, signal);
     }
 
     /** Detaches the session and its internal client. */
@@ -199,14 +199,34 @@ export class ProviderClientSession {
      * **Rejects** on the request timeout. Resolving with a synthetic error there
      * made every caller treat a dead provider as a provider that answered, which
      * is how a hung `initialize` ended up registered in `_all` with no trace.
+     *
+     * An aborted `signal` withdraws the request: the provider is sent
+     * `notifications/cancelled` under this session's own id, and the call
+     * resolves with a cancellation error nobody relays.
      */
-    private _request(method: string, params: unknown, caller: IPrincipal | null = null): Promise<IRpcOutcome> {
+    private _request(method: string, params: unknown, caller: IPrincipal | null = null, signal?: AbortSignal): Promise<IRpcOutcome> {
         return new Promise<IRpcOutcome>((resolve, reject) => {
             if (this._closed) {
                 resolve({ error: { code: -32000, message: "session closed" } });
                 return;
             }
+            if (signal?.aborted) {
+                resolve({ error: { code: -32000, message: "request cancelled" } });
+                return;
+            }
             const id = this._idPrefix + String(++this._nextId);
+            signal?.addEventListener(
+                "abort",
+                () => {
+                    const pending = this._pending.get(id);
+                    if (!pending) return;
+                    this._pending.delete(id);
+                    clearTimeout(pending.timer);
+                    this._client.send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id } }), caller);
+                    pending.resolve({ error: { code: -32000, message: "request cancelled" } });
+                },
+                { once: true }
+            );
             const startedAt = Date.now();
             const timer = setTimeout(() => {
                 this._pending.delete(id);

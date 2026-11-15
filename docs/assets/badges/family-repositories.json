@@ -3,7 +3,7 @@
   "repositories": [
     {
       "repository": "mcp-broker",
-      "version": "1.6.1",
+      "version": "1.11.0",
       "sourceType": "source",
       "evidence": "node/packages/broker/package.json"
     },
@@ -15,7 +15,7 @@
     },
     {
       "repository": "mcp-core",
-      "version": "1.6.1",
+      "version": "1.11.0",
       "sourceType": "neighbor",
       "evidence": "../mcp-broker/node/packages/broker/package.json"
     },
