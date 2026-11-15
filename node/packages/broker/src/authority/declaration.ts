@@ -87,12 +87,46 @@ export interface IDeclarationContext {
     readonly principal: IProviderPrincipal | null;
     readonly protectedSlots: Readonly<Record<string, IProtectedSlot>>;
     readonly slotResources: ISlotResourceResolver;
-    /** The principal whose accepted declaration holds `domain`, if any. */
-    readonly domainOwner?: (domain: string) => string | undefined;
+    /**
+     * Problems with who may own this part of the domain: a subtree that
+     * overlaps another owner's, a vocabulary that differs from the domain's,
+     * an identity or subtree the security file does not list. Called once the
+     * domain and the namespace are known, so its problems are reported with
+     * every other one.
+     */
+    readonly domainProblems?: (candidate: IDomainCandidate) => readonly string[];
+}
+
+/** What the ownership rules of a domain look at in a declaration. */
+export interface IDomainCandidate {
+    readonly principalId: string;
+    readonly slot: string;
+    readonly domain: string;
+    readonly namespace: ResourcePath;
+    readonly capabilities: ReadonlySet<string>;
+    readonly resultsRequired: ReadonlySet<string>;
+}
+
+/**
+ * Owners fixed by the operators, in the security file
+ * (`authorization.domains`): for a listed domain, only these identities may
+ * declare it, each on its subtree or below. Like `protectedSlots`, it only
+ * restricts: it grants no caller anything.
+ */
+export interface IConfiguredDomainOwner {
+    /** Provider principal id. */
+    readonly owner: string;
+    /** The subtree this owner may declare the domain on. */
+    readonly namespace: string;
+}
+
+/** `true` when one of the two subtrees contains the other (equal included). */
+export function namespacesOverlap(a: ResourcePath, b: ResourcePath): boolean {
+    return isWithinNamespace(a, b) || isWithinNamespace(b, a);
 }
 
 /** Domains the broker's own capabilities live in (`mcp.tools.call`, `broker.providers.read`). No provider may declare them. */
-const RESERVED_DOMAINS: ReadonlySet<string> = new Set(["mcp", "broker"]);
+export const RESERVED_DOMAINS: ReadonlySet<string> = new Set(["mcp", "broker"]);
 
 /** Keys a declaration may carry. Anything else refuses it. */
 const DECLARATION_KEYS = new Set(["version", "domain", "namespace", "capabilities", "resources", "protects", "resultsRequired", "budgetUnits"]);
@@ -112,7 +146,7 @@ export const DECLARATION_LIMITS = Object.freeze({
     maxIdentifierLength: 2048,
 });
 
-const DOMAIN_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
+export const DOMAIN_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 
 /** The principal id the legacy shared secret yields: it names no one in particular. */
 const SHARED_SECRET_PRINCIPAL = "shared-secret";
@@ -256,10 +290,6 @@ export function validateDeclaration(
     const domainOk = typeof domain === "string" && DOMAIN_PATTERN.test(domain);
     if (!domainOk) errors.push('domain must be lowercase letters, digits and "-", starting with a letter (e.g. "scada")');
     else if (RESERVED_DOMAINS.has(domain as string)) errors.push(`domain "${String(domain)}" is reserved for the broker's own capabilities`);
-    else {
-        const owner = context.domainOwner?.(domain as string);
-        if (owner !== undefined && owner !== principal.id) errors.push(`domain "${String(domain)}" is already declared by provider "${owner}"; a domain has one owner`);
-    }
 
     // Namespace: a resource path the principal may publish into.
     let namespace: ResourcePath | undefined;
@@ -424,6 +454,11 @@ export function validateDeclaration(
                 resultsRequired.add(capability);
             }
         }
+    }
+
+    // Ownership last: it needs the domain, the subtree and the vocabulary.
+    if (domainOk && !RESERVED_DOMAINS.has(domain as string) && namespace && context.domainProblems) {
+        errors.push(...context.domainProblems({ principalId: principal.id, slot: context.slot, domain: domain as string, namespace, capabilities, resultsRequired }));
     }
 
     if (errors.length > 0 || !namespace) return { ok: false, errors: errors.length > 0 ? errors : ["namespace is missing"] };

@@ -57,6 +57,7 @@ export type BrokerDiagnosisRuleId =
     | "stdio-bridge-target-unreachable"
     | "self-served-page-blocked"
     | "protected-slot-unconfirmed"
+    | "declaration-owner-offline"
     | "undeclared-capability"
     | "decision-result-overdue"
     | "telemetry-export-failures"
@@ -520,6 +521,32 @@ export function diagnoseBroker(context: IBrokerContext, slot?: string): IBrokerD
                 fix:
                     `Start the provider authenticated as "${p.declaredBy}" and have it send broker/authorization/declare with "${p.slot}" in "protects". ` +
                     "If it did and this persists, its declaration was refused: the broker log names every problem it found.",
+            });
+        }
+        const now = Date.now();
+        for (const d of authorityInfo.declarations) {
+            if (d.ownerOfflineSinceMs === undefined || (slot !== undefined && slot !== d.slot)) continue;
+            const offlineMs = now - d.ownerOfflineSinceMs;
+            if (offlineMs < authorityInfo.declarationOfflineThresholdMs) continue;
+            problems.push({
+                id: "declaration-owner-offline",
+                severity: "warning",
+                slot: d.slot,
+                symptom:
+                    `The provider "${d.principalId}" that declared domain "${d.domain}" on slot "${d.slot}" has been disconnected for ${Math.round(offlineMs / 1000)} s. ` +
+                    "A disconnection withdraws nothing: the domain stays owned, and no other identity can declare it until the declaration is withdrawn.",
+                evidence: {
+                    principalId: d.principalId,
+                    slot: d.slot,
+                    domain: d.domain,
+                    version: d.version,
+                    offlineSince: new Date(d.ownerOfflineSinceMs).toISOString(),
+                    offlineMs,
+                    thresholdMs: authorityInfo.declarationOfflineThresholdMs,
+                },
+                fix:
+                    `If "${d.principalId}" is coming back, restart it: it keeps its declaration. If it is gone for good, withdraw it with ` +
+                    `broker_declaration_withdraw({ principal: "${d.principalId}", slot: "${d.slot}" }) (needs broker.authorization.admin). Protected slots stay closed either way.`,
             });
         }
         if (slot === undefined && authorityInfo.undeclaredCapabilities.length > 0) {

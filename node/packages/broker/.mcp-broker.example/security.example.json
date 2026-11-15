@@ -37,6 +37,9 @@
     "authorization": {
         "protectedSlots": {
             "bench-motor01": { "declaredBy": "mcp-scada", "publishedBy": "modbus-bench" }
+        },
+        "domains": {
+            "scada": [{ "owner": "mcp-scada", "namespace": "/production/site1" }]
         }
     }
 }

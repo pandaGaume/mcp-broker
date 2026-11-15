@@ -215,24 +215,65 @@ that namespace before the slot becomes visible. A multiplexed connection checks
 each announced slot independently. The shared-secret implementation remains
 unrestricted for backward compatibility.
 
-### Declared domains have one owner
+### Declared domains have one owner per subtree
 
 A provider identity may declare an authorization domain
-(`broker/authorization/declare`) and have the broker decide for it. Each domain
-has a single owner:
+(`broker/authorization/declare`) and have the broker decide for it. A domain is
+a capability vocabulary, so several identities may share it, one subtree each:
 
-- the first identity whose declaration of a domain is accepted owns it;
-- a declaration of that domain from any other identity is refused with
-  `domain "<d>" is already declared by provider "<id>"; a domain has one owner`;
+- the first identity whose declaration of a domain on a subtree is accepted owns
+  that subtree. Another identity may own a **sibling** subtree of the same
+  domain (`/production/site2` next to `/production/site1`); a subtree that
+  contains, or is contained in, another identity's is refused with
+  `namespace "<n>" overlaps "<m>", owned by provider "<id>" in domain "<d>"`,
+  because one resource would have two decision makers;
+- every identity owning part of a domain declares the same vocabulary, the same
+  `capabilities` and `resultsRequired`; a declaration that differs is refused
+  (`capability vocabulary differs from the domain's`), so a role means the same
+  thing on the whole domain. A sole owner may still change it;
+- `broker/authorize` stays bounded to the asking provider's own subtree: the
+  owner of `/production/site1` gets no decision about `/production/site2`
+  (`undeclared-resource`);
+- the security file may fix the owners from startup, as `protectedSlots` fixes
+  protections, which removes the race for a domain when a site starts:
+
+  ```json
+  { "authorization": { "domains": {
+      "history": [
+        { "owner": "mcp-history-site1", "namespace": "/production/site1" },
+        { "owner": "mcp-history-site2", "namespace": "/production/site2" }
+      ] } } }
+  ```
+
+  A listed domain may only be declared by its listed identities, each on its
+  subtree or below. Listed subtrees of two owners that overlap stop the broker
+  at start. An unlisted domain keeps first come, first served. The section
+  grants no caller anything;
+- `broker://domains` on `_broker` lists each domain, its vocabulary and, for
+  each subtree, the owner, its slot, whether it declared yet (`declared`),
+  whether the security file lists it (`configured`) and whether it is
+  `connected`. It shows a reader only the subtrees the policy grants it one of
+  the domain's capabilities on, or all of them with `broker.authorization.admin`
+  on `_broker`;
 - declarations belong to the pair `(provider identity, slot)`. Declaring again
   replaces only that slot's declaration. `broker/authorize`, concrete resource
   checks, declared limit patterns, `resultsRequired` and `budgetUnits` use the
   declaration of the slot the request arrived on;
-- ownership follows the provider identity, not the slot, and is kept for the
-  broker's lifetime, even after the owner disconnects or replaces its declaration
-  with another domain: a network cut must not
-  hand the domain to someone else. There is no administrative withdrawal yet,
-  so moving a domain to another identity needs a broker restart;
+- ownership of a subtree is kept for the broker's lifetime unless it is
+  withdrawn, even after the owner disconnects or replaces its slot's
+  declaration with another domain: a network cut or a new version must not
+  hand the subtree to someone else;
+- a declaration is withdrawn by its owner, `broker/authorization/withdraw` with
+  no parameter, on the slot it declared from (a clean shutdown, or handing the
+  domain to a new identity), or by an operator with
+  `broker_declaration_withdraw({ principal, slot? })` on `_broker`, which needs
+  `broker.authorization.admin` and is audited with the operator's subjects.
+  Either frees every subtree the slot owned, the domains it replaced included;
+  the subtree is free once no slot of its owner holds it any more. Protected slots
+  stay closed: they belong to the security file. A declaring provider that stays
+  disconnected past the threshold (5 minutes by default,
+  `withDeclarationOfflineThreshold()`) shows up in `broker_diagnose` as
+  `declaration-owner-offline`;
 - an identity may own several domains through several slots. It may also declare
   the same domain on two slots, each with its own resources and limits.
 

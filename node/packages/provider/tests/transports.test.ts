@@ -603,6 +603,23 @@ describe("transport.broker", () => {
         await expect(refused).rejects.toMatchObject({ name: "BrokerRequestError", code: -32602, data: { errors: ["namespace"] } });
     });
 
+    it("withdraws its declaration with no parameter, and the answer never reaches the server", async () => {
+        const transport = new DirectTransport(slotUrl());
+        const seen: string[] = [];
+        transport.onMessage = (frame) => seen.push(frame);
+        transport.connect();
+        lastSocket().accept();
+
+        const withdrawn = transport.broker.withdraw();
+        const request = JSON.parse(lastSocket().sent[lastSocket().sent.length - 1]) as { id: string; method: string; params: unknown };
+        expect(request.method).toBe("broker/authorization/withdraw");
+        expect(request.params).toEqual({});
+
+        lastSocket().deliver(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { withdrawn: true, domain: "scada", version: "1", policyVersion: "abc.2" } }));
+        await expect(withdrawn).resolves.toEqual({ withdrawn: true, domain: "scada", version: "1", policyVersion: "abc.2" });
+        expect(seen).toEqual([]);
+    });
+
     it("routes answers per slot on a MultiplexTransport, inside the envelope", async () => {
         const url = tunnelUrl();
         const a = MultiplexTransport.create("a", url);

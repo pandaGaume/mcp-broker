@@ -7,13 +7,56 @@ import type { IAuthorizationAuditEvent, IAuthorizationDecision, IAuthorizationSu
 import type { ResourcePath } from "../authorization/resource.path";
 import type { IPolicyAuthorization } from "../authorization/runtime";
 import type { ISlotResourceResolver } from "../authorization/slot.resource";
-import { isWithinNamespace, parseProviderResourcePath, validateDeclaration, type IProtectedSlot, type IProviderDeclaration } from "./declaration";
+import {
+    isWithinNamespace,
+    namespacesOverlap,
+    parseProviderResourcePath,
+    validateDeclaration,
+    type IConfiguredDomainOwner,
+    type IDomainCandidate,
+    type IProtectedSlot,
+    type IProviderDeclaration,
+} from "./declaration";
+import { compileConfiguredDomains, type ConfiguredDomains } from "./domains";
+
+/** One owner of a domain, as `broker://domains` and `broker_diagnose` show it. */
+export interface IDomainOwnerInfo {
+    /** Provider principal id. */
+    readonly owner: string;
+    /** The subtree it decides on. */
+    readonly namespace: string;
+    /** Slot its declaration came from; absent while a configured owner has not declared yet. */
+    readonly slot?: string;
+    /** An accepted declaration holds this subtree. */
+    readonly declared: boolean;
+    /** The security file lists this owner and subtree. */
+    readonly configured: boolean;
+    /** A provider currently serves the slot. Always `false` when not declared. */
+    readonly connected: boolean;
+}
+
+/** One domain: its vocabulary and the owners of its subtrees. */
+export interface IDomainInfo {
+    readonly domain: string;
+    /** The capabilities every owner of the domain declares; empty until one declared. */
+    readonly capabilities: readonly string[];
+    readonly owners: readonly IDomainOwnerInfo[];
+}
 
 /** Prefix of every method a provider sends to the broker itself. Never relayed. */
 export const BROKER_METHOD_PREFIX = "broker/";
 
 /** A provider declares its resources, capabilities and protected slots. */
 export const BROKER_DECLARE_METHOD = "broker/authorization/declare";
+
+/**
+ * A provider withdraws the declaration it made on the slot it speaks from.
+ * Takes no parameter: a provider can only ever withdraw its own.
+ */
+export const BROKER_WITHDRAW_METHOD = "broker/authorization/withdraw";
+
+/** Default delay after which a declaring provider still disconnected is reported by `broker_diagnose`. */
+export const DEFAULT_DECLARATION_OFFLINE_THRESHOLD_MS = 300_000;
 
 /** A provider asks for one or more decisions. */
 export const BROKER_AUTHORIZE_METHOD = "broker/authorize";
@@ -99,7 +142,17 @@ export interface IBrokerAuthorityInfo {
         readonly resourceCount: number;
         readonly resourcePatterns?: readonly ReturnType<import("./resource.limits").LimitPattern["info"]>[];
         readonly protects: readonly string[];
+        /**
+         * `Date.now()` when the provider serving the declaration's slot went
+         * away, absent while it is connected. A disconnection never withdraws
+         * a declaration; this is what `broker_diagnose` reports on.
+         */
+        readonly ownerOfflineSinceMs?: number;
     }[];
+    /** Past this delay offline, a declaration's owner is reported by `broker_diagnose` (`declaration-owner-offline`). */
+    readonly declarationOfflineThresholdMs: number;
+    /** Every domain, with the owner of each subtree; configured owners that have not declared yet included. */
+    readonly domains: readonly IDomainInfo[];
     /** Domain-prefixed capabilities the policy grants that no accepted declaration covers. */
     readonly undeclaredCapabilities: readonly string[];
     readonly liveCallerRefs: number;
@@ -137,6 +190,57 @@ export interface IBrokerAuthorityOptions {
     readonly decisionRetentionMs?: number;
     /** Upper bound on decisions kept for their result; the oldest go first. @default 10000 */
     readonly maxTrackedDecisions?: number;
+    /** Past this delay offline, a declaration's owner is reported by `broker_diagnose`. @default 300000 */
+    readonly declarationOfflineThresholdMs?: number;
+    /**
+     * Owners fixed by the security file (`authorization.domains`): a listed
+     * domain may only be declared by its listed identities, on their subtrees.
+     * Unlisted domains go to whoever declares them first, per subtree.
+     */
+    readonly domains?: Readonly<Record<string, readonly IConfiguredDomainOwner[]>>;
+}
+
+/** Who withdrew a declaration. */
+export type DeclarationWithdrawnBy = "provider" | "administrator";
+
+/** One declaration an administrative withdrawal removed. */
+export interface IWithdrawnDeclaration {
+    readonly principalId: string;
+    readonly slot: string;
+    readonly domain: string;
+    /**
+     * Version of the declaration withdrawn. Absent when only the ownership of
+     * the subtree remained: the slot had since declared another domain.
+     */
+    readonly version?: string;
+}
+
+/** One subtree of one domain, owned through one slot. */
+interface IOwnership {
+    readonly domain: string;
+    readonly principalId: string;
+    readonly slot: string;
+    readonly namespace: ResourcePath;
+}
+
+function ownershipKey(domain: string, principalId: string, slot: string): string {
+    return JSON.stringify([domain, principalId, slot]);
+}
+
+/** What a withdrawal writes to the authorization audit stream. */
+export interface IDeclarationAuditEvent {
+    readonly timestamp: string;
+    readonly phase: "withdraw";
+    readonly withdrawnBy: DeclarationWithdrawnBy;
+    /** The provider's subjects when it withdrew its own, the operator's otherwise. */
+    readonly subjectIds: readonly string[];
+    readonly principalId: string;
+    readonly slot: string;
+    readonly domain: string;
+    /** Absent when only the ownership of the subtree remained. */
+    readonly version?: string;
+    /** The policy version in force once the declaration is gone. */
+    readonly policyVersion: string;
 }
 
 /** What a client may send as `X-Correlation-Id` and see reused in the audit. Anything else is replaced. */
@@ -202,9 +306,14 @@ export class BrokerAuthority {
     private _decisionsExpired = 0;
 
     private readonly _declarations = new Map<string, Map<string, IProviderDeclaration>>();
-    private readonly _domainOwners = new Map<string, string>();
+    private readonly _configuredDomains: ConfiguredDomains;
+    /** Who owns which subtree of which domain, by `(domain, principal, slot)`. Freed only by a withdrawal. */
+    private readonly _ownerships = new Map<string, IOwnership>();
     private readonly _refs = new Map<string, ICallerRef>();
     private readonly _principals = new Map<string, IProviderPrincipal>();
+    /** Slot to `Date.now()` of its provider's departure, for slots that went away. */
+    private readonly _slotOfflineSince = new Map<string, number>();
+    private readonly _offlineThresholdMs: number;
     private _declarationCount = 0;
 
     constructor(options: IBrokerAuthorityOptions) {
@@ -218,6 +327,10 @@ export class BrokerAuthority {
         this._resultTimeoutMs = Math.max(1, options.resultTimeoutMs ?? 60_000);
         this._decisionRetentionMs = Math.max(this._resultTimeoutMs, options.decisionRetentionMs ?? 600_000);
         this._maxTrackedDecisions = Math.max(1, options.maxTrackedDecisions ?? 10_000);
+        this._offlineThresholdMs = Math.max(0, options.declarationOfflineThresholdMs ?? DEFAULT_DECLARATION_OFFLINE_THRESHOLD_MS);
+        const configured = compileConfiguredDomains(options.domains);
+        if (configured.problems.length > 0) throw new Error(`authorization.domains cannot be enforced: ${configured.problems.join("; ")}.`);
+        this._configuredDomains = configured.domains;
         for (const principal of options.knownPrincipals ?? []) this._principals.set(principal.id, principal);
     }
 
@@ -296,7 +409,7 @@ export class BrokerAuthority {
                 slot: origin.slot,
                 protectedSlots: this._protectedSlots,
                 slotResources: this._slotResources,
-                domainOwner: (domain) => this._domainOwners.get(domain),
+                domainProblems: (candidate) => this._domainProblems(candidate),
             },
             policyVersion
         );
@@ -317,13 +430,223 @@ export class BrokerAuthority {
             this._declarations.set(declaration.principalId, declarations);
         }
         declarations.set(origin.slot, declaration);
-        this._domainOwners.set(declaration.domain, declaration.principalId);
+        // Owning the subtree outlives the declaration: replacing it with
+        // another domain keeps the first one owned, and only a withdrawal
+        // frees it. A network cut or a new version must not hand it over.
+        this._ownerships.set(ownershipKey(declaration.domain, declaration.principalId, declaration.slot), {
+            domain: declaration.domain,
+            principalId: declaration.principalId,
+            slot: declaration.slot,
+            namespace: declaration.namespace,
+        });
         this._declarationCount += 1;
         console.info(
             `[broker] authorization declaration accepted: principal "${declaration.principalId}", slot "${declaration.slot}", domain "${declaration.domain}", version "${declaration.version}", ` +
                 `${declaration.capabilities.size} capabilities, ${declaration.resources.size} resources, protects [${declaration.protects.join(", ")}], policyVersion ${declaration.policyVersion}`
         );
         return { result: { accepted: true, version: declaration.version, policyVersion: declaration.policyVersion } };
+    }
+
+    /**
+     * Handles `broker/authorization/withdraw`: the provider drops the
+     * declaration it made on this slot, typically at a clean shutdown or
+     * before a new version declares the domain from another identity.
+     *
+     * Takes no parameter, so a provider can withdraw nothing but its own.
+     * Idempotent: with no declaration left on the slot, it answers
+     * `withdrawn: false` and changes nothing. Protected slots stay closed:
+     * they come from the security file, never from the declaration.
+     */
+    withdraw(params: unknown, origin: IBrokerMethodOrigin): BrokerMethodOutcome {
+        const empty = params === undefined || params === null || (typeof params === "object" && !Array.isArray(params) && Object.keys(params).length === 0);
+        if (!empty) return invalidParams(`${BROKER_WITHDRAW_METHOD} takes no parameter: a provider withdraws only the declaration it made on its own slot.`);
+        const principal = origin.principal;
+        if (!principal) return { error: { code: -32003, message: "An anonymous provider has no declaration to withdraw." } };
+        const declaration = this.declarationOf(principal.id, origin.slot);
+        const released = this._release(principal.id, origin.slot, "provider", principal.subjects ?? []);
+        if (released.length === 0) return { result: { withdrawn: false, domains: [], policyVersion: this.policyVersion } };
+        return {
+            result: {
+                withdrawn: true,
+                ...(declaration ? { domain: declaration.domain, version: declaration.version } : {}),
+                domains: released.map((r) => r.domain),
+                policyVersion: this.policyVersion,
+            },
+        };
+    }
+
+    /**
+     * Administrative withdrawal, what `broker_declaration_withdraw` calls: an
+     * operator removes the declarations of a provider that is gone and will
+     * not withdraw them itself, and frees every subtree it owns. All of
+     * `principalId`'s slots, or only `slot`. Audited with the operator's
+     * subjects in `by`.
+     */
+    withdrawDeclarations(principalId: string, slot: string | undefined, by: readonly string[]): readonly IWithdrawnDeclaration[] {
+        const slots = new Set<string>();
+        for (const d of this._declarations.get(principalId)?.values() ?? []) slots.add(d.slot);
+        for (const o of this._ownerships.values()) if (o.principalId === principalId) slots.add(o.slot);
+        return [...slots].filter((s) => slot === undefined || s === slot).flatMap((s) => this._release(principalId, s, "administrator", by));
+    }
+
+    /**
+     * Drops what `principalId` holds through `slot`: its declaration, and the
+     * ownership of every subtree it declared from there, the domains it
+     * replaced since included. Audits one event per freed domain.
+     */
+    private _release(principalId: string, slot: string, withdrawnBy: DeclarationWithdrawnBy, subjectIds: readonly string[]): IWithdrawnDeclaration[] {
+        const declarations = this._declarations.get(principalId);
+        const declaration = declarations?.get(slot);
+        const owned = [...this._ownerships.entries()].filter(([, o]) => o.principalId === principalId && o.slot === slot);
+        if (!declaration && owned.length === 0) return [];
+        if (declaration) {
+            declarations!.delete(slot);
+            if (declarations!.size === 0) this._declarations.delete(principalId);
+            // References on this slot can no longer be decided on: drop them now.
+            for (const [ref, entry] of this._refs) if (entry.slot === slot && entry.providerPrincipalId === principalId) this._refs.delete(ref);
+        }
+        for (const [key] of owned) this._ownerships.delete(key);
+        this._declarationCount += 1;
+
+        const domains = new Set(owned.map(([, o]) => o.domain));
+        if (declaration) domains.add(declaration.domain);
+        const released: IWithdrawnDeclaration[] = [];
+        for (const domain of domains) {
+            const version = declaration?.domain === domain ? declaration.version : undefined;
+            released.push({ principalId, slot, domain, ...(version !== undefined ? { version } : {}) });
+            const event: IDeclarationAuditEvent = {
+                timestamp: new Date().toISOString(),
+                phase: "withdraw",
+                withdrawnBy,
+                subjectIds,
+                principalId,
+                slot,
+                domain,
+                ...(version !== undefined ? { version } : {}),
+                policyVersion: this.policyVersion,
+            };
+            console.error(`[broker] authorization ${JSON.stringify(event)}`);
+            const stillHeld = [...this._ownerships.values()].some((o) => o.domain === domain && o.principalId === principalId);
+            console.info(
+                `[broker] authorization ${version !== undefined ? "declaration" : "ownership"} withdrawn by the ${withdrawnBy}: principal "${principalId}", slot "${slot}", domain "${domain}"` +
+                    `${stillHeld ? " (its subtree stays owned through another slot)" : ", its subtree is free"}; policyVersion ${this.policyVersion}`
+            );
+        }
+        return released;
+    }
+
+    // -------------------------------------------------------------------------
+    // Domains: one vocabulary, one owner per subtree
+    // -------------------------------------------------------------------------
+
+    /** Every accepted declaration of `domain`, all identities and slots. */
+    private _declarationsOfDomain(domain: string): IProviderDeclaration[] {
+        const out: IProviderDeclaration[] = [];
+        for (const slots of this._declarations.values()) for (const d of slots.values()) if (d.domain === domain) out.push(d);
+        return out;
+    }
+
+    /** Every subtree of `domain` someone owns, declared now or not. */
+    private _ownershipsOfDomain(domain: string): IOwnership[] {
+        return [...this._ownerships.values()].filter((o) => o.domain === domain);
+    }
+
+    /**
+     * The ownership rules of a domain, checked against a declaration about to
+     * be accepted:
+     *
+     * - a domain the security file lists may only be declared by its listed
+     *   identities, each on its listed subtree or below;
+     * - another identity's subtree of the same domain must be disjoint from
+     *   this one: siblings share a domain, nested subtrees would give one
+     *   resource two decision makers;
+     * - every identity owning part of a domain declares the same vocabulary
+     *   (capabilities and resultsRequired), so a role means the same thing on
+     *   the whole domain.
+     *
+     * The identity's own declarations on other slots are not competitors: one
+     * identity may declare one domain on several slots (1.7.0). Another
+     * identity's subtree counts until it is withdrawn, even when that identity
+     * has since declared something else on its slot.
+     */
+    private _domainProblems(c: IDomainCandidate): string[] {
+        const problems: string[] = [];
+        const configured = this._configuredDomains.get(c.domain);
+        if (configured) {
+            const mine = configured.filter((entry) => entry.owner === c.principalId);
+            if (mine.length === 0) {
+                problems.push(
+                    `domain "${c.domain}" is assigned by the security file to ${configured.map((e) => `"${e.owner}"`).join(", ")}; provider "${c.principalId}" is not one of its owners`
+                );
+            } else if (!mine.some((entry) => isWithinNamespace(entry.namespace, c.namespace))) {
+                problems.push(
+                    `namespace "${c.namespace.value}" is outside the subtree${mine.length === 1 ? "" : "s"} the security file assigns provider "${c.principalId}" in domain "${c.domain}": ` +
+                        mine.map((e) => `"${e.namespace.value}"`).join(", ")
+                );
+            }
+        }
+
+        for (const other of this._ownershipsOfDomain(c.domain)) {
+            if (other.principalId === c.principalId || !namespacesOverlap(other.namespace, c.namespace)) continue;
+            problems.push(
+                `namespace "${c.namespace.value}" overlaps "${other.namespace.value}", owned by provider "${other.principalId}" in domain "${c.domain}" (slot "${other.slot}"). ` +
+                    "Sibling subtrees may share a domain; nested ones may not, or one resource would have two decision makers. " +
+                    "A subtree is owned until its declaration is withdrawn (broker/authorization/withdraw, or broker_declaration_withdraw)"
+            );
+        }
+
+        const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean => a.size === b.size && [...a].every((x) => b.has(x));
+        const reference = this._declarationsOfDomain(c.domain).find((d) => d.principalId !== c.principalId);
+        if (reference && !(sameSet(reference.capabilities, c.capabilities) && sameSet(reference.resultsRequired, c.resultsRequired))) {
+            const list = (s: ReadonlySet<string>): string => `[${[...s].sort().join(", ")}]`;
+            problems.push(
+                `capability vocabulary differs from the domain's: "${c.domain}" declares capabilities ${list(reference.capabilities)} and resultsRequired ${list(reference.resultsRequired)} ` +
+                    `(provider "${reference.principalId}"), this declaration ${list(c.capabilities)} and ${list(c.resultsRequired)}. Every owner of a domain declares the same vocabulary`
+            );
+        }
+        return problems;
+    }
+
+    /** Every domain, configured or declared, with the owner of each subtree. Unfiltered. */
+    domainsInfo(): readonly IDomainInfo[] {
+        const names = new Set<string>([...this._configuredDomains.keys()]);
+        for (const o of this._ownerships.values()) names.add(o.domain);
+        return [...names].sort().map((domain) => {
+            const declared = this._declarationsOfDomain(domain);
+            const owned = this._ownershipsOfDomain(domain);
+            const configured = this._configuredDomains.get(domain) ?? [];
+            const owners: IDomainOwnerInfo[] = owned.map((o) => {
+                const live = this._declarations.get(o.principalId)?.get(o.slot)?.domain === domain;
+                return {
+                    owner: o.principalId,
+                    namespace: o.namespace.value,
+                    slot: o.slot,
+                    declared: live,
+                    configured: configured.some((e) => e.owner === o.principalId && isWithinNamespace(e.namespace, o.namespace)),
+                    connected: live && !this._slotOfflineSince.has(o.slot),
+                };
+            });
+            for (const entry of configured) {
+                if (owned.some((o) => o.principalId === entry.owner && isWithinNamespace(entry.namespace, o.namespace))) continue;
+                owners.push({ owner: entry.owner, namespace: entry.namespace.value, declared: false, configured: true, connected: false });
+            }
+            owners.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.owner.localeCompare(b.owner));
+            return { domain, capabilities: declared[0] ? [...declared[0].capabilities].sort() : [], owners };
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Provider presence, for declarations whose owner went away
+    // -------------------------------------------------------------------------
+
+    /** The provider serving `slot` went away. Withdraws nothing: a disconnection must not reopen a domain. */
+    noteSlotDisconnected(slot: string, now = Date.now()): void {
+        if (!this._slotOfflineSince.has(slot)) this._slotOfflineSince.set(slot, now);
+    }
+
+    /** A provider serves `slot` again. */
+    noteSlotConnected(slot: string): void {
+        this._slotOfflineSince.delete(slot);
     }
 
     // -------------------------------------------------------------------------
@@ -723,7 +1046,10 @@ export class BrokerAuthority {
                 resourceCount: d.resources.size,
                 resourcePatterns: d.resourcePatterns.patterns.map((p) => p.info()),
                 protects: d.protects,
+                ...(this._slotOfflineSince.has(d.slot) ? { ownerOfflineSinceMs: this._slotOfflineSince.get(d.slot)! } : {}),
             })),
+            declarationOfflineThresholdMs: this._offlineThresholdMs,
+            domains: this.domainsInfo(),
             undeclaredCapabilities: undeclared,
             liveCallerRefs: this._refs.size,
             results: this._resultsInfo(),

@@ -35,6 +35,7 @@ export {
     type IBudgetSettlement,
     type ICallerReference,
     type IDeclarationAccepted,
+    type IDeclarationWithdrawn,
     type IDeclaredResource,
     type IResourceLimits,
     type ITelemetryEvent,

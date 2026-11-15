@@ -623,7 +623,7 @@ describe("hardening found in review", () => {
 
         const other = await FakeProvider.open(base, "scada2", "s-other");
         const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
-        expect(taken.error?.data?.errors?.join("\n")).toContain('already declared by provider "mcp-scada"');
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
         const reserved = await other.call("broker/authorization/declare", { ...DECLARATION, domain: "mcp", capabilities: ["mcp.tools.call"], protects: [] });
         expect(reserved.error?.data?.errors?.join("\n")).toContain("reserved");
         const root = await other.call("broker/authorization/declare", {
@@ -952,5 +952,169 @@ describe("amendment 3: X-Correlation-Id", () => {
             [2, "second"],
             [3, "third"],
         ]);
+    });
+});
+
+describe("E8: withdrawing a declaration", () => {
+    const OTHER = { id: "other-scada", secret: "s-other", subjects: ["service:other"], allowedResources: ["/production/site1/**"] };
+
+    /** A policy where operators-line1 may administer declarations and victor may only read the broker. */
+    function adminPolicy() {
+        return compileAuthorizationPolicy({
+            subjectMapping: { userClaim: "sub", groupClaims: ["groups"], serviceClaims: ["service"] },
+            roles: {
+                caller: { capabilities: ["mcp.tools.list", "mcp.tools.call"] },
+                reader: { inherits: ["caller"], capabilities: ["broker.providers.read"] },
+                admin: { inherits: ["reader"], capabilities: ["broker.authorization.admin", "scada.observe", "scada.control"] },
+            },
+            assignments: [
+                { subject: "group:operators-line1", role: "admin", resource: "**" },
+                { subject: "user:victor", role: "reader", resource: "**" },
+                { subject: "service:mcp-scada", role: "caller", resource: "/production/site1/**" },
+            ],
+            slotResources: {
+                scada: "/production/site1/scada",
+                scada2: "/production/site1/scada2",
+                plain: "/production/site1/plain",
+                "bench-motor01": "/production/site1/bench/motor01",
+            },
+        });
+    }
+
+    function startWithAdmin(configure: (b: WsTunnelBuilder) => void = () => {}): Promise<string> {
+        const policy = adminPolicy();
+        return start((b) => {
+            b.withAuth({ ...auth, authorization: policy, slotResourceResolver: policy.slotResourceResolver }).withProviderPrincipals([...PROVIDERS, OTHER]);
+            configure(b);
+        });
+    }
+
+    function toolText(reply: IJsonRpc): { isError: boolean; body: string } {
+        return { isError: reply.result?.isError === true, body: (reply.result?.content as { text: string }[] | undefined)?.[0]?.text ?? "" };
+    }
+
+    it("T28: frees the domain for another identity; the protected slot stays closed", async () => {
+        const base = await startWithAdmin();
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        expect((await scada.call("broker/authorization/declare", DECLARATION)).error).toBeUndefined();
+        const before = tunnel!.getAuthorityInfo().policyVersion;
+
+        // Parameters are refused: a provider withdraws only its own declaration.
+        const named = await scada.call("broker/authorization/withdraw", { principal: "other-scada" });
+        expect(named.error?.code).toBe(-32602);
+
+        const withdrawn = await scada.call("broker/authorization/withdraw", {});
+        expect(withdrawn.error).toBeUndefined();
+        expect(withdrawn.result).toMatchObject({ withdrawn: true, domain: "scada", version: "2026-10-01.1" });
+        const info = tunnel!.getAuthorityInfo();
+        expect(info.declarations).toEqual([]);
+        expect(info.policyVersion).not.toBe(before);
+        expect(info.protectedSlots).toEqual([{ slot: "bench-motor01", declaredBy: "mcp-scada", publishedBy: "modbus-bench", confirmed: false }]);
+
+        // Idempotent, and nothing left to decide on.
+        expect((await scada.call("broker/authorization/withdraw", undefined)).result).toMatchObject({ withdrawn: false });
+        const refused = await scada.call("broker/authorize", {
+            principal: { type: "provider" },
+            checks: [{ capability: "scada.observe", resource: "x", resourcePath: "/production/site1/x" }],
+        });
+        expect(refused.error?.code).toBe(-32003);
+
+        // The domain is free: another identity declares it.
+        const other = await FakeProvider.open(base, "scada2", "s-other");
+        const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
+        expect(taken.error).toBeUndefined();
+        expect(tunnel!.getAuthorityInfo().declarations).toEqual([expect.objectContaining({ principalId: "other-scada", domain: "scada" })]);
+
+        // The protected slot still follows the security file, not the declaration.
+        const stranger = await connect(`${base}/bench-motor01`, { authorization: "Bearer visitor" });
+        expect((await closure(stranger.ws)).code).toBe(1008);
+    });
+
+    it("keeps the domain owned while the same identity still declares it from another slot", async () => {
+        const base = await startWithAdmin();
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        const scada2 = await FakeProvider.open(base, "scada2", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+        await scada2.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
+        expect((await scada.call("broker/authorization/withdraw", {})).result).toMatchObject({ withdrawn: true });
+
+        const other = await FakeProvider.open(base, "plain", "s-other");
+        const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
+    });
+
+    it("withdraws through the loopback handle too", async () => {
+        await startWithAdmin();
+        const [providerEnd] = LoopbackTransport.createPair();
+        const handle = tunnel!.registerLoopbackProvider("scada", providerEnd, { principal: PROVIDERS[0] });
+        expect(await handle.declare({ ...DECLARATION, protects: [] })).toMatchObject({ result: { accepted: true } });
+        expect(await handle.withdraw()).toMatchObject({ result: { withdrawn: true, domain: "scada" } });
+        expect(tunnel!.getAuthorityInfo().declarations).toEqual([]);
+    });
+
+    it("T29: broker_declaration_withdraw is refused without broker.authorization.admin, accepted and audited with it", async () => {
+        const base = await startWithAdmin();
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+
+        const reader = await Client.open(base, "_broker", "visitor");
+        const listed = await reader.request("tools/list", {});
+        expect((listed.result?.tools as { name: string }[]).map((t) => t.name)).toContain("broker_declaration_withdraw");
+        const denied = await reader.request("tools/call", { name: "broker_declaration_withdraw", arguments: { principal: "mcp-scada" } });
+        expect(denied.error?.code).toBe(-32001);
+        expect(tunnel!.getAuthorityInfo().declarations).toHaveLength(1);
+
+        const audit = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const admin = await Client.open(base, "_broker", "operator");
+            const missing = toolText(await admin.request("tools/call", { name: "broker_declaration_withdraw", arguments: { principal: "nobody" } }));
+            expect(missing.isError).toBe(true);
+            expect(missing.body).toContain('No accepted declaration from provider "nobody"');
+
+            const done = toolText(await admin.request("tools/call", { name: "broker_declaration_withdraw", arguments: { principal: "mcp-scada", slot: "scada" } }));
+            expect(done.isError).toBe(false);
+            expect(JSON.parse(done.body)).toMatchObject({
+                withdrawn: [{ principalId: "mcp-scada", slot: "scada", domain: "scada" }],
+                by: expect.arrayContaining(["user:olivia", "group:operators-line1"]),
+            });
+            const events = audit.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('"phase":"withdraw"'));
+            expect(events).toHaveLength(1);
+            expect(JSON.parse(events[0]!.replace("[broker] authorization ", ""))).toMatchObject({
+                withdrawnBy: "administrator",
+                principalId: "mcp-scada",
+                domain: "scada",
+                subjectIds: expect.arrayContaining(["user:olivia"]),
+            });
+        } finally {
+            audit.mockRestore();
+        }
+        expect(tunnel!.getAuthorityInfo().declarations).toEqual([]);
+    });
+
+    it("T30: a disconnection releases nothing; broker_diagnose reports declaration-owner-offline past the threshold", async () => {
+        const base = await startWithAdmin((b) => b.withDeclarationOfflineThreshold(100));
+        const scada = await FakeProvider.open(base, "scada", "s-scada");
+        await scada.call("broker/authorization/declare", DECLARATION);
+        expect(diagnoseBroker(tunnel!)!.problems.map((p) => p.id)).not.toContain("declaration-owner-offline");
+
+        scada.ws.close();
+        await delay(30);
+        // Below the threshold: owned, and not reported yet.
+        expect(tunnel!.getAuthorityInfo().declarations[0]?.ownerOfflineSinceMs).toEqual(expect.any(Number));
+        expect(diagnoseBroker(tunnel!)!.problems.map((p) => p.id)).not.toContain("declaration-owner-offline");
+        await delay(120);
+
+        const problem = diagnoseBroker(tunnel!)!.problems.find((p) => p.id === "declaration-owner-offline");
+        expect(problem).toMatchObject({ slot: "scada", evidence: { principalId: "mcp-scada", domain: "scada" } });
+        expect(problem!.fix).toContain("broker_declaration_withdraw");
+        const other = await FakeProvider.open(base, "scada2", "s-other");
+        const taken = await other.call("broker/authorization/declare", { ...DECLARATION, protects: [] });
+        expect(taken.error?.data?.errors?.join("\n")).toContain('owned by provider "mcp-scada"');
+
+        // Back online: the declaration is still there and the report goes away.
+        await FakeProvider.open(base, "scada", "s-scada");
+        await delay(30);
+        expect(tunnel!.getAuthorityInfo().declarations[0]?.ownerOfflineSinceMs).toBeUndefined();
+        expect(diagnoseBroker(tunnel!)!.problems.map((p) => p.id)).not.toContain("declaration-owner-offline");
     });
 });

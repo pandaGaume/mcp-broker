@@ -187,6 +187,23 @@ export interface IDeclarationAccepted {
     readonly policyVersion: string;
 }
 
+/** What `broker/authorization/withdraw` answers. */
+export interface IDeclarationWithdrawn {
+    /** `false` when this slot held no declaration: nothing changed. */
+    readonly withdrawn: boolean;
+    /** The domain that is now free, when one was withdrawn. */
+    readonly domain?: string;
+    /** The version of the withdrawn declaration. */
+    readonly version?: string;
+    /**
+     * Every domain whose subtree this slot no longer owns: the one declared
+     * now, and any it replaced earlier, which stayed owned until this call.
+     * Absent from brokers before domain ownership by subtree.
+     */
+    readonly domains?: readonly string[];
+    readonly policyVersion: string;
+}
+
 /** One question: may (the caller) do `capability` on this resource? */
 export interface IAuthorizationCheck {
     readonly capability: string;
@@ -332,6 +349,17 @@ export class BrokerClient {
      */
     declare(declaration: IAuthorizationDeclaration): Promise<IDeclarationAccepted> {
         return this._request("broker/authorization/declare", declaration) as Promise<IDeclarationAccepted>;
+    }
+
+    /**
+     * Withdraws the declaration this provider made on its slot, at a clean
+     * shutdown or before another identity takes the domain over. Its domain
+     * becomes free; the protected slots the security file configures stay
+     * closed. Idempotent: resolves with `withdrawn: false` when there was
+     * nothing to withdraw. A disconnection alone withdraws nothing.
+     */
+    withdraw(): Promise<IDeclarationWithdrawn> {
+        return this._request("broker/authorization/withdraw", {}) as Promise<IDeclarationWithdrawn>;
     }
 
     reserveBudget(query: IBudgetReservationQuery): Promise<IBudgetReservation> {

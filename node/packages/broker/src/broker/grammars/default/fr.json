@@ -30,6 +30,13 @@
                 "slot": "Slot de l'appel bloqué, tel que broker_diagnose le liste.",
                 "requestId": "requestId de l'appel bloqué, tel que broker_diagnose le liste."
             }
+        },
+        "broker_declaration_withdraw": {
+            "description": "Retire les déclarations d'autorisation d'un provider disparu, pour que son domaine puisse être déclaré depuis une autre identité. Exige broker.authorization.admin ; audité avec votre identité. Les slots protégés restent fermés. broker_diagnose liste les déclarations dont le propriétaire est hors ligne.",
+            "properties": {
+                "principal": "Identité du provider dont retirer les déclarations (principalId, tel que broker_diagnose le liste).",
+                "slot": "Ne retirer que la déclaration faite sur ce slot. Omis : toutes les déclarations de ce provider."
+            }
         }
     },
     "resources": {
@@ -40,6 +47,10 @@
         "broker://providers": {
             "name": "Providers du broker",
             "description": "Liste de tous les emplacements de providers connus du broker, y compris les déconnectés."
+        },
+        "broker://domains": {
+            "name": "Domaines d'autorisation",
+            "description": "Chaque domaine d'autorisation, son vocabulaire de capabilities, et quel provider, sur quel slot, décide pour chaque sous-arbre. Ne liste que les sous-arbres sur lesquels vous détenez une capability du domaine."
         },
         "broker://guide/index": {
             "name": "Index du guide",

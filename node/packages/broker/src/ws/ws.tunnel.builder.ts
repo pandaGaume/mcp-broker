@@ -80,6 +80,8 @@ export class WsTunnelBuilder {
     private _securityVersion: string | undefined = undefined;
     private _authorizeBatchLimit: number | undefined = undefined;
     private _authorizationResultTimeoutMs: number | undefined = undefined;
+    private _declarationOfflineThresholdMs: number | undefined = undefined;
+    private _domains: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>> | undefined = undefined;
 
     /** Sets the TCP port the broker listens on. */
     withPort(port: number): this {
@@ -450,6 +452,16 @@ export class WsTunnelBuilder {
         return this;
     }
 
+    /**
+     * Fixes the owners of authorization domains, as `authorization.domains`
+     * does in the security file: a listed domain may only be declared by its
+     * listed identities, each on its subtree or below.
+     */
+    withDomains(domains: Readonly<Record<string, readonly import("../authority/declaration").IConfiguredDomainOwner[]>>): this {
+        this._domains = { ...domains };
+        return this;
+    }
+
     /** Stamps every `policyVersion` with this identifier of the security configuration. */
     withSecurityVersion(version: string): this {
         this._securityVersion = version;
@@ -465,6 +477,12 @@ export class WsTunnelBuilder {
     /** How long an awaited `broker/audit/result` may take before `broker_diagnose` reports it overdue. */
     withAuthorizationResultTimeout(ms: number): this {
         this._authorizationResultTimeoutMs = ms;
+        return this;
+    }
+
+    /** How long a declaring provider may stay disconnected before `broker_diagnose` reports it (`declaration-owner-offline`). */
+    withDeclarationOfflineThreshold(ms: number): this {
+        this._declarationOfflineThresholdMs = ms;
         return this;
     }
 
@@ -521,6 +539,8 @@ export class WsTunnelBuilder {
             securityVersion: this._securityVersion,
             authorizeBatchLimit: this._authorizeBatchLimit,
             authorizationResultTimeoutMs: this._authorizationResultTimeoutMs,
+            declarationOfflineThresholdMs: this._declarationOfflineThresholdMs,
+            domains: this._domains,
         };
         return new WsTunnel(options);
     }
