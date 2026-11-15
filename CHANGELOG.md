@@ -125,6 +125,25 @@ repository; the changes it needed for this release are listed under
 - **provider** `transport.broker.declare()` / `.authorize()` on
   `DirectTransport` and `MultiplexTransport`, `callerReferenceOf()`,
   `BrokerRequestError`, and `brokerRequestTimeoutMs` (off by default).
+- **broker** `notifications/cancelled` is translated. The broker renumbers
+  every request, so a client's `requestId` named an id the provider never saw
+  and a cancellation did nothing. It is now matched against the requests that
+  same client has pending on the slot and rewritten to the broker id; the
+  pending entry is settled at once (no answer, no timeout error) and its caller
+  reference released. On `_all`, the routed call is withdrawn from the
+  provider under the aggregate session's own id. Execution limits treat a
+  cancellation like a deadline: rules with `onTimeout: "release"` free their
+  slot, the others wait for a late answer or an operator (audit action
+  `cancel`). A late answer to a cancelled request is dropped without the
+  unmatched-id warning.
+
+### Security
+
+- **broker** A cancellation that matches none of the sender's own pending
+  requests is dropped instead of relayed. Broker ids are sequential, so
+  relaying it as is would have let one client cancel another client's call on
+  a shared slot once providers honor `notifications/cancelled` (mcp-core 1.5.0
+  does).
 
 ### Fixed
 
@@ -204,6 +223,10 @@ repository; the changes it needed for this release are listed under
   argument, `IMcpRequestContext` (`requestId`, `method`, `params._meta`
   frozen). This is how a provider reads the broker's caller reference
   (`request?.meta`). Adapters written without it are unchanged.
+- `@cyanmycelium/mcp-core` 1.5.0: `notifications/cancelled` on both ends.
+  `McpClient` calls take `{ signal }`, and a server aborts
+  `IMcpRequestContext.signal` and sends no answer for a cancelled request.
+  Through the broker this needs the translation above.
 
 ## [1.11.0] - 2026-11-06
 

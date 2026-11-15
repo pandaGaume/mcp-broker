@@ -124,6 +124,40 @@ function requestIdOf(frame: string): string | number | undefined {
  */
 const BROKER_REQUEST_ID_PREFIX = "brk-";
 
+/** The MCP notification a client sends to withdraw one of its requests. */
+const CANCELLED_METHOD = "notifications/cancelled";
+
+/** How many cancelled broker ids are remembered, so a late answer to one is dropped quietly. */
+const MAX_REMEMBERED_CANCELLATIONS = 1024;
+
+/** Key of a cancelled request in the tunnel's memory of them. 1 and "1" are different ids. */
+function cancellationKey(providerName: string, id: string | number): string {
+    return `${providerName}\u0000${typeof id}:${id}`;
+}
+
+/**
+ * Whether two sinks are the same client: the same socket, session or
+ * in-process client. Sinks are rebuilt for every frame, so they are compared
+ * by what they point at, never by identity. A broker-internal sink never
+ * matches: the broker cancels nothing it sent.
+ */
+function sameSink(a: ResponseSink, b: ResponseSink): boolean {
+    switch (a.type) {
+        case "ws":
+            return b.type === "ws" && b.socket === a.socket;
+        case "sse":
+            return b.type === "sse" && b.sessionId === a.sessionId;
+        case "http-session":
+            return b.type === "http-session" && b.sessionId === a.sessionId;
+        case "stdio":
+            return b.type === "stdio";
+        case "internal":
+            return b.type === "internal" && b.client === a.client;
+        default:
+            return false;
+    }
+}
+
 /** The {@link ClientKey} of the stdio bridge: there is at most one per broker. */
 const STDIO_CLIENT_KEY: ClientKey = "stdio";
 
@@ -401,6 +435,13 @@ export class WsTunnel implements IBrokerContext {
      * issued, so a provider that does this on every frame warns once.
      */
     private readonly _unmatchedIdWarnedProviders = new Set<string>();
+
+    /**
+     * Broker ids of requests a client cancelled, oldest first. A provider may
+     * still answer one; that answer is expected and is dropped without the
+     * unmatched-id warning. Bounded by {@link MAX_REMEMBERED_CANCELLATIONS}.
+     */
+    private readonly _cancelledIds = new Set<string>();
 
     /**
      * Slots already warned about for opening requests of their own, so a
@@ -1544,11 +1585,16 @@ export class WsTunnel implements IBrokerContext {
                 const request = item as Record<string, unknown>;
                 if (typeof request.id === "string" || typeof request.id === "number") ensureTraceparent(request);
             }
-            return JSON.stringify(kept);
+            const relayed = kept.filter(
+                (item) => (item as { method?: unknown }).method !== CANCELLED_METHOD || this._rewriteCancellation(state, providerName, item as Record<string, unknown>, sink)
+            );
+            return relayed.length > 0 ? JSON.stringify(relayed) : "";
         }
         if (typeof parsed !== "object" || parsed === null) return frame;
         const message = parsed as Record<string, unknown>;
         stripCallerMeta(message);
+
+        if (message.method === CANCELLED_METHOD) return this._rewriteCancellation(state, providerName, message, sink) ? JSON.stringify(message) : "";
 
         // The broker's own tools that act (releasing a held limit slot) must
         // audit who acted. `_broker` is in process, so it is told directly.
@@ -3058,7 +3104,7 @@ export class WsTunnel implements IBrokerContext {
                     this._authority.releaseRef(entry.callerRef);
                     (msg as { id: unknown }).id = entry.clientId;
                     this._deliverToSink(state, entry.sink, JSON.stringify(msg));
-                } else {
+                } else if (!this._cancelledIds.delete(cancellationKey(providerName, msg.id))) {
                     this._warnUnmatchedResponseId(providerName, msg.id);
                 }
             } else if ((msg as { method?: unknown }).method === "notifications/resources/updated") {
@@ -3201,6 +3247,49 @@ export class WsTunnel implements IBrokerContext {
      *
      * Once per slot: a provider doing this does it on every frame.
      */
+    /**
+     * Rewrites a client's `notifications/cancelled` so it names the request
+     * the provider actually received, and settles that request here.
+     *
+     * The broker renumbers every request (see {@link _trackRequest}), so the
+     * client's `requestId` means nothing to the provider. It is looked up
+     * among the requests **this same client** has pending on the slot and
+     * replaced by the broker id. A cancellation that matches none of them
+     * (unknown, already answered, or naming another client's request, which
+     * the predictable broker ids would otherwise allow) is dropped: returns
+     * `false` and nothing reaches the provider.
+     *
+     * The pending entry is removed, so the client gets neither the answer nor
+     * a timeout for a request it withdrew, as the spec asks. Its caller
+     * reference is released. Execution limits treat the cancellation like a
+     * deadline (see `LimitsController.cancelled`).
+     */
+    private _rewriteCancellation(state: IProviderState, providerName: string, message: Record<string, unknown>, sink: ResponseSink): boolean {
+        const params = message.params;
+        if (typeof params !== "object" || params === null || Array.isArray(params)) return false;
+        const requestId = (params as Record<string, unknown>).requestId;
+        if (typeof requestId !== "string" && typeof requestId !== "number") return false;
+
+        for (const [brokerId, entry] of state.pending) {
+            if (entry.clientId !== requestId || !sameSink(entry.sink, sink)) continue;
+            state.pending.delete(brokerId);
+            this._authority.releaseRef(entry.callerRef);
+            this._limits?.cancelled(providerName, String(brokerId));
+            this._rememberCancelled(providerName, brokerId);
+            (params as Record<string, unknown>).requestId = brokerId;
+            return true;
+        }
+        return false;
+    }
+
+    private _rememberCancelled(providerName: string, brokerId: string | number): void {
+        this._cancelledIds.add(cancellationKey(providerName, brokerId));
+        if (this._cancelledIds.size > MAX_REMEMBERED_CANCELLATIONS) {
+            const oldest = this._cancelledIds.values().next().value;
+            if (oldest !== undefined) this._cancelledIds.delete(oldest);
+        }
+    }
+
     private _warnUnmatchedResponseId(providerName: string, id: string | number): void {
         if (this._unmatchedIdWarnedProviders.has(providerName)) return;
         this._unmatchedIdWarnedProviders.add(providerName);

@@ -25,6 +25,11 @@ interface IClientMessage {
     params?: unknown;
 }
 
+/** Key of a routed request. JSON-RPC ids are strings or numbers, and 1 and "1" differ. */
+function inflightKey(id: string | number): string {
+    return `${typeof id}:${id}`;
+}
+
 interface ICallParams {
     name?: string;
     arguments?: Record<string, unknown>;
@@ -56,6 +61,13 @@ export class AggregateServer implements IMessageTransport {
 
     private readonly _catalog = new AggregateCatalog();
     private readonly _sessions = new Map<string, ProviderClientSession>();
+
+    /**
+     * `tools/call` and `prompts/get` being routed, by the id the tunnel gave
+     * them, with the controller that withdraws the sub-provider call when the
+     * client cancels.
+     */
+    private readonly _inflight = new Map<string, AbortController>();
     private readonly _openClient: InternalClientFactory;
     private _running = false;
     /** Per-caller provider visibility filter; `null` ⇒ every caller sees all. */
@@ -322,7 +334,13 @@ export class AggregateServer implements IMessageTransport {
             return;
         }
         const id = msg.id;
-        if (id == null) return; // client notification: nothing to answer
+        if (id == null) {
+            // Client notification: nothing to answer. A cancellation arrives
+            // with the tunnel's id for the request, already checked to be one
+            // this client sent.
+            if (msg.method === "notifications/cancelled") this._cancel(msg.params);
+            return;
+        }
 
         switch (msg.method) {
             case "initialize":
@@ -382,16 +400,37 @@ export class AggregateServer implements IMessageTransport {
             return;
         }
         const args = p.arguments ?? {};
+        const key = inflightKey(id);
+        const controller = new AbortController();
+        this._inflight.set(key, controller);
         try {
-            const outcome = kind === "tool" ? await session.callTool(route.original, args, principal) : await session.getPrompt(route.original, args, principal);
+            const outcome =
+                kind === "tool"
+                    ? await session.callTool(route.original, args, principal, controller.signal)
+                    : await session.getPrompt(route.original, args, principal, controller.signal);
+            // A cancelled request gets no answer: the client has forgotten it.
+            if (controller.signal.aborted) return;
             this._reply(id, outcome.error !== undefined ? { error: outcome.error } : { result: outcome.result });
         } catch (error) {
+            if (controller.signal.aborted) return;
             // The session rejects rather than resolves on a timeout, so the caller
             // gets a named error instead of an open request that never settles.
             const message = describeError(error);
             console.error(`[broker] aggregate: routing ${kind} "${p.name ?? "(none)"}" to provider "${route.provider}" failed: ${message}`);
             this._reply(id, { error: { code: -32000, message } });
+        } finally {
+            if (this._inflight.get(key) === controller) this._inflight.delete(key);
         }
+    }
+
+    /** Withdraws a routed call the client cancelled. An unknown id is ignored. */
+    private _cancel(params: unknown): void {
+        const requestId = (params as { requestId?: unknown } | null | undefined)?.requestId;
+        if (typeof requestId !== "string" && typeof requestId !== "number") return;
+        const controller = this._inflight.get(inflightKey(requestId));
+        if (!controller) return;
+        this._inflight.delete(inflightKey(requestId));
+        controller.abort();
     }
 
     private _reply(id: string | number, body: { result?: unknown; error?: unknown }): void {
