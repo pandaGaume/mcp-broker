@@ -5,6 +5,12 @@
   A new push to the same PR cancels its obsolete CI run.
 - Releases keep their full validation and publication steps, triggered only by
   the matching package's tag series.
+- `release-node` ends with a job of its own, `mcp-registry`: it checks that
+  `node/packages/broker/server.json` carries the tag's version, verifies the
+  pinned `mcp-publisher` with cosign, logs in with GitHub OIDC (namespace
+  `io.github.pandaGaume`) and publishes, retrying while npm catches up. The
+  registry reads `mcpName` in the published `package.json`, so the first
+  listing is the first release that ships it. Re-run that job alone if it fails.
 - `ci-c` selects checks from the changed files: broker runtime changes run the
   C/Node roundtrip, host code runs native checks, shared `libmcpb` code runs all
   checks, and ESP-IDF changes run the firmware build. Manual runs check all targets.

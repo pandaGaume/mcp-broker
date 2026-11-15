@@ -9,6 +9,10 @@
 // Descriptions are only checked: docs/positioning.md holds the canonical text,
 // and a surface that says something else is a mistake for a human to fix.
 //
+// The MCP registry entry (node/packages/broker/server.json) is one of the
+// surfaces: its versions are written, its description, name and package are
+// checked against docs/positioning.md and the broker's package.json.
+//
 // Run by the broker's `version` lifecycle script and by bump-broker-minor.mjs,
 // so a release commit carries the new version everywhere, and by ci-docs.yml.
 
@@ -55,6 +59,18 @@ const versionRules = [
         file: "node/packages/broker/mcpb/manifest.json",
         what: "bundle version",
         pattern: /^(    "version": ")([^"]*)(")/m,
+        value: brokerVersion,
+    },
+    {
+        file: "node/packages/broker/server.json",
+        what: "MCP registry server version",
+        pattern: /^(    "version": ")([^"]*)(")/m,
+        value: brokerVersion,
+    },
+    {
+        file: "node/packages/broker/server.json",
+        what: "MCP registry npm package version",
+        pattern: /^(            "version": ")([^"]*)(")/m,
         value: brokerVersion,
     },
     {
@@ -124,6 +140,16 @@ expectEqual(
     JSON.parse(read("node/packages/broker/mcpb/manifest.json")).description,
     SHORT,
 );
+
+const brokerPackage = JSON.parse(read("node/packages/broker/package.json"));
+const serverJson = JSON.parse(read("node/packages/broker/server.json"));
+expectEqual("node/packages/broker/server.json", "description (short text)", serverJson.description, SHORT);
+if (serverJson.name !== brokerPackage.mcpName) {
+    problems.push(`node/packages/broker/server.json: name "${serverJson.name}" differs from mcpName "${brokerPackage.mcpName}" in package.json; the MCP registry refuses the publish`);
+}
+if (serverJson.packages?.[0]?.identifier !== brokerPackage.name) {
+    problems.push(`node/packages/broker/server.json: packages[0].identifier is not "${brokerPackage.name}"`);
+}
 
 const readmeLead = /^# mcp-broker\s*\n\s*\n([^\n]+)/m.exec(read("README.md"))?.[1];
 if (readmeLead === undefined) problems.push("README.md: no paragraph after the title");

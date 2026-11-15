@@ -28,6 +28,7 @@ on:
             - "node/scripts/build-site.mjs"
             - "node/packages/broker/package.json"
             - "node/packages/broker/mcpb/manifest.json"
+            - "node/packages/broker/server.json"
             - "c/libmcpb/include/mcpb/mcpb.h"
             - "node/scripts/sync-versions.mjs"
             - ".github/workflows/ci-docs.yml"

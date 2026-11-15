@@ -189,6 +189,12 @@ repository; the changes it needed for this release are listed under
   `llms-full.txt`, `sitemap.xml` and `robots.txt`; the homepage gains a
   canonical URL, JSON-LD and links for agents. `npm run docs:sync` and
   `npm run docs:check` from `node/`.
+- **broker** Listed in the official MCP registry as
+  `io.github.pandaGaume/mcp-broker` (title "CyanMycelium MCP Broker"), from
+  `node/packages/broker/server.json`: the npm package over stdio, bridged to
+  `_all`. `package.json` gains `mcpName`; `release-node` publishes with GitHub
+  OIDC after npm; `sync-versions.mjs` keeps the entry's versions, description,
+  name and package in step with the package.
 
 ### Coordinated releases
 

@@ -34,6 +34,7 @@ And one property that serves all three: the broker documents and diagnoses itsel
 |---|---|---|
 | `node/packages/broker/package.json` `description` | long | yes |
 | `node/packages/broker/mcpb/manifest.json` `description` | short | yes |
+| `node/packages/broker/server.json` `description` (MCP registry) | short | yes |
 | `README.md`, first sentence after the title | long | yes |
 | `docs/index.html` `<meta name="description">`, `.hero-sub` and JSON-LD `description` | long | yes |
 | GitHub repository description | short | no, set by hand in the repository settings |

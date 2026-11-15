@@ -11,6 +11,7 @@
         "directory": "node/packages/broker"
     },
     "homepage": "https://pandagaume.github.io/mcp-broker/",
+    "mcpName": "io.github.pandaGaume/mcp-broker",
     "bugs": {
         "url": "https://github.com/pandaGaume/mcp-broker/issues"
     },
@@ -73,7 +74,7 @@
         "format:fix": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
         "gen-cert": "node scripts/gen-cert.mjs",
         "prepublishOnly": "npm run lint && npm run build && npm test",
-        "version": "node ../../scripts/sync-versions.mjs --write && git add mcpb/manifest.json ../../../README.md ../../../docs"
+        "version": "node ../../scripts/sync-versions.mjs --write && git add mcpb/manifest.json server.json ../../../README.md ../../../docs"
     },
     "dependencies": {
         "@cyanmycelium/mcp-core": "^1.4.1",

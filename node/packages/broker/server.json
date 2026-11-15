@@ -1,0 +1,50 @@
+{
+    "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    "name": "io.github.pandaGaume/mcp-broker",
+    "title": "CyanMycelium MCP Broker",
+    "description": "One host and one port for many MCP servers: browsers, devices, simulators and stdio tools.",
+    "version": "1.11.0",
+    "websiteUrl": "https://pandagaume.github.io/mcp-broker/",
+    "repository": {
+        "url": "https://github.com/pandaGaume/mcp-broker",
+        "source": "github",
+        "id": "1243384154",
+        "subfolder": "node/packages/broker"
+    },
+    "icons": [
+        {
+            "src": "https://pandagaume.github.io/mcp-broker/assets/logo.png",
+            "mimeType": "image/png"
+        }
+    ],
+    "packages": [
+        {
+            "registryType": "npm",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "identifier": "@cyanmycelium/mcp-broker",
+            "version": "1.11.0",
+            "runtimeHint": "npx",
+            "transport": {
+                "type": "stdio"
+            },
+            "environmentVariables": [
+                {
+                    "name": "MCP_BROKER_STDIO_PROVIDER",
+                    "description": "Slot bridged to stdio. Keep _all: it exists before any provider connects and aggregates every opted-in provider.",
+                    "value": "_all"
+                },
+                {
+                    "name": "MCP_BROKER_PORT",
+                    "description": "TCP port for provider tunnels (ws://<host>:<port>/provider/<slot>) and client transports (/<slot>/mcp). One broker per port.",
+                    "format": "number",
+                    "default": "3000"
+                },
+                {
+                    "name": "MCP_BROKER_HOST",
+                    "description": "Interface to bind. 127.0.0.1 keeps the broker private to this machine; 0.0.0.0 exposes it on the network.",
+                    "default": "127.0.0.1"
+                }
+            ]
+        }
+    ]
+}
