@@ -101,6 +101,13 @@ export interface IAuthorizationPolicyConfig {
     readonly slotResources?: Readonly<Record<string, string>>;
     readonly toolCapabilities?: Readonly<Record<string, string>>;
     readonly providerToolCapabilities?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+    /**
+     * Capabilities for request methods the broker does not classify itself
+     * (a provider's own method, an MCP extension it does not know yet).
+     * Without an entry, such a request needs `mcp.unclassified-method` and is
+     * refused unless that is granted. Built-in methods cannot be reclassified.
+     */
+    readonly methodCapabilities?: Readonly<Record<string, string>>;
     readonly audit?: IAuthorizationAuditConfig;
 }
 

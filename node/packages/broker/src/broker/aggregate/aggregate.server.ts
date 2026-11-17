@@ -266,7 +266,7 @@ export class AggregateServer implements IMessageTransport {
         let capability: string | undefined;
         let tool: string | undefined;
         try {
-            const classified = authorization.capabilityClassifier.classify(operation, resource, provider);
+            const classified = authorization.capabilityResolver.resolve(operation, resource, provider);
             if (!classified) return true;
             capability = classified.capability;
             tool = classified.tool;

@@ -648,6 +648,7 @@ async function main(): Promise<void> {
             slotResources: authConfig?.slotResources,
             toolCapabilities: authConfig?.toolCapabilities,
             providerToolCapabilities: authConfig?.providerToolCapabilities,
+            methodCapabilities: authConfig?.methodCapabilities,
             audit: authConfig?.audit,
         });
     }
@@ -679,6 +680,7 @@ async function main(): Promise<void> {
             slotResources: authConfig?.slotResources,
             toolCapabilities: authConfig?.toolCapabilities,
             providerToolCapabilities: authConfig?.providerToolCapabilities,
+            methodCapabilities: authConfig?.methodCapabilities,
             audit: authConfig?.audit,
         });
     }

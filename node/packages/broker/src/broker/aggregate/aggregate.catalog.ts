@@ -41,6 +41,30 @@ const SEPARATOR = "-";
 /** Anthropic API tool-name limit; aggregated tool names must fit inside it. */
 const MAX_TOOL_NAME_LENGTH = 64;
 
+/**
+ * A provider's tool as `_all` can carry it, under MCP Apps
+ * (`io.modelcontextprotocol/ui`): `undefined` for an app-only tool
+ * (`_meta.ui.visibility` without `"model"`), which only an app may call and
+ * which a host must keep out of the model's list; otherwise the tool without
+ * `_meta.ui`. `_all` serves no resources, so the `ui://` resource the tool
+ * points at could never be read through it: a host given the link would show
+ * a broken view. The tool keeps its full UI on its own slot.
+ */
+export function withoutAppUi(tool: ICatalogTool): ICatalogTool | undefined {
+    const meta = tool["_meta"];
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return tool;
+    const ui = (meta as Record<string, unknown>)["ui"];
+    if (ui === undefined) return tool;
+    const visibility = typeof ui === "object" && ui !== null ? (ui as Record<string, unknown>)["visibility"] : undefined;
+    if (Array.isArray(visibility) && !visibility.includes("model")) return undefined;
+    const rest = { ...(meta as Record<string, unknown>) };
+    delete rest["ui"];
+    const copy: ICatalogTool = { ...tool };
+    if (Object.keys(rest).length > 0) copy["_meta"] = rest;
+    else delete copy["_meta"];
+    return copy;
+}
+
 export class AggregateCatalog {
     private readonly _providers = new Map<string, IProviderEntry>();
     private _tools: ICatalogTool[] = [];
@@ -107,7 +131,9 @@ export class AggregateCatalog {
         const promptRoutes = new Map<string, IRoute>();
 
         for (const [provider, entry] of this._providers) {
-            for (const tool of entry.tools) {
+            for (const original of entry.tools) {
+                const tool = withoutAppUi(original);
+                if (!tool) continue;
                 const name = unique(capToolName(prefixed(provider, tool.name)), toolRoutes);
                 toolRoutes.set(name, { provider, original: tool.name });
                 tools.push({ ...tool, name, description: tag(provider, tool.description) });

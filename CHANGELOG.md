@@ -169,8 +169,26 @@ repository; the changes it needed for this release are listed under
   `DirectTransport` and `MultiplexTransport`, `callerReferenceOf()`,
   `BrokerRequestError`, and `brokerRequestTimeoutMs` (off by default).
 
+- **broker** MCP Apps (`io.modelcontextprotocol/ui`) through `_all`: tools lose
+  `_meta.ui`, and app-only tools (`visibility` without `"model"`) are left
+  out. `_all` serves no resources, so the `ui://` view a tool points at could
+  never be read through it. A tool keeps its full UI on its own slot.
+- **broker** Machine clients, as the MCP extension
+  `io.modelcontextprotocol/oauth-client-credentials` describes them, are
+  documented and tested: a `client_credentials` token is validated like any
+  other and authorized through its `client:<client_id>` subject
+  (`subjectMapping.clientClaim` for servers that use `azp`). No code change was
+  needed.
+
 ### Fixed
 
+- **broker** The MCP Skills extension methods (`io.modelcontextprotocol/skills`)
+  are authorized. `skills/list`, `skills/get` and `resources/directory/read`
+  were unclassified, and an unclassified method is never refused, so a
+  provider implementing the extension let any caller enumerate its skills and
+  list its directories with authorization on. They now need
+  `mcp.resources.read` like the file reads they lead to, and
+  `broker.providers.read` on `_broker`.
 - **broker** A budget reservation on a resource with declared engineering
   limits is accepted: an `allow-with-constraints` decision reserves like an
   `allow`, and the grant carries `effect` and `obligations.constraints` for the
@@ -208,6 +226,24 @@ repository; the changes it needed for this release are listed under
   unknown id is still dropped and logged once per slot.
 
 ### Changed
+
+- **broker** **Breaking for deployments with authorization on:** an unknown
+  request method is refused by default. A request the broker does not classify
+  (a provider's own method, an MCP extension such as `tasks/get`) used to need
+  no capability at all, so every new method was open until someone added it to
+  the table. It now needs `mcp.unclassified-method`, which nothing grants
+  unless the operator writes it. Classify such a method with
+  `auth.methodCapabilities` (`{ "acme/calibrate": "acme.calibrate" }`);
+  built-in methods cannot be reclassified. `initialize`, `server/discover`
+  (the probe hosts on protocol 2026-07-28 send first), `ping`,
+  `resources/unsubscribe`, responses and unknown notifications stay free.
+  `logging/setLevel`, unclassified until now, needs `mcp.logging.configure`.
+- **broker** The capability classifier is now the `RequiredCapabilityResolver`
+  (`resolve()` instead of `classify()`, `IRequiredCapabilityResolver`,
+  `IRequiredCapability`), and `IPolicyAuthorization.capabilityClassifier` is
+  `capabilityResolver`. `ConfiguredCapabilityClassifier`,
+  `ICapabilityClassifier` and `authorizationWithEngine({ capabilityClassifier })`
+  still work, deprecated, until the next major version.
 
 - **provider** `IBudgetReservation` gains `effect` and `obligations`.
 - **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.1`. The

@@ -1707,7 +1707,7 @@ export class WsTunnel implements IBrokerContext {
             try {
                 const resource = this._slotResourceResolver.resolve(providerName);
                 const provider = this._providerPrincipalOfSlot(providerName, state);
-                const capability = resource ? (this._authorization?.capabilityClassifier.classify(message, resource, providerName)?.capability ?? "mcp.tools.call") : undefined;
+                const capability = resource ? (this._authorization?.capabilityResolver.resolve(message, resource, providerName)?.capability ?? "mcp.tools.call") : undefined;
                 if (!resource || !capability || !this._clientMayReach(providerName, principal) || !this._authorizeMcpFrame(providerName, JSON.stringify(message), principal))
                     failure = { reason: "authorization-denied" };
                 else {
@@ -1949,7 +1949,7 @@ export class WsTunnel implements IBrokerContext {
             // classifier.
             let capability: string | undefined;
             try {
-                const classified = authorization.capabilityClassifier.classify(operation, resource, providerName);
+                const classified = authorization.capabilityResolver.resolve(operation, resource, providerName);
                 if (!classified) continue;
                 capability = classified.capability;
                 const decision = authorization.engine.authorize({

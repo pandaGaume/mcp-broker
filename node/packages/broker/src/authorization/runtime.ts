@@ -1,4 +1,4 @@
-import { ConfiguredCapabilityClassifier, type ICapabilityClassifier } from "./capability.classifier";
+import { RequiredCapabilityResolver, resolverFromClassifier, type ICapabilityClassifier, type IRequiredCapabilityResolver } from "./required.capability";
 import { ConfigPolicyEngine } from "./policy.engine";
 import type { IAuthorizationAuditConfig, IAuthorizationPolicyConfig, IPolicyEngine } from "./policy.types";
 import { DefaultSlotResourceResolver, type ISlotResourceResolver } from "./slot.resource";
@@ -8,7 +8,8 @@ export interface IPolicyAuthorization {
     readonly engine: IPolicyEngine;
     readonly subjectMapper: ISubjectMapper;
     readonly slotResourceResolver: ISlotResourceResolver;
-    readonly capabilityClassifier: ICapabilityClassifier;
+    /** Which capability each MCP operation requires. */
+    readonly capabilityResolver: IRequiredCapabilityResolver;
     readonly audit: Readonly<Required<IAuthorizationAuditConfig>>;
     /**
      * Every capability the policy's roles and denies name. `broker_diagnose`
@@ -29,12 +30,12 @@ export function compileAuthorizationPolicy(config: IAuthorizationPolicyConfig): 
     const engine = new ConfigPolicyEngine(config.roles ?? {}, config.assignments ?? [], config.denies ?? []);
     const subjectMapper = new JwtSubjectMapper(config.subjectMapping);
     const slotResourceResolver = new DefaultSlotResourceResolver(config.slotResources);
-    const capabilityClassifier = new ConfiguredCapabilityClassifier(config.toolCapabilities, config.providerToolCapabilities);
+    const capabilityResolver = new RequiredCapabilityResolver(config.toolCapabilities, config.providerToolCapabilities, config.methodCapabilities);
     return {
         engine,
         subjectMapper,
         slotResourceResolver,
-        capabilityClassifier,
+        capabilityResolver,
         audit: Object.freeze({ logAllowed: config.audit?.logAllowed ?? false }),
         capabilities: Object.freeze(
             new Set([...Object.values(config.roles ?? {}).flatMap((role) => role.capabilities ?? []), ...(config.denies ?? []).flatMap((deny) => deny.capabilities ?? [])])
@@ -47,6 +48,8 @@ export function authorizationWithEngine(
     overrides: {
         readonly subjectMapper?: ISubjectMapper;
         readonly slotResourceResolver?: ISlotResourceResolver;
+        readonly capabilityResolver?: IRequiredCapabilityResolver;
+        /** @deprecated Use `capabilityResolver`. */
         readonly capabilityClassifier?: ICapabilityClassifier;
         readonly audit?: IAuthorizationAuditConfig;
     } = {}
@@ -55,7 +58,8 @@ export function authorizationWithEngine(
         engine,
         subjectMapper: overrides.subjectMapper ?? new JwtSubjectMapper(),
         slotResourceResolver: overrides.slotResourceResolver ?? new DefaultSlotResourceResolver(),
-        capabilityClassifier: overrides.capabilityClassifier ?? new ConfiguredCapabilityClassifier(),
+        capabilityResolver:
+            overrides.capabilityResolver ?? (overrides.capabilityClassifier ? resolverFromClassifier(overrides.capabilityClassifier) : new RequiredCapabilityResolver()),
         audit: Object.freeze({ logAllowed: overrides.audit?.logAllowed ?? false }),
     };
 }

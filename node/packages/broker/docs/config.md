@@ -751,6 +751,7 @@ compatibility, is in
 | `auth.slotResources` | `Record<string,string>` | (file-only) | Maps technical slot names to stable resource paths |
 | `auth.toolCapabilities` | `Record<string,string>` | (file-only) | Global tool to functional capability mapping |
 | `auth.providerToolCapabilities` | `Record<path,Record<tool,capability>>` | (file-only) | Resource-qualified tool mapping |
+| `auth.methodCapabilities` | `Record<method,capability>` | (file-only) | Capability for a request method the broker does not classify itself. Without an entry such a request needs `mcp.unclassified-method` and is refused unless granted. Built-in methods cannot be reclassified |
 | `auth.audit.logAllowed` | `boolean` | (file-only) | Logs allowed decisions when true. Default false |
 | `auth.dev` | `object` | (security file only) | Development tokens instead of OAuth, from loopback and the networks named (`"lan"`). See [`auth.dev`](#authdev-development-tokens-no-authorization-server) |
 

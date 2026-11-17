@@ -1,4 +1,4 @@
-import { validateCapability } from "./capability.classifier";
+import { validateCapability } from "./required.capability";
 import type { IAuthorizationDecision, IAuthorizationRequest, IDenyPolicy, IPolicyAssignment, IPolicyEngine, IRoleDefinition } from "./policy.types";
 import { ResourcePathPattern } from "./resource.path";
 
