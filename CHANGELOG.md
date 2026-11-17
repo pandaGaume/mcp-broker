@@ -210,6 +210,7 @@ repository; the changes it needed for this release are listed under
 Broker 1.14.0: connection by slot is the primary path, `_all` is frozen, unknown
 request methods are refused by default, and the broker runs on mcp-core 1.6.0.
 The provider is unchanged (0.5.0).
+It also carries the 1.13.0 changes below, which were never published on their own.
 
 ### Added
 
@@ -280,6 +281,9 @@ The provider is unchanged (0.5.0).
 ## [1.13.0] - 2026-11-15
 
 Broker 1.13.0 and provider 0.5.0: UNS domains (E7, E8 of the mcp-scada broker evolution brief).
+
+The broker 1.13.0 was never published to npm: its changes first ship in 1.14.0.
+The provider 0.5.0 was published.
 
 ### Added
 
