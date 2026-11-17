@@ -122,3 +122,21 @@ describe("the 2026-07-28 probe", () => {
         expect((await askOverWebSocket("plant", probe)).error?.code).toBe(-32601);
     });
 });
+
+describe("dual-era clients through the broker", () => {
+    it('a protocol "auto" client (mcp-core 1.6) falls back to initialize, over Streamable HTTP and on an empty slot', async () => {
+        broker = await startTestBroker({ callers: { host: {} } });
+        const client = new McpClient({ name: "host", version: "1" }, new StreamableHttpTransport(broker.mcpUrl("plant"), { headers: broker.bearer("host") }), 5_000, {
+            protocol: "auto",
+        });
+        const opened = await client.connect();
+        expect(client.isStateless).toBe(false);
+        expect(opened.protocolVersion).toBe("2025-11-25");
+        expect(await client.listTools()).toEqual([]);
+
+        await attachProvider("plant");
+        await settle(200);
+        expect((await client.listTools()).map((tool) => tool.name)).toEqual(["open_valve"]);
+        client.disconnect();
+    });
+});

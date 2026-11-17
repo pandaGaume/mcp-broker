@@ -2517,6 +2517,12 @@ export class WsTunnel implements IBrokerContext {
 
         state.httpEndpoint = new StreamableHttpEndpoint({
             allowedOrigins: this._allowedOrigins,
+            // The relay below assumes a session opened by initialize, which it
+            // replays to the provider. Until the broker relays stateless
+            // requests (protocol 2026-07-28), a session-less POST is refused
+            // like before mcp-core 1.6.0, and a dual-era client falls back to
+            // initialize.
+            statelessProtocolVersions: [],
 
             createServer: (transport, sessionId, _principal) => {
                 const session: IHttpSession = { transport, principal: null };
