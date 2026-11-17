@@ -71,7 +71,7 @@ the reserved `_all` slot.
 ```
 
 The example pins the bridge to `_all`, which unions every opted-in provider.
-Pinning it to one provider's slot works as well (unreleased): a slot with no
+Pinning it to one provider's slot works as well (1.14.0): a slot with no
 provider answers the handshake itself and pushes
 `notifications/tools/list_changed` when the provider attaches, so a browser page
 opened later shows up live. `_all` is frozen (tools and prompts only). Providers

@@ -795,7 +795,7 @@ services:
 ## Claude Desktop integration
 
 The broker can act as a stdio MCP server for Claude Desktop and any other stdio
-MCP host. **Point the bridge at your provider's slot** (unreleased; up to 1.13, at `_all`):
+MCP host. **Point the bridge at your provider's slot** (1.14.0; up to 1.13, at `_all`):
 
 ```json
 {

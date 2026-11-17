@@ -81,7 +81,7 @@ A slot holds one provider socket. A reload whose predecessor's socket is still O
 
 ### 5. The stdio bridge targets a slot that exists before its provider
 
-`MCP_BROKER_STDIO_PROVIDER=<your slot>` or `_all`. A slot with no provider answers `initialize` itself (unreleased) and pushes `notifications/tools/list_changed` when the provider attaches, so the host does not fail when it starts first, which for a browser-hosted provider is every time. Up to broker 1.13 a real slot refused the handshake and only `_all` worked; these samples keep `_all`, which unions every opted-in provider.
+`MCP_BROKER_STDIO_PROVIDER=<your slot>` or `_all`. A slot with no provider answers `initialize` itself (1.14.0) and pushes `notifications/tools/list_changed` when the provider attaches, so the host does not fail when it starts first, which for a browser-hosted provider is every time. Up to broker 1.13 a real slot refused the handshake and only `_all` worked; these samples keep `_all`, which unions every opted-in provider.
 
 ### 6. Never rebuild an aggregated tool name
 

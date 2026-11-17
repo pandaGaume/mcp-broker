@@ -699,7 +699,7 @@ Desktop: stdin carries the host's JSON-RPC, stdout carries the replies, and all
 logging is redirected to stderr so it cannot corrupt the channel. The broker
 keeps listening on its port at the same time, so providers can still tunnel in.
 
-**Set it to your provider's slot** (unreleased). The host sends `initialize` the
+**Set it to your provider's slot** (1.14.0). The host sends `initialize` the
 instant it launches and treats a failure as a dead server, while your provider
 does not exist yet. A slot with no provider answers `initialize` itself, lists
 nothing, and when the provider attaches the broker handshakes it and sends
