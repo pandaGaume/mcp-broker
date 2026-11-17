@@ -246,6 +246,13 @@ repository; the changes it needed for this release are listed under
 
 ### Coordinated releases
 
+- `@cyanmycelium/mcp-core` 1.6.0 (extensions, protocol 2026-07-28 beside the
+  handshake revisions, MCP Apps, Events): the broker and the provider depend on
+  `^1.6.0`. The broker's Streamable HTTP endpoint passes
+  `statelessProtocolVersions: []`: its relay assumes a session opened by
+  `initialize`, so a session-less 2026-07-28 POST is refused as before, and a
+  dual-era client (mcp-core `protocol: "auto"`, Claude Code) falls back to
+  `initialize`, until the broker relays stateless requests.
 - `@cyanmycelium/mcp-core` 1.4.0: every runtime operation of an adapter or a
   behavior (`readResourceAsync`, `executeToolAsync`, `getPromptAsync`,
   `completeAsync`) receives the request it serves as an optional last
