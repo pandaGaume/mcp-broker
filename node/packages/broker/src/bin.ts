@@ -388,16 +388,14 @@ const envWwwDir = process.env["MCP_BROKER_WWW_DIR"] ? path.resolve(cwd, process.
 const envBundleDir = process.env["MCP_BROKER_BUNDLE_DIR"] ? path.resolve(cwd, process.env["MCP_BROKER_BUNDLE_DIR"]) : null;
 
 /**
- * Warns when the stdio bridge is pinned to a slot this broker does not host.
+ * Tells the operator when the stdio bridge is pinned to a slot this broker
+ * does not host itself.
  *
- * The bridge gates every frame, `initialize` included, on the slot being
- * occupied, so an MCP host that starts before the slot is claimed fails the
- * handshake and gives up: with a browser-hosted provider, which cannot be
- * connected before the host launches, this fails every single time. Naming the
- * slots the broker does have turns that into a one-line fix.
- *
- * Deliberately a warning, not an exit: a WebSocket provider may legitimately
- * claim the slot later, and a broker that refuses to start would be worse.
+ * That is normal for a WebSocket provider, which claims the slot later: the
+ * slot answers `initialize` and empty lists until then, and announces
+ * `list_changed` when the provider attaches. The note exists for the other
+ * cause, a slot name that does not match the one the provider registers,
+ * which leaves the host with an empty tool list forever.
  */
 function warnIfStdioTargetUnknown(target: string): void {
     const known = new Set<string>([
@@ -411,12 +409,10 @@ function warnIfStdioTargetUnknown(target: string): void {
 
     const hosted = [...known].filter((name) => name !== BROKER_AGGREGATE_NAME && name !== BROKER_PROVIDER_NAME);
     console.warn(
-        `[mcp-broker] MCP_BROKER_STDIO_PROVIDER="${target}" names a slot this broker does not host. ` +
-            `Nothing answers on it until a WebSocket provider connects to ${providerPath}/${target} (or announces "${target}" on ${providersPath}), ` +
-            `and until then every request from the MCP host, including the initial handshake, fails with 'Provider "${target}" not connected'. ` +
-            `An MCP host that starts before that provider is up, which is always the case for a provider hosted in a browser page, will therefore never connect. ` +
-            `Prefer MCP_BROKER_STDIO_PROVIDER="${BROKER_AGGREGATE_NAME}": it exists from startup, answers the handshake itself, unions every opted-in provider, ` +
-            `and pushes notifications/tools/list_changed as providers join, so a page opened later appears live. ` +
+        `[mcp-broker] MCP_BROKER_STDIO_PROVIDER="${target}" names a slot this broker does not host itself. ` +
+            `The MCP host connects anyway: the slot answers initialize and empty lists until a WebSocket provider connects to ${providerPath}/${target} ` +
+            `(or announces "${target}" on ${providersPath}), then the broker sends notifications/tools/list_changed and the tools appear. ` +
+            `If they never do, check that the provider registers exactly "${target}". ` +
             `Slots this broker hosts right now: ${hosted.length > 0 ? hosted.map((n) => `"${n}"`).join(", ") + `, plus the reserved "${BROKER_AGGREGATE_NAME}" and "${BROKER_PROVIDER_NAME}"` : `the reserved "${BROKER_AGGREGATE_NAME}" and "${BROKER_PROVIDER_NAME}" only`}.`
     );
 }

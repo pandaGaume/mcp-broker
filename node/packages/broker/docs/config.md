@@ -282,7 +282,7 @@ it here would look functional and do nothing.
 | `protocol` | `"http" \| "https"` | auto | `MCP_BROKER_PROTOCOL` | `auto` enables TLS when `tls.cert` + `tls.key` are set |
 | `locale` | `string` | `en` | `MCP_BROKER_LOCALE` | BCP-47 tag (`fr`, `fr-CA`, `zh-CN`, ...) |
 | `brokerName` | `string` | package name | (none) | Logical name in `broker_info` output. **Library-only**, see below |
-| `stdioProvider` | `string` | (unset) | `MCP_BROKER_STDIO_PROVIDER` | Bridge stdin/stdout to this slot. Use `_all`, see below |
+| `stdioProvider` | `string` | (unset) | `MCP_BROKER_STDIO_PROVIDER` | Bridge stdin/stdout to this slot: your provider's slot, or `_all`, see below |
 | `allowedOrigins` | `string[]` or `{ pattern, flags? }` | (unset) | `MCP_BROKER_ALLOWED_ORIGINS` | Browser origins allowed on the HTTP client endpoints, see below |
 | `providerHeartbeatIntervalMs` | `number` | `30000` | `MCP_BROKER_PROVIDER_HEARTBEAT_MS` | ws-level ping interval on provider sockets. `0` disables |
 | `providerRequestTimeoutMs` | `number` | `60000` | `MCP_BROKER_PROVIDER_REQUEST_TIMEOUT_MS` | Deadline for one provider request. `0` disables |
@@ -699,19 +699,19 @@ Desktop: stdin carries the host's JSON-RPC, stdout carries the replies, and all
 logging is redirected to stderr so it cannot corrupt the channel. The broker
 keeps listening on its port at the same time, so providers can still tunnel in.
 
-**Set it to `_all`.** Pinning a real slot is an ordering failure that happens
-every time: the host sends `initialize` the instant it launches, treats a
-failure as a dead server with no retry, and your provider does not exist yet, so
-the bridge answers `-32000 Provider "<slot>" not connected` and the host gives
-up for the session. `_all` is registered before the broker resumes stdin,
-answers `initialize` itself, already aggregates `_broker`, and pushes
-`notifications/tools/list_changed` when a provider joins later. `_broker` is the
-fallback if you want introspection only.
+**Set it to your provider's slot** (unreleased). The host sends `initialize` the
+instant it launches and treats a failure as a dead server, while your provider
+does not exist yet. A slot with no provider answers `initialize` itself, lists
+nothing, and when the provider attaches the broker handshakes it and sends
+`notifications/tools/list_changed`, so the tools appear live. Up to broker 1.12
+such a slot refused `initialize` and the bridge had to target `_all`, which
+still works (`_all` is frozen: tools and prompts only). `_broker` gives
+introspection only.
 
-The broker warns at startup when `stdioProvider` names a slot it does not host,
-listing the slots it does.
+The broker notes at startup when `stdioProvider` names a slot it does not host
+itself, listing the slots it does: a mistyped name leaves the host empty.
 
-The bridge reaches `_all` with **no principal attached**. That is invisible
+The bridge reaches its slot with **no principal attached**. That is invisible
 until you enable authorization, at which point the host's tool list silently
 empties.
 
@@ -773,7 +773,7 @@ Two limits worth knowing before you set it:
   HTTP 401, which surfaces in the page as a bare `error` event with no status.
   Run without a provider secret, or terminate provider auth in a reverse proxy
   that injects the header.
-- **The stdio bridge is anonymous.** `stdioProvider` forwards to `_all` with no
+- **The stdio bridge is anonymous.** `stdioProvider` forwards to its slot with no
   principal attached, so enabling per-provider scopes or any policy that denies
   an anonymous subject silently empties an MCP host's tool list: `tools/list`
   still succeeds and returns `tools: []`.

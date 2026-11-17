@@ -71,13 +71,12 @@ describe("resource-server auth over HTTP", () => {
         expect(res.headers.get("www-authenticate") ?? "").toContain('scope="mcp:call"');
     });
 
-    it("passes a valid token through to the handler (provider-not-connected proves the gate opened)", async () => {
+    it("passes a valid token through to the handler (the empty slot's own answer proves the gate opened)", async () => {
         const base = await start(true);
         const res = await mcpCall(base, "weather", RPC, { authorization: "Bearer good" });
         expect(res.status).toBe(200);
-        const body = (await res.json()) as JsonRpcBody;
-        expect(body.error?.code).toBe(-32000);
-        expect(String(body.error?.message)).toContain("not connected");
+        const body = (await res.json()) as JsonRpcBody & { result?: { tools?: unknown[] } };
+        expect(body.result?.tools).toEqual([]);
     });
 
     it("does not require auth for the CORS preflight", async () => {
@@ -94,7 +93,7 @@ describe("resource-server auth over HTTP", () => {
         // MCP POST reaches the handler with no token.
         const res = await mcpCall(base, "weather", RPC);
         expect(res.status).toBe(200);
-        const body = (await res.json()) as JsonRpcBody;
-        expect(body.error?.code).toBe(-32000);
+        const body = (await res.json()) as JsonRpcBody & { result?: { tools?: unknown[] } };
+        expect(body.result?.tools).toEqual([]);
     });
 });

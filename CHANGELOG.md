@@ -227,6 +227,18 @@ repository; the changes it needed for this release are listed under
 
 ### Changed
 
+- **broker** Connection by slot is the primary path, and `_all` is frozen. A
+  slot with no provider now answers `initialize` itself (the client's
+  revision, `listChanged` capabilities, the slot's name as the server's), lists
+  nothing, answers `ping`; when the provider attaches, the broker handshakes it
+  with the last client `initialize` and sends `tools`, `prompts` and
+  `resources` `list_changed` to the slot's clients. A stdio host pinned to a real
+  slot therefore no longer fails at startup; `MCP_BROKER_STDIO_PROVIDER=_all` is
+  no longer required. Calls still fail until the provider is there. `_all` keeps
+  tools and prompts and takes no MCP extension.
+- **broker** `server/discover`, the probe of protocol 2026-07-28 hosts (Claude
+  Code 2.1.292 and later), is answered `-32601` on every slot, so they fall back
+  to `initialize` until the broker relays stateless requests.
 - **broker** **Breaking for deployments with authorization on:** an unknown
   request method is refused by default. A request the broker does not classify
   (a provider's own method, an MCP extension such as `tasks/get`) used to need
