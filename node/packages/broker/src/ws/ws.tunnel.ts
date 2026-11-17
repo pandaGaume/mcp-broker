@@ -9,7 +9,7 @@ import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
-import { createEventEmitter } from "@cyanmycelium/mcp-core";
+import { createEventEmitter, negotiateProtocolVersion } from "@cyanmycelium/mcp-core";
 import type { IEventEmitter, IEventSource, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioTransport, StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
 // The broker is itself a provider: it publishes its own `_broker` and `_all`
@@ -164,6 +164,14 @@ function sameSink(a: ResponseSink, b: ResponseSink): boolean {
 
 /** The {@link ClientKey} of the stdio bridge: there is at most one per broker. */
 const STDIO_CLIENT_KEY: ClientKey = "stdio";
+
+/** What the broker answers for a list method on a slot with no provider. */
+const EMPTY_LISTS: Readonly<Record<string, Record<string, unknown[]>>> = Object.freeze({
+    "tools/list": { tools: [] },
+    "prompts/list": { prompts: [] },
+    "resources/list": { resources: [] },
+    "resources/templates/list": { resourceTemplates: [] },
+});
 
 /** Default heartbeat period, in ms, for `providerHeartbeatIntervalMs`. */
 const DEFAULT_PROVIDER_HEARTBEAT_MS = 30_000;
@@ -1707,7 +1715,7 @@ export class WsTunnel implements IBrokerContext {
             try {
                 const resource = this._slotResourceResolver.resolve(providerName);
                 const provider = this._providerPrincipalOfSlot(providerName, state);
-                const capability = resource ? (this._authorization?.capabilityClassifier.classify(message, resource, providerName)?.capability ?? "mcp.tools.call") : undefined;
+                const capability = resource ? (this._authorization?.capabilityResolver.resolve(message, resource, providerName)?.capability ?? "mcp.tools.call") : undefined;
                 if (!resource || !capability || !this._clientMayReach(providerName, principal) || !this._authorizeMcpFrame(providerName, JSON.stringify(message), principal))
                     failure = { reason: "authorization-denied" };
                 else {
@@ -1949,7 +1957,7 @@ export class WsTunnel implements IBrokerContext {
             // classifier.
             let capability: string | undefined;
             try {
-                const classified = authorization.capabilityClassifier.classify(operation, resource, providerName);
+                const classified = authorization.capabilityResolver.resolve(operation, resource, providerName);
                 if (!classified) continue;
                 capability = classified.capability;
                 const decision = authorization.engine.authorize({
@@ -3088,9 +3096,8 @@ export class WsTunnel implements IBrokerContext {
                         error: {
                             code: -32000,
                             message:
-                                `Provider "${this._stdioClientProvider}" not connected. A stdio host cannot wait for a provider to appear: pin ` +
-                                `MCP_BROKER_STDIO_PROVIDER to "_all" (the aggregate slot, present at startup, and it announces tools as providers join) ` +
-                                `or to "_broker" (introspection only: broker_info, providers_list, provider_status).`,
+                                `Provider "${this._stdioClientProvider}" not connected yet. The session stays open: its tools appear when the provider ` +
+                                `connects (the broker sends notifications/tools/list_changed). Call providers_list on the _broker slot to see which slots are live.`,
                         },
                     })
                 );
@@ -3530,13 +3537,59 @@ export class WsTunnel implements IBrokerContext {
      * and prompts only, and answers resources methods with `-32601` itself.
      */
     private _interceptClientFrame(state: IProviderState, providerName: string, frame: string, sink: ResponseSink): boolean {
-        // A cheap guard before parsing: almost every frame is neither.
-        if (!frame.includes('"resources/') && !frame.includes('"initialize"')) return false;
+        const connected = this._isProviderConnected(providerName, state);
+        // A cheap guard before parsing: with a provider there, almost every frame is none of these.
+        if (connected && !frame.includes('"resources/') && !frame.includes('"initialize"') && !frame.includes('"server/discover"')) return false;
         const msg = parseObjectFrame(frame);
         if (!msg) return false;
+        const hasId = typeof msg.id === "string" || typeof msg.id === "number";
+
+        // Protocol 2026-07-28 probe. The broker relays the initialize
+        // revisions only, until it relays stateless requests: answering the
+        // probe -32601 makes a dual-era host (Claude Code, mcp-core "auto")
+        // fall back to initialize, whatever the provider behind speaks.
+        if (msg.method === "server/discover") {
+            if (hasId)
+                this._deliverToSink(
+                    state,
+                    sink,
+                    JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: msg.id,
+                        error: {
+                            code: -32601,
+                            message: "Method not found: server/discover. This broker speaks the initialize revisions (up to 2025-11-25); connect with initialize.",
+                        },
+                    })
+                );
+            return true;
+        }
+
         if (msg.method === "initialize") {
             state.lastInitializeParams = msg.params;
-            return false;
+            if (connected || !hasId) return false;
+            // No provider yet: the broker opens the session itself, so a host
+            // that treats a failed initialize as final can still connect to
+            // the slot. The provider is handshaken when it attaches, and the
+            // client is told to re-read its lists.
+            state.answeredWithoutProvider = true;
+            this._deliverToSink(state, sink, JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: this._initializeWithoutProvider(providerName, msg.params) }));
+            return true;
+        }
+
+        if (!connected) {
+            const empty = EMPTY_LISTS[String(msg.method)];
+            if (empty !== undefined && hasId) {
+                state.answeredWithoutProvider = true;
+                this._deliverToSink(state, sink, JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: empty }));
+                return true;
+            }
+            if (msg.method === "ping" && hasId) {
+                this._deliverToSink(state, sink, JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }));
+                return true;
+            }
+            // The session the broker opened needs no provider to be "initialized".
+            if (msg.method === "notifications/initialized") return true;
         }
         if (msg.method !== "resources/subscribe" && msg.method !== "resources/unsubscribe") return false;
         if (providerName === AggregateServer.SLOT) return false;
@@ -3559,6 +3612,22 @@ export class WsTunnel implements IBrokerContext {
             msg.method === "resources/subscribe" ? this._subscriptions.subscribe(providerName, client, sink, uri) : this._subscriptions.unsubscribe(providerName, client, uri);
         void pending.then(answer, (error: unknown) => answer({ ok: false, error: { code: -32603, message: `Subscription failed: ${(error as Error).message}` } }));
         return true;
+    }
+
+    /**
+     * The `initialize` result the broker gives on a slot with no provider: the
+     * client's revision when the broker speaks it, the capabilities a provider
+     * may bring (with `listChanged`, so the client re-reads when it comes),
+     * and the slot's name as the server's.
+     */
+    private _initializeWithoutProvider(providerName: string, params: unknown): Record<string, unknown> {
+        const requested = typeof params === "object" && params !== null ? (params as { protocolVersion?: unknown }).protocolVersion : undefined;
+        return {
+            protocolVersion: negotiateProtocolVersion(typeof requested === "string" ? requested : undefined),
+            capabilities: { tools: { listChanged: true }, prompts: { listChanged: true }, resources: { subscribe: true, listChanged: true } },
+            serverInfo: { name: providerName, version: VERSION },
+            instructions: `Slot "${providerName}" has no provider yet. Its tools, prompts and resources appear when one connects; the broker then sends list_changed notifications.`,
+        };
     }
 
     /**
@@ -3625,13 +3694,19 @@ export class WsTunnel implements IBrokerContext {
         }
     }
 
-    /** A provider now serves `name`: announce it, and restore the subscriptions it should hold. */
+    /**
+     * A provider now serves `name`: announce it, restore the subscriptions it
+     * should hold, and tell the clients the broker answered alone to re-read.
+     */
     private _onProviderAttached(name: string): void {
         this._authority.noteSlotConnected(name);
         this._emitProviderChanged(name);
-        if (this._subscriptions.hasSubscriptions(name)) {
-            void this._replaySubscriptions(name).catch((error: unknown) => {
-                console.error(`[broker] provider "${name}": restoring resource subscriptions failed: ${(error as Error).message}`);
+        const state = this._providers.get(name);
+        const announce = state?.answeredWithoutProvider === true;
+        if (state) state.answeredWithoutProvider = false;
+        if (this._subscriptions.hasSubscriptions(name) || announce) {
+            void this._replaySubscriptions(name, announce).catch((error: unknown) => {
+                console.error(`[broker] provider "${name}": restoring the slot's clients failed: ${(error as Error).message}`);
             });
         }
     }
@@ -3651,7 +3726,7 @@ export class WsTunnel implements IBrokerContext {
      * Where the new provider refuses a URI, that is also what tells its
      * subscribers, since their re-read fails; their subscription is dropped.
      */
-    private async _replaySubscriptions(name: string): Promise<void> {
+    private async _replaySubscriptions(name: string, announceLists = false): Promise<void> {
         const params = this._providers.get(name)?.lastInitializeParams ?? {
             protocolVersion: "2025-06-18",
             capabilities: {},
@@ -3666,6 +3741,12 @@ export class WsTunnel implements IBrokerContext {
         }
 
         const state = this._providers.get(name);
+        // Clients the broker answered alone saw empty lists: now there is something to read.
+        if (announceLists && state) {
+            for (const method of ["notifications/tools/list_changed", "notifications/prompts/list_changed", "notifications/resources/list_changed"]) {
+                this._broadcast(state, name, JSON.stringify({ jsonrpc: "2.0", method }));
+            }
+        }
         for (const result of await this._subscriptions.replay(name)) {
             if (!result.outcome.ok) {
                 console.warn(

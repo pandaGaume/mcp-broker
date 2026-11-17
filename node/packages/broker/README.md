@@ -173,7 +173,7 @@ This table is complete: it lists every `MCP_BROKER_*` variable the CLI reads.
 | `MCP_BROKER_TLS_CERT` | (unset) | Path to a PEM certificate. Enables HTTPS/WSS |
 | `MCP_BROKER_TLS_KEY` | (unset) | Path to a PEM private key. Enables HTTPS/WSS |
 | `MCP_BROKER_PROTOCOL` | auto | `http` forces plain, `https` forces TLS, unset auto-detects from cert+key |
-| `MCP_BROKER_STDIO_PROVIDER` | (unset) | When set, bridge stdin/stdout JSON-RPC to this slot. **Use `_all`**, see [Claude Desktop integration](#claude-desktop-integration) |
+| `MCP_BROKER_STDIO_PROVIDER` | (unset) | When set, bridge stdin/stdout JSON-RPC to this slot: your provider's slot, or `_all`. See [Claude Desktop integration](#claude-desktop-integration) |
 | `MCP_BROKER_AUTH_ENABLED` | (unset) | `1` to turn on the OAuth 2.1 resource server (requires the three below) |
 | `MCP_BROKER_PUBLIC_BASE_URL` | (unset) | Public origin used to build canonical resource URIs, e.g. `https://mcp.example.com` |
 | `MCP_BROKER_JWKS` | (unset) | Authorization server's JWKS URL, used to verify token signatures |
@@ -795,7 +795,7 @@ services:
 ## Claude Desktop integration
 
 The broker can act as a stdio MCP server for Claude Desktop and any other stdio
-MCP host. **Point the bridge at `_all`, not at one of your slots:**
+MCP host. **Point the bridge at your provider's slot** (unreleased; up to 1.13, at `_all`):
 
 ```json
 {
@@ -804,7 +804,7 @@ MCP host. **Point the bridge at `_all`, not at one of your slots:**
       "command": "npx",
       "args": ["-y", "@cyanmycelium/mcp-broker"],
       "env": {
-        "MCP_BROKER_STDIO_PROVIDER": "_all",
+        "MCP_BROKER_STDIO_PROVIDER": "plant",
         "MCP_BROKER_PORT": "3000",
         "MCP_BROKER_HOST": "127.0.0.1"
       }
@@ -813,24 +813,23 @@ MCP host. **Point the bridge at `_all`, not at one of your slots:**
 }
 ```
 
-### Why `_all` and not your slot
-
-This is an ordering problem, and pinning a real slot fails every single time.
+### Why your slot works before the provider is there
 
 An MCP host starts its servers when the host application launches. It sends
 `initialize` immediately and treats a failure as a dead server: no retry, no
 backoff, the entry is disabled for the session. Your provider does not exist
 yet. A browser provider needs a human to open a page; a provider in another
-process needs that process to start. So the bridge answers the host's very first
-`initialize` with `-32000 Provider "<slot>" not connected`, and the host gives
-up. **Pinning a real slot never works for a browser-hosted provider at all.**
+process needs that process to start.
 
-`_all` is registered before the broker resumes stdin, so the slot exists before
-the host's first byte arrives. It answers `initialize` itself. It already
-aggregates `_broker`, so the host always has at least the five introspection
-tools. And it pushes `notifications/tools/list_changed` when a provider joins,
-so a page opened ten minutes into the session appears in the host's tool list
-live, with no reconnect.
+So a slot with no provider answers `initialize` itself and lists nothing. When
+the provider attaches, the broker handshakes it with the host's `initialize`
+and sends `notifications/tools/list_changed` (and the prompts and resources
+ones), so a page opened ten minutes into the session appears in the host's tool
+list live, with no reconnect. Only calls fail until then.
+
+Up to broker 1.13 a slot without a provider refused `initialize`, and the
+bridge had to be pinned to `_all`. That still works: `_all` is frozen, tools and
+prompts only, and suits one entry that must follow a changing set of providers.
 
 `_broker` is the fallback if you want introspection only. It is also always up,
 but it will never show anything except the broker's own five tools.

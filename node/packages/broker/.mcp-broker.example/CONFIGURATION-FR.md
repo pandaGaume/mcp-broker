@@ -908,6 +908,22 @@ valeur globale. Cette redondance est volontairement pédagogique. Dans un vrai
 déploiement, ce bloc est surtout utile si le même nom d'outil n'a pas le même
 niveau de risque selon le fournisseur ou la zone.
 
+### `methodCapabilities`
+
+Chaque méthode MCP connue du broker a sa capacité intégrée (`resources/read`
+demande `mcp.resources.read`, etc.). Une requête de toute autre méthode, une
+méthode propre au fournisseur ou une extension MCP que le broker ne connaît pas
+encore, demande `mcp.unclassified-method` et est refusée tant qu'aucun rôle ne
+l'accorde. Donnez plutôt à cette méthode sa propre capacité :
+
+```json
+"methodCapabilities": {
+    "acme/calibrate": "acme.calibrate"
+}
+```
+
+Une méthode intégrée ne peut pas être reclassée : le broker refuse de démarrer.
+
 ## Audit
 
 ```json

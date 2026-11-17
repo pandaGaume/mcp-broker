@@ -57,9 +57,9 @@ one is refused with `Provider "<n>" is reserved by the broker`.
 6. Attaches the stdio bridge, if configured, and resumes stdin.
 7. Starts the embedded `_broker` server and adds it to `_all`.
 
-Step 4 before step 6 is what makes `_all` a safe stdio bridge target: the slot
-exists before the host's first byte arrives. Nothing in this sequence waits for
-a WebSocket provider, because none can exist yet.
+Nothing in this sequence waits for a WebSocket provider, because none can exist
+yet: a slot without one answers `initialize` and the lists itself, and announces
+`list_changed` when the provider attaches.
 
 `start()` **rejects** on a listen failure, and the rejection names the port, the
 one-broker-per-port rule and the URL to attach to the broker already holding it.
@@ -74,7 +74,7 @@ page's own origin if the page is also an MCP client, and needs provider auth
 OFF, because a browser cannot present the provider secret.
 
 **Stdio host plus broker plus browser provider.** The host launches the broker
-pinned to `_all`; the human opens the page later; `_all` pushes
+pinned to the provider's slot; the human opens the page later; the broker pushes
 `list_changed` and the tools appear. This is the topology `broker://guide/host-config`
 is written for.
 

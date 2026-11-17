@@ -110,8 +110,9 @@ describe("hierarchical policy enforcement on direct slots", () => {
         const base = await startTunnel();
         const response = await mcpCall(base, "motor", LIST, { authorization: "Bearer alice" });
         expect(response.status).toBe(200);
-        const body = (await response.json()) as { error?: { code: number; message: string } };
-        expect(body.error?.message).toContain("not connected");
+        // No provider behind the slot: the broker answers the list itself, once the policy let it through.
+        const body = (await response.json()) as { result?: { tools?: unknown[] }; error?: { code: number; message: string } };
+        expect(body.result?.tools).toEqual([]);
     });
 
     it("denies a caller with no matching assignment", async () => {

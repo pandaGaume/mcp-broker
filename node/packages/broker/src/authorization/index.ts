@@ -1,6 +1,15 @@
 export { ResourcePath, ResourcePathPattern } from "./resource.path";
-export { ConfiguredCapabilityClassifier, validateCapability } from "./capability.classifier";
-export type { CapabilityClassifier, ClassifiedCapability, ICapabilityClassifier, IClassifiedCapability, IMcpOperation, McpOperation } from "./capability.classifier";
+export { ConfiguredCapabilityClassifier, RequiredCapabilityResolver, UNCLASSIFIED_METHOD_CAPABILITY, resolverFromClassifier, validateCapability } from "./required.capability";
+export type {
+    CapabilityClassifier,
+    ClassifiedCapability,
+    ICapabilityClassifier,
+    IClassifiedCapability,
+    IMcpOperation,
+    IRequiredCapability,
+    IRequiredCapabilityResolver,
+    McpOperation,
+} from "./required.capability";
 export { ConfigPolicyEngine } from "./policy.engine";
 export { JwtSubjectMapper, SubjectMappingError } from "./subject.mapper";
 export type { ISubjectMapper, SubjectMapper } from "./subject.mapper";

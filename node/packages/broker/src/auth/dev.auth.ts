@@ -296,7 +296,7 @@ export function buildDevAuth(options: IDevAuthOptions): IResolvedAuth {
     if (options.scopesSupported) resolved.scopesSupported = options.scopesSupported;
     if (options.requiredScopes) resolved.requiredScopes = options.requiredScopes;
     if (options.perSlotScopes) resolved.perSlotScopes = options.perSlotScopes;
-    const { roles, assignments, denies, slotResources, toolCapabilities, providerToolCapabilities, audit } = options;
+    const { roles, assignments, denies, slotResources, toolCapabilities, providerToolCapabilities, methodCapabilities, audit } = options;
     const policy: IAuthorizationPolicyConfig = {
         roles,
         assignments,
@@ -304,6 +304,7 @@ export function buildDevAuth(options: IDevAuthOptions): IResolvedAuth {
         slotResources,
         toolCapabilities,
         providerToolCapabilities,
+        methodCapabilities,
         audit,
         subjectMapping: DEV_SUBJECT_MAPPING,
     };

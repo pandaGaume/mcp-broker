@@ -214,6 +214,12 @@ export interface IProviderState {
      * instead of sending requests to one that was never initialized.
      */
     lastInitializeParams?: unknown;
+    /**
+     * Set when the broker answered a client itself because no provider was
+     * there (`initialize`, an empty list): when one attaches, the broker
+     * handshakes it and announces `list_changed` so those clients re-read.
+     */
+    answeredWithoutProvider?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -96,7 +96,7 @@ A provider that declares an authorization domain must have explicit
 ### `policy`
 
 The security file's policy keys: `roles`, `assignments`, `denies`,
-`slotResources`, `toolCapabilities`. `subjectMapping` is fixed by the kit (see
+`slotResources`, `toolCapabilities`, `methodCapabilities`. `subjectMapping` is fixed by the kit (see
 `callers`). Remember that a caller needs `mcp.tools.call` (or whatever the
 operation classifies as) on the **slot's** resource just to reach the
 provider, on top of the domain capabilities `broker/authorize` checks:

@@ -1,6 +1,6 @@
 import { LimitPattern, LimitPatternIndex } from "./resource.limits";
 import { providerPublishDecision, type IProviderPrincipal } from "../auth/provider.auth";
-import { validateCapability } from "../authorization/capability.classifier";
+import { validateCapability } from "../authorization/required.capability";
 import { ResourcePath } from "../authorization/resource.path";
 import type { ISlotResourceResolver } from "../authorization/slot.resource";
 

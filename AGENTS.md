@@ -26,7 +26,7 @@ One process that puts N MCP servers behind one host and one port. Each server oc
 |---|---|
 | You need a broker, and you do not own a Node process that should host it | **Run the process**: `npx @cyanmycelium/mcp-broker` |
 | Your app already owns an HTTP port, or hosts MCP servers in-process | **Embed the library**: `new WsTunnelBuilder()...build()`, then `await tunnel.start()` |
-| You are wiring Claude Desktop or another stdio MCP host | Run the process with `MCP_BROKER_STDIO_PROVIDER=_all` (see §4) |
+| You are wiring Claude Desktop or another stdio MCP host | Run the process with `MCP_BROKER_STDIO_PROVIDER=<your slot>` (see §4) |
 | You are writing an MCP **client** | Install nothing of ours. Point a standard MCP client at `http://<host>/<slot>/mcp` |
 | You are writing **tests** that need a broker, callers with identities, or provider identities | `startTestBroker()` from `@cyanmycelium/mcp-broker/testing`: a real broker, tokens are caller names, no authorization server ([guide](node/packages/broker/docs/testing.md)) |
 
@@ -88,7 +88,7 @@ Observable signatures, if you are debugging one:
             "command": "npx",
             "args": ["-y", "@cyanmycelium/mcp-broker"],
             "env": {
-                "MCP_BROKER_STDIO_PROVIDER": "_all",
+                "MCP_BROKER_STDIO_PROVIDER": "plant",
                 "MCP_BROKER_PORT": "3000",
                 "MCP_BROKER_HOST": "127.0.0.1"
             }
@@ -97,23 +97,25 @@ Observable signatures, if you are debugging one:
 }
 ```
 
-**Pin the bridge to `_all`, never to a real slot.** The host sends `initialize` the instant it launches and treats a failure as a dead server: no retry, no backoff. Your provider does not exist yet, so a real slot answers `-32000 Provider "<slot>" not connected` and the host gives up permanently. `_all` is registered before the broker resumes stdin, answers `initialize` itself, already aggregates `_broker`, and pushes `notifications/tools/list_changed` when a provider joins later. `_broker` is the fallback if you want introspection only.
+**Connect to the slot itself: it is the primary path** (unreleased). The host sends `initialize` the instant it launches and treats a failure as a dead server, while your provider does not exist yet. On a slot with no provider the broker now answers `initialize` itself, lists nothing, and, when the provider attaches, handshakes it and sends `notifications/tools/list_changed` (and the prompts and resources ones): the host re-reads and the tools appear. Only calls fail meanwhile (`-32000 ... not connected yet`). Up to broker 1.13, a real slot refused `initialize` and the bridge had to be pinned to `_all`; that still works, `_all` is frozen (§5).
 
 **One broker per port.** A second host entry spawning another broker cannot bind and dies; the host says `Connection closed` and the real `EADDRINUSE` diagnosis is only in `mcp-server-<name>.log`.
 
-**The bridge is anonymous.** It reaches `_all` with no principal. Invisible until you enable authorization, at which point the host's tool list silently empties.
+**The bridge is anonymous.** It reaches its slot with no principal. Invisible until you enable authorization, at which point the host's tool list silently empties.
+
+**Protocol 2026-07-28 hosts fall back to `initialize`.** Claude Code (2.1.292 and later) and other dual-era hosts probe with `server/discover` first. Until the broker relays stateless requests, it answers that probe `-32601` on every slot, which makes them use `initialize`, as the specification intends for an older server.
 
 **A host that speaks Streamable HTTP does not need the bridge.** Claude Code (`.mcp.json`), and any host with an `http` server type, can point straight at a slot of a broker you run once, on the side:
 
 ```json
 {
     "mcpServers": {
-        "mcp-broker": { "type": "http", "url": "http://127.0.0.1:3000/_all/mcp" }
+        "plant": { "type": "http", "url": "http://127.0.0.1:3000/plant/mcp" }
     }
 }
 ```
 
-No second process and no start-order problem: the host talks to the slot when it needs it. `_all` for the tools, `_broker` for introspection only, `/<slot>/mcp` for one provider.
+No second process and no start-order problem: the host talks to the slot when it needs it. One entry per slot, `/<slot>/mcp`; `_broker` for introspection; `_all` only if one entry must follow a changing set of providers.
 
 ### 4b. Browser provider
 
@@ -168,13 +170,16 @@ await tunnel.stop();
 | slot | what it is | anti-goal |
 |---|---|---|
 | `_broker` | The broker's own introspection MCP server: `broker_info`, `providers_list`, `provider_status`, `broker_guide`, `broker_diagnose`, plus resources `broker://info`, `broker://providers`, `broker://providers/{name}`, `broker://guide/{topic}` | It proxies **nothing**. It is not a route to other slots. |
-| `_all` | An aggregate presenting the union of the tools and prompts of every **opted-in** provider as one MCP server | It is **not** a proxy and **not** automatic. |
+| `_all` | An aggregate presenting the union of the tools and prompts of every **opted-in** provider as one MCP server. **Frozen** | It is **not** a proxy and **not** automatic. |
+
+**`_all` is frozen** (unreleased): it keeps tools and prompts and takes no MCP extension (no resources, Skills, Apps UI, Events or Tasks), because those bind what they serve to the server it comes from, and an aggregate mixes origins. Connect to a provider's own slot for anything else; that is the primary path (§4a). `_all` remains for one host entry that must follow a changing set of providers.
 
 `_all`, precisely:
 
 - **Membership is opt-in, per provider.** WebSocket providers join by asking (`{ aggregate: true }` on the transport). `stdioUpstreams[]` entries need `"aggregate": true`. `mcpServers[]` and `mcpbBundles[]` are aggregated **by default**; set `"aggregate": false` to opt out. That asymmetry is real. `_broker` is always in.
 - **Names are prefixed** `<slot>-<original>`, descriptions tagged `[<slot>] ...`. **Never reconstruct a prefixed name**: it is capped at 64 characters, an overlong one is truncated and hash-suffixed, and a collision is broken with `-2`, `-3`. Call `tools/list` and pass the returned string back verbatim.
 - **Tools and prompts only.** `initialize`, `ping`, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`. Everything else, `resources/list` and `resources/read` included, returns `-32601 Method not found`. For resources, connect to the provider's own slot.
+- **No MCP Apps UI** (unreleased): a tool's `_meta.ui` is removed in `_all`, and an app-only tool (`visibility` without `"model"`) is left out, since `_all` cannot serve the `ui://` resource. The tool keeps its UI on its own slot.
 - It emits `notifications/tools/list_changed` and `notifications/prompts/list_changed`, so a provider that appears mid-session shows up without a reconnect.
 - Neither name can be claimed by a provider: `/provider/_all` is refused with `Provider "_all" is reserved by the broker`.
 
@@ -244,7 +249,8 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 | WebSocket closes `1008 Slot already held by a live provider` after a reload | a stale socket still holds the slot and answered the last heartbeat | release on `pagehide`; under the default `providerTakeover: "liveness"` the newcomer takes the slot as soon as the incumbent misses a ping (one interval, default 30 s). `"reject"` never hands over; `"always"` needs `providerAuth` and the same principal, else it falls back to `"liveness"` and says so |
 | MCP host: `Connection closed`, no cause | a second broker could not bind the port | one broker per port; read `mcp-server-<name>.log` for `EADDRINUSE` |
 | HTTP 403 `invalid_origin` from a page the broker itself serves | **a static mount does not exempt the origin it serves** | list that exact origin (scheme and port included) in `allowedOrigins` / `MCP_BROKER_ALLOWED_ORIGINS` |
-| `Provider "<slot>" not connected` at host start | ordering: the host starts before any provider exists | point `MCP_BROKER_STDIO_PROVIDER` at `_all` |
+| `Provider "<slot>" not connected` at host start | broker 1.13 or earlier: a slot without a provider refused `initialize` | upgrade (the slot now answers `initialize` itself and announces the tools later), or point `MCP_BROKER_STDIO_PROVIDER` at `_all` |
+| Tools of a slot stay empty in the host | the provider never attached, or the host ignores `tools/list_changed` | `provider_status({ name })`; reconnect the host once the provider is up |
 | `_all` shows only `_broker-*` tools | nothing opted in | see §5; verify with `tools/list` on `_all`, never assume an opt-in took |
 | Host's tool list goes empty after enabling authorization | the stdio bridge is anonymous | grant the anonymous subject, or stop bridging in authorized deployments |
 | Browser provider gets a bare `error` event | provider auth is on; a browser cannot send the header | run without a provider secret, or authenticate in a proxy |
@@ -261,6 +267,7 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 | `broker/authorization/declare` refused: `not one of its owners` or `outside the subtree the security file assigns` | `authorization.domains` fixes who declares that domain, and where | declare from a listed identity, inside its listed subtree, or change the security file |
 | `broker/authorization/declare` refused: `overlaps ... owned by provider` | another identity owns a subtree of that domain containing, or inside, yours, possibly since before it disconnected: ownership is kept until withdrawn | declare a sibling subtree, declare from the owning identity, or withdraw the old declaration: `broker/authorization/withdraw` from its owner, `broker_declaration_withdraw` if it is gone (`broker_diagnose` reports it as `declaration-owner-offline`) |
 | `broker/authorize`: `-32602 principal.ref is unknown, expired` | the reference's request was already answered, or it is used on another slot | ask before answering, on the socket the request came on |
+| A provider's own method, or an extension method such as `tasks/get`, answers `-32001 Forbidden` with authorization on; the audit names `mcp.unclassified-method` | an unknown request is refused by default (unreleased) | classify it in `auth.methodCapabilities`, then grant that capability |
 | Every decision is `no-matching-grant` | the caller is anonymous (client OAuth off) or nothing grants the capability | enable client auth; grant the capability in `auth.assignments` |
 | Client refused on a protected slot (1008 / HTTP 403) | only the declarer's own client identity may call it | the protection working; go through the declaring provider |
 | `resourceSubscriptionCount` in `provider_status` only grows | HTTP clients leave without `DELETE` | send the DELETE on shutdown |

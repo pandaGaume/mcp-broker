@@ -70,11 +70,11 @@ the reserved `_all` slot.
 }
 ```
 
-Pin the bridge to `_all`, not to a real slot. `_all` exists from startup and
-answers the handshake itself, so the host connects even though no provider has
-arrived yet, and it pushes `notifications/tools/list_changed` as providers join,
-so a browser page opened later shows up live. Pinned to a real slot, the host
-starts before the provider does and fails the handshake every time. Providers
+The example pins the bridge to `_all`, which unions every opted-in provider.
+Pinning it to one provider's slot works as well (unreleased): a slot with no
+provider answers the handshake itself and pushes
+`notifications/tools/list_changed` when the provider attaches, so a browser page
+opened later shows up live. `_all` is frozen (tools and prompts only). Providers
 join `_all` by opting in: `aggregate: true` on an upstream, or
 `{ aggregate: true }` on `DirectTransport` / `MultiplexTransport.create`.
 

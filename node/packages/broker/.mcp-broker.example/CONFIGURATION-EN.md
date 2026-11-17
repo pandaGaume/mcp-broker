@@ -894,6 +894,22 @@ value. This duplication is intentionally educational. In a real deployment,
 this block is useful when the same tool name has a different risk level for a
 particular provider or area.
 
+### `methodCapabilities`
+
+Every MCP request method the broker knows has a built-in capability
+(`resources/read` needs `mcp.resources.read`, and so on). A request with any
+other method, a provider's own method or an MCP extension the broker does not
+know yet, needs `mcp.unclassified-method` and is refused unless a role grants
+it. Give such a method its own capability instead:
+
+```json
+"methodCapabilities": {
+    "acme/calibrate": "acme.calibrate"
+}
+```
+
+A built-in method cannot be reclassified: the broker refuses to start.
+
 ## Audit logging
 
 ```json

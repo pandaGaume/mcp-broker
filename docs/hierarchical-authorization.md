@@ -123,15 +123,38 @@ Inheritance is expanded at startup. Duplicate capabilities are removed.
 Undefined inherited roles and inheritance cycles stop startup. `*` grants every
 capability within the resource paths assigned to that role.
 
-The built-in MCP classification is:
+Each request is first resolved to the capability it requires (the
+`RequiredCapabilityResolver`, named `ConfiguredCapabilityClassifier` up to
+1.13), then the policy engine checks whether the caller holds that capability
+on the slot's resource. The built-in table is:
 
 | MCP operation | Capability |
 |---|---|
-| `resources/list`, `resources/read` | `mcp.resources.read` |
+| `resources/list`, `resources/read`, `resources/templates/list`, `resources/subscribe` | `mcp.resources.read` |
+| `skills/list`, `skills/get`, `resources/directory/read` (MCP Skills extension) | `mcp.resources.read` |
 | `tools/list` | `mcp.tools.list` |
 | `tools/call` | Configured tool capability, otherwise `mcp.tools.call` |
 | `prompts/list`, `prompts/get` | `mcp.prompts.read` |
 | `completion/complete` | `mcp.completion.use` |
+| `logging/setLevel` | `mcp.logging.configure` |
+| `initialize`, `server/discover`, `ping`, `resources/unsubscribe`, responses | nothing: every session needs them |
+| any other request | `methodCapabilities[method]`, otherwise `mcp.unclassified-method` |
+| any other notification | nothing |
+
+**An unknown request is refused by default.** A method the broker does not
+know (an MCP extension it does not classify yet, such as `tasks/get`, or a
+provider's own method) needs `mcp.unclassified-method`, which no role grants
+unless you write it. Classify such a method instead:
+
+```json
+{ "auth": { "methodCapabilities": { "acme/calibrate": "acme.calibrate" } } }
+```
+
+Built-in methods cannot be reclassified: the broker refuses to start. A
+notification gets no answer, so an unknown one cannot read anything back; the
+notifications that carry provider data out to clients
+(`notifications/resources/*`, `notifications/tools/list_changed`,
+`notifications/prompts/list_changed`) are in the table.
 
 Tool names are never interpreted as capabilities. Configure them explicitly:
 
@@ -198,6 +221,33 @@ String and string-array claims are accepted. Missing optional claims are
 ignored. A configured claim with another shape fails authorization safely.
 Duplicate subjects are removed. Subject prefixes are extensible; the initial
 model recognizes `user:`, `group:`, `client:`, and `service:`.
+
+### Machine clients (OAuth client credentials)
+
+A plant service, a historian or a CI job has no user to sign in. The MCP
+extension `io.modelcontextprotocol/oauth-client-credentials` (stable,
+`github.com/modelcontextprotocol/ext-auth`) has it obtain a token with the
+`client_credentials` grant, authenticating with `private_key_jwt` or a client
+secret, credentials provisioned out of band (no dynamic registration). Nothing
+changes on the broker's side: it is the resource server, and it validates such
+a token like any other (issuer, signature, audience, scopes).
+
+Grant the client by its `client:` subject:
+
+```json
+{ "id": "historian-service", "subject": "client:plant-historian", "role": "archiver", "resource": "/plant/**" }
+```
+
+- Ask for the token with `resource=<publicBaseUrl>/<slot>/mcp`, the slot's
+  canonical resource URI (RFC 8707), which is also the `resource` of the
+  slot's protected resource metadata. The broker checks the audience per slot:
+  a token minted for another slot, or another service, is refused.
+- An RFC 9068 access token from this grant carries `client_id`, which yields
+  `client:<id>`. Its `sub` names the client too, so it also yields `user:<id>`:
+  assign the `client:` subject, which says what the caller is.
+- Some authorization servers name the client in another claim: set
+  `subjectMapping.clientClaim` to it, `"azp"` for Keycloak and for Microsoft
+  Entra ID v2 tokens.
 
 ## Assign roles to subjects and paths
 
