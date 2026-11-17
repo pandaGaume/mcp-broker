@@ -126,26 +126,8 @@ repository; the changes it needed for this release are listed under
   `DirectTransport` and `MultiplexTransport`, `callerReferenceOf()`,
   `BrokerRequestError`, and `brokerRequestTimeoutMs` (off by default).
 
-- **broker** MCP Apps (`io.modelcontextprotocol/ui`) through `_all`: tools lose
-  `_meta.ui`, and app-only tools (`visibility` without `"model"`) are left
-  out. `_all` serves no resources, so the `ui://` view a tool points at could
-  never be read through it. A tool keeps its full UI on its own slot.
-- **broker** Machine clients, as the MCP extension
-  `io.modelcontextprotocol/oauth-client-credentials` describes them, are
-  documented and tested: a `client_credentials` token is validated like any
-  other and authorized through its `client:<client_id>` subject
-  (`subjectMapping.clientClaim` for servers that use `azp`). No code change was
-  needed.
-
 ### Fixed
 
-- **broker** The MCP Skills extension methods (`io.modelcontextprotocol/skills`)
-  are authorized. `skills/list`, `skills/get` and `resources/directory/read`
-  were unclassified, and an unclassified method is never refused, so a
-  provider implementing the extension let any caller enumerate its skills and
-  list its directories with authorization on. They now need
-  `mcp.resources.read` like the file reads they lead to, and
-  `broker.providers.read` on `_broker`.
 - **broker** A budget reservation on a resource with declared engineering
   limits is accepted: an `allow-with-constraints` decision reserves like an
   `allow`, and the grant carries `effect` and `obligations.constraints` for the
@@ -184,36 +166,6 @@ repository; the changes it needed for this release are listed under
 
 ### Changed
 
-- **broker** Connection by slot is the primary path, and `_all` is frozen. A
-  slot with no provider now answers `initialize` itself (the client's
-  revision, `listChanged` capabilities, the slot's name as the server's), lists
-  nothing, answers `ping`; when the provider attaches, the broker handshakes it
-  with the last client `initialize` and sends `tools`, `prompts` and
-  `resources` `list_changed` to the slot's clients. A stdio host pinned to a real
-  slot therefore no longer fails at startup; `MCP_BROKER_STDIO_PROVIDER=_all` is
-  no longer required. Calls still fail until the provider is there. `_all` keeps
-  tools and prompts and takes no MCP extension.
-- **broker** `server/discover`, the probe of protocol 2026-07-28 hosts (Claude
-  Code 2.1.292 and later), is answered `-32601` on every slot, so they fall back
-  to `initialize` until the broker relays stateless requests.
-- **broker** **Breaking for deployments with authorization on:** an unknown
-  request method is refused by default. A request the broker does not classify
-  (a provider's own method, an MCP extension such as `tasks/get`) used to need
-  no capability at all, so every new method was open until someone added it to
-  the table. It now needs `mcp.unclassified-method`, which nothing grants
-  unless the operator writes it. Classify such a method with
-  `auth.methodCapabilities` (`{ "acme/calibrate": "acme.calibrate" }`);
-  built-in methods cannot be reclassified. `initialize`, `server/discover`
-  (the probe hosts on protocol 2026-07-28 send first), `ping`,
-  `resources/unsubscribe`, responses and unknown notifications stay free.
-  `logging/setLevel`, unclassified until now, needs `mcp.logging.configure`.
-- **broker** The capability classifier is now the `RequiredCapabilityResolver`
-  (`resolve()` instead of `classify()`, `IRequiredCapabilityResolver`,
-  `IRequiredCapability`), and `IPolicyAuthorization.capabilityClassifier` is
-  `capabilityResolver`. `ConfiguredCapabilityClassifier`,
-  `ICapabilityClassifier` and `authorizationWithEngine({ capabilityClassifier })`
-  still work, deprecated, until the next major version.
-
 - **provider** `IBudgetReservation` gains `effect` and `obligations`.
 - **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.1`. The
   provider's peer range is unchanged. 1.4.1 fixes the Streamable HTTP endpoint
@@ -246,19 +198,84 @@ repository; the changes it needed for this release are listed under
 
 ### Coordinated releases
 
-- `@cyanmycelium/mcp-core` 1.6.0 (extensions, protocol 2026-07-28 beside the
-  handshake revisions, MCP Apps, Events): the broker and the provider depend on
-  `^1.6.0`. The broker's Streamable HTTP endpoint passes
-  `statelessProtocolVersions: []`: its relay assumes a session opened by
-  `initialize`, so a session-less 2026-07-28 POST is refused as before, and a
-  dual-era client (mcp-core `protocol: "auto"`, Claude Code) falls back to
-  `initialize`, until the broker relays stateless requests.
 - `@cyanmycelium/mcp-core` 1.4.0: every runtime operation of an adapter or a
   behavior (`readResourceAsync`, `executeToolAsync`, `getPromptAsync`,
   `completeAsync`) receives the request it serves as an optional last
   argument, `IMcpRequestContext` (`requestId`, `method`, `params._meta`
   frozen). This is how a provider reads the broker's caller reference
   (`request?.meta`). Adapters written without it are unchanged.
+
+## [1.14.0] - 2026-11-17
+
+Broker 1.14.0: connection by slot is the primary path, `_all` is frozen, unknown
+request methods are refused by default, and the broker runs on mcp-core 1.6.0.
+The provider is unchanged (0.5.0).
+
+### Added
+
+- **broker** MCP Apps (`io.modelcontextprotocol/ui`) through `_all`: tools lose
+  `_meta.ui`, and app-only tools (`visibility` without `"model"`) are left
+  out. `_all` serves no resources, so the `ui://` view a tool points at could
+  never be read through it. A tool keeps its full UI on its own slot.
+- **broker** Machine clients, as the MCP extension
+  `io.modelcontextprotocol/oauth-client-credentials` describes them, are
+  documented and tested: a `client_credentials` token is validated like any
+  other and authorized through its `client:<client_id>` subject
+  (`subjectMapping.clientClaim` for servers that use `azp`). No code change was
+  needed.
+
+### Fixed
+
+- **broker** The MCP Skills extension methods (`io.modelcontextprotocol/skills`)
+  are authorized. `skills/list`, `skills/get` and `resources/directory/read`
+  were unclassified, and an unclassified method is never refused, so a
+  provider implementing the extension let any caller enumerate its skills and
+  list its directories with authorization on. They now need
+  `mcp.resources.read` like the file reads they lead to, and
+  `broker.providers.read` on `_broker`.
+
+### Changed
+
+- **broker** Connection by slot is the primary path, and `_all` is frozen. A
+  slot with no provider now answers `initialize` itself (the client's
+  revision, `listChanged` capabilities, the slot's name as the server's), lists
+  nothing, answers `ping`; when the provider attaches, the broker handshakes it
+  with the last client `initialize` and sends `tools`, `prompts` and
+  `resources` `list_changed` to the slot's clients. A stdio host pinned to a real
+  slot therefore no longer fails at startup; `MCP_BROKER_STDIO_PROVIDER=_all` is
+  no longer required. Calls still fail until the provider is there. `_all` keeps
+  tools and prompts and takes no MCP extension.
+- **broker** `server/discover`, the probe of protocol 2026-07-28 hosts (Claude
+  Code 2.1.292 and later), is answered `-32601` on every slot, so they fall back
+  to `initialize` until the broker relays stateless requests.
+- **broker** **Breaking for deployments with authorization on:** an unknown
+  request method is refused by default. A request the broker does not classify
+  (a provider's own method, an MCP extension such as `tasks/get`) used to need
+  no capability at all, so every new method was open until someone added it to
+  the table. It now needs `mcp.unclassified-method`, which nothing grants
+  unless the operator writes it. Classify such a method with
+  `auth.methodCapabilities` (`{ "acme/calibrate": "acme.calibrate" }`);
+  built-in methods cannot be reclassified. `initialize`, `server/discover`
+  (the probe hosts on protocol 2026-07-28 send first), `ping`,
+  `resources/unsubscribe`, responses and unknown notifications stay free.
+  `logging/setLevel`, unclassified until now, needs `mcp.logging.configure`.
+- **broker** The capability classifier is now the `RequiredCapabilityResolver`
+  (`resolve()` instead of `classify()`, `IRequiredCapabilityResolver`,
+  `IRequiredCapability`), and `IPolicyAuthorization.capabilityClassifier` is
+  `capabilityResolver`. `ConfiguredCapabilityClassifier`,
+  `ICapabilityClassifier` and `authorizationWithEngine({ capabilityClassifier })`
+  still work, deprecated, until the next major version.
+
+### Coordinated releases
+
+- `@cyanmycelium/mcp-core` 1.6.0 (extensions, protocol 2026-07-28 beside the
+  handshake revisions, MCP Apps, Events): the broker depends on `^1.6.0`. The
+  provider's peer range is unchanged; only its development dependency moves.
+  The broker's Streamable HTTP endpoint passes `statelessProtocolVersions: []`:
+  its relay assumes a session opened by `initialize`, so a session-less
+  2026-07-28 POST is refused as before, and a dual-era client (mcp-core
+  `protocol: "auto"`, Claude Code) falls back to `initialize`, until the broker
+  relays stateless requests.
 
 ## [1.13.0] - 2026-11-15
 

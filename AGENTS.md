@@ -97,7 +97,7 @@ Observable signatures, if you are debugging one:
 }
 ```
 
-**Connect to the slot itself: it is the primary path** (unreleased). The host sends `initialize` the instant it launches and treats a failure as a dead server, while your provider does not exist yet. On a slot with no provider the broker now answers `initialize` itself, lists nothing, and, when the provider attaches, handshakes it and sends `notifications/tools/list_changed` (and the prompts and resources ones): the host re-reads and the tools appear. Only calls fail meanwhile (`-32000 ... not connected yet`). Up to broker 1.13, a real slot refused `initialize` and the bridge had to be pinned to `_all`; that still works, `_all` is frozen (§5).
+**Connect to the slot itself: it is the primary path** (1.14.0). The host sends `initialize` the instant it launches and treats a failure as a dead server, while your provider does not exist yet. On a slot with no provider the broker now answers `initialize` itself, lists nothing, and, when the provider attaches, handshakes it and sends `notifications/tools/list_changed` (and the prompts and resources ones): the host re-reads and the tools appear. Only calls fail meanwhile (`-32000 ... not connected yet`). Up to broker 1.13, a real slot refused `initialize` and the bridge had to be pinned to `_all`; that still works, `_all` is frozen (§5).
 
 **One broker per port.** A second host entry spawning another broker cannot bind and dies; the host says `Connection closed` and the real `EADDRINUSE` diagnosis is only in `mcp-server-<name>.log`.
 
@@ -172,14 +172,14 @@ await tunnel.stop();
 | `_broker` | The broker's own introspection MCP server: `broker_info`, `providers_list`, `provider_status`, `broker_guide`, `broker_diagnose`, plus resources `broker://info`, `broker://providers`, `broker://providers/{name}`, `broker://guide/{topic}` | It proxies **nothing**. It is not a route to other slots. |
 | `_all` | An aggregate presenting the union of the tools and prompts of every **opted-in** provider as one MCP server. **Frozen** | It is **not** a proxy and **not** automatic. |
 
-**`_all` is frozen** (unreleased): it keeps tools and prompts and takes no MCP extension (no resources, Skills, Apps UI, Events or Tasks), because those bind what they serve to the server it comes from, and an aggregate mixes origins. Connect to a provider's own slot for anything else; that is the primary path (§4a). `_all` remains for one host entry that must follow a changing set of providers.
+**`_all` is frozen** (1.14.0): it keeps tools and prompts and takes no MCP extension (no resources, Skills, Apps UI, Events or Tasks), because those bind what they serve to the server it comes from, and an aggregate mixes origins. Connect to a provider's own slot for anything else; that is the primary path (§4a). `_all` remains for one host entry that must follow a changing set of providers.
 
 `_all`, precisely:
 
 - **Membership is opt-in, per provider.** WebSocket providers join by asking (`{ aggregate: true }` on the transport). `stdioUpstreams[]` entries need `"aggregate": true`. `mcpServers[]` and `mcpbBundles[]` are aggregated **by default**; set `"aggregate": false` to opt out. That asymmetry is real. `_broker` is always in.
 - **Names are prefixed** `<slot>-<original>`, descriptions tagged `[<slot>] ...`. **Never reconstruct a prefixed name**: it is capped at 64 characters, an overlong one is truncated and hash-suffixed, and a collision is broken with `-2`, `-3`. Call `tools/list` and pass the returned string back verbatim.
 - **Tools and prompts only.** `initialize`, `ping`, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`. Everything else, `resources/list` and `resources/read` included, returns `-32601 Method not found`. For resources, connect to the provider's own slot.
-- **No MCP Apps UI** (unreleased): a tool's `_meta.ui` is removed in `_all`, and an app-only tool (`visibility` without `"model"`) is left out, since `_all` cannot serve the `ui://` resource. The tool keeps its UI on its own slot.
+- **No MCP Apps UI** (1.14.0): a tool's `_meta.ui` is removed in `_all`, and an app-only tool (`visibility` without `"model"`) is left out, since `_all` cannot serve the `ui://` resource. The tool keeps its UI on its own slot.
 - It emits `notifications/tools/list_changed` and `notifications/prompts/list_changed`, so a provider that appears mid-session shows up without a reconnect.
 - Neither name can be claimed by a provider: `/provider/_all` is refused with `Provider "_all" is reserved by the broker`.
 
@@ -267,7 +267,7 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 | `broker/authorization/declare` refused: `not one of its owners` or `outside the subtree the security file assigns` | `authorization.domains` fixes who declares that domain, and where | declare from a listed identity, inside its listed subtree, or change the security file |
 | `broker/authorization/declare` refused: `overlaps ... owned by provider` | another identity owns a subtree of that domain containing, or inside, yours, possibly since before it disconnected: ownership is kept until withdrawn | declare a sibling subtree, declare from the owning identity, or withdraw the old declaration: `broker/authorization/withdraw` from its owner, `broker_declaration_withdraw` if it is gone (`broker_diagnose` reports it as `declaration-owner-offline`) |
 | `broker/authorize`: `-32602 principal.ref is unknown, expired` | the reference's request was already answered, or it is used on another slot | ask before answering, on the socket the request came on |
-| A provider's own method, or an extension method such as `tasks/get`, answers `-32001 Forbidden` with authorization on; the audit names `mcp.unclassified-method` | an unknown request is refused by default (unreleased) | classify it in `auth.methodCapabilities`, then grant that capability |
+| A provider's own method, or an extension method such as `tasks/get`, answers `-32001 Forbidden` with authorization on; the audit names `mcp.unclassified-method` | an unknown request is refused by default (1.14.0) | classify it in `auth.methodCapabilities`, then grant that capability |
 | Every decision is `no-matching-grant` | the caller is anonymous (client OAuth off) or nothing grants the capability | enable client auth; grant the capability in `auth.assignments` |
 | Client refused on a protected slot (1008 / HTTP 403) | only the declarer's own client identity may call it | the protection working; go through the declaring provider |
 | `resourceSubscriptionCount` in `provider_status` only grows | HTTP clients leave without `DELETE` | send the DELETE on shutdown |
