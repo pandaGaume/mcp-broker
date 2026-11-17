@@ -214,7 +214,7 @@ export type CapabilityClassifier = ICapabilityClassifier;
 
 /**
  * @deprecated Use {@link RequiredCapabilityResolver}; `classify` is now
- * `resolve`. Kept so code written against 1.12 still compiles. It shares the
+ * `resolve`. Kept so code written against 1.13 still compiles. It shares the
  * new behavior: an unknown request now needs {@link UNCLASSIFIED_METHOD_CAPABILITY}.
  */
 export class ConfiguredCapabilityClassifier extends RequiredCapabilityResolver implements ICapabilityClassifier {
@@ -223,7 +223,7 @@ export class ConfiguredCapabilityClassifier extends RequiredCapabilityResolver i
     }
 }
 
-/** Wraps a 1.12-style classifier so it can stand where a resolver is expected. */
+/** Wraps a 1.13-style classifier so it can stand where a resolver is expected. */
 export function resolverFromClassifier(classifier: ICapabilityClassifier): IRequiredCapabilityResolver {
     return { resolve: (operation, resource, provider) => classifier.classify(operation, resource, provider) };
 }

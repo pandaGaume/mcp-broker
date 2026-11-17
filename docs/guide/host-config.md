@@ -18,7 +18,7 @@ sends `notifications/tools/list_changed` (and the prompts and resources ones),
 so a page opened ten minutes into the session appears in the host's tool list
 live. Only calls fail meanwhile, with `-32000 ... not connected yet`.
 
-Brokers up to 1.12 refused `initialize` on such a slot, and the bridge had to be
+Brokers up to 1.13 refused `initialize` on such a slot, and the bridge had to be
 pinned to `_all`. That still works: `_all` is frozen, tools and prompts only,
 and stays the choice for one entry that must follow a changing set of
 providers. `_broker` gives introspection only.

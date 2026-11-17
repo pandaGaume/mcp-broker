@@ -795,7 +795,7 @@ services:
 ## Claude Desktop integration
 
 The broker can act as a stdio MCP server for Claude Desktop and any other stdio
-MCP host. **Point the bridge at your provider's slot** (unreleased; up to 1.12, at `_all`):
+MCP host. **Point the bridge at your provider's slot** (unreleased; up to 1.13, at `_all`):
 
 ```json
 {
@@ -827,7 +827,7 @@ and sends `notifications/tools/list_changed` (and the prompts and resources
 ones), so a page opened ten minutes into the session appears in the host's tool
 list live, with no reconnect. Only calls fail until then.
 
-Up to broker 1.12 a slot without a provider refused `initialize`, and the
+Up to broker 1.13 a slot without a provider refused `initialize`, and the
 bridge had to be pinned to `_all`. That still works: `_all` is frozen, tools and
 prompts only, and suits one entry that must follow a changing set of providers.
 

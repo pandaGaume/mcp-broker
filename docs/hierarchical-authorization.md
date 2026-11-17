@@ -125,7 +125,7 @@ capability within the resource paths assigned to that role.
 
 Each request is first resolved to the capability it requires (the
 `RequiredCapabilityResolver`, named `ConfiguredCapabilityClassifier` up to
-1.12), then the policy engine checks whether the caller holds that capability
+1.13), then the policy engine checks whether the caller holds that capability
 on the slot's resource. The built-in table is:
 
 | MCP operation | Capability |

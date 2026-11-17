@@ -81,7 +81,7 @@ describe("slot resource resolution and capability classification", () => {
         expect(() => new RequiredCapabilityResolver({}, {}, { "acme/x": "bad capability" })).toThrow(/malformed/);
     });
 
-    it("keeps the 1.12 classifier name working", () => {
+    it("keeps the 1.13 classifier name working", () => {
         const classifier = new ConfiguredCapabilityClassifier();
         const slot = ResourcePath.parse("/enterprise/site/asset");
         expect(classifier.classify({ method: "tools/list", id: 1 }, slot)?.capability).toBe("mcp.tools.list");

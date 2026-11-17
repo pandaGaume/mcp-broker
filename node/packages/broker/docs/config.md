@@ -703,7 +703,7 @@ keeps listening on its port at the same time, so providers can still tunnel in.
 instant it launches and treats a failure as a dead server, while your provider
 does not exist yet. A slot with no provider answers `initialize` itself, lists
 nothing, and when the provider attaches the broker handshakes it and sends
-`notifications/tools/list_changed`, so the tools appear live. Up to broker 1.12
+`notifications/tools/list_changed`, so the tools appear live. Up to broker 1.13
 such a slot refused `initialize` and the bridge had to target `_all`, which
 still works (`_all` is frozen: tools and prompts only). `_broker` gives
 introspection only.

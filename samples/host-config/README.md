@@ -8,7 +8,7 @@ You are wiring the broker into Claude Desktop, Claude Code, Cursor, VS Code or a
 
 ## The ordering problem, in four sentences
 
-An MCP host starts its servers when *it* starts, completes the `initialize` handshake immediately, and marks a server failed if that handshake does not succeed. A broker slot backed by a browser page, or by anything a user opens later, is empty at that moment. Up to broker 1.12 the stdio bridge gated every frame on its target slot being occupied, so a bridge pinned to a real slot failed the handshake and the host gave up, permanently. This sample pins it to **`_all`**: that slot exists from broker startup, answers `initialize` itself, unions every opted-in provider, and pushes `notifications/tools/list_changed` when one joins, so a provider that appears an hour later still shows up live. Since then (unreleased) a real slot does the same for its own provider: it answers `initialize` itself and announces the tools when the provider attaches.
+An MCP host starts its servers when *it* starts, completes the `initialize` handshake immediately, and marks a server failed if that handshake does not succeed. A broker slot backed by a browser page, or by anything a user opens later, is empty at that moment. Up to broker 1.13 the stdio bridge gated every frame on its target slot being occupied, so a bridge pinned to a real slot failed the handshake and the host gave up, permanently. This sample pins it to **`_all`**: that slot exists from broker startup, answers `initialize` itself, unions every opted-in provider, and pushes `notifications/tools/list_changed` when one joins, so a provider that appears an hour later still shows up live. Since then (unreleased) a real slot does the same for its own provider: it answers `initialize` itself and announces the tools when the provider attaches.
 
 ## Run it
 
@@ -132,7 +132,7 @@ It did not opt into the aggregate. Membership is requested at registration time,
 Check with `broker_diagnose` on the `_broker` slot, or `providers_list`.
 
 **`initialize` on the bridge fails with `Provider "x" not connected`.**
-A broker up to 1.12 with `MCP_BROKER_STDIO_PROVIDER` pinned to a real slot: that is the ordering problem. Upgrade, or set it to `_all`. A newer broker answers `initialize` on an empty slot; if the tools never appear, the provider registers another slot name, which the broker notes at startup.
+A broker up to 1.13 with `MCP_BROKER_STDIO_PROVIDER` pinned to a real slot: that is the ordering problem. Upgrade, or set it to `_all`. A newer broker answers `initialize` on an empty slot; if the tools never appear, the provider registers another slot name, which the broker notes at startup.
 
 **Everything works from `check.mjs` but not from a browser page.**
 That is not this sample. Browsers add an `Origin` header and the client HTTP surface refuses unlisted origins. See `../browser-provider/`.

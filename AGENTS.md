@@ -97,7 +97,7 @@ Observable signatures, if you are debugging one:
 }
 ```
 
-**Connect to the slot itself: it is the primary path** (unreleased). The host sends `initialize` the instant it launches and treats a failure as a dead server, while your provider does not exist yet. On a slot with no provider the broker now answers `initialize` itself, lists nothing, and, when the provider attaches, handshakes it and sends `notifications/tools/list_changed` (and the prompts and resources ones): the host re-reads and the tools appear. Only calls fail meanwhile (`-32000 ... not connected yet`). Up to broker 1.12, a real slot refused `initialize` and the bridge had to be pinned to `_all`; that still works, `_all` is frozen (§5).
+**Connect to the slot itself: it is the primary path** (unreleased). The host sends `initialize` the instant it launches and treats a failure as a dead server, while your provider does not exist yet. On a slot with no provider the broker now answers `initialize` itself, lists nothing, and, when the provider attaches, handshakes it and sends `notifications/tools/list_changed` (and the prompts and resources ones): the host re-reads and the tools appear. Only calls fail meanwhile (`-32000 ... not connected yet`). Up to broker 1.13, a real slot refused `initialize` and the bridge had to be pinned to `_all`; that still works, `_all` is frozen (§5).
 
 **One broker per port.** A second host entry spawning another broker cannot bind and dies; the host says `Connection closed` and the real `EADDRINUSE` diagnosis is only in `mcp-server-<name>.log`.
 
@@ -249,7 +249,7 @@ A provider that serves its own kind of resource (SCADA first) can make the broke
 | WebSocket closes `1008 Slot already held by a live provider` after a reload | a stale socket still holds the slot and answered the last heartbeat | release on `pagehide`; under the default `providerTakeover: "liveness"` the newcomer takes the slot as soon as the incumbent misses a ping (one interval, default 30 s). `"reject"` never hands over; `"always"` needs `providerAuth` and the same principal, else it falls back to `"liveness"` and says so |
 | MCP host: `Connection closed`, no cause | a second broker could not bind the port | one broker per port; read `mcp-server-<name>.log` for `EADDRINUSE` |
 | HTTP 403 `invalid_origin` from a page the broker itself serves | **a static mount does not exempt the origin it serves** | list that exact origin (scheme and port included) in `allowedOrigins` / `MCP_BROKER_ALLOWED_ORIGINS` |
-| `Provider "<slot>" not connected` at host start | broker 1.12 or earlier: a slot without a provider refused `initialize` | upgrade (the slot now answers `initialize` itself and announces the tools later), or point `MCP_BROKER_STDIO_PROVIDER` at `_all` |
+| `Provider "<slot>" not connected` at host start | broker 1.13 or earlier: a slot without a provider refused `initialize` | upgrade (the slot now answers `initialize` itself and announces the tools later), or point `MCP_BROKER_STDIO_PROVIDER` at `_all` |
 | Tools of a slot stay empty in the host | the provider never attached, or the host ignores `tools/list_changed` | `provider_status({ name })`; reconnect the host once the provider is up |
 | `_all` shows only `_broker-*` tools | nothing opted in | see §5; verify with `tools/list` on `_all`, never assume an opt-in took |
 | Host's tool list goes empty after enabling authorization | the stdio bridge is anonymous | grant the anonymous subject, or stop bridging in authorized deployments |
