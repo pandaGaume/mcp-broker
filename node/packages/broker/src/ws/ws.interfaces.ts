@@ -2,7 +2,7 @@ import type { ILimitsConfig } from "../limits/controller";
 import type { IBrokerMdnsOptions } from "../discovery/mdns";
 import type { ServerResponse } from "http";
 import type { WebSocket } from "ws";
-import type { GrammarResolverOptions, IMessageTransport } from "@cyanmycelium/mcp-core";
+import type { GrammarResolverOptions, IMessageTransport, McpLoggingLevel } from "@cyanmycelium/mcp-core";
 import type { StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
 import type { IStdioUpstreamConfig } from "../stdio.upstream";
 import type { IRemoteUpstreamConfig } from "../remote.upstream";
@@ -41,6 +41,9 @@ export type ResponseSink =
     | { type: "ws"; socket: WebSocket }
     | { type: "sse"; sessionId: string }
     | { type: "http-session"; sessionId: string }
+    // One stateless Streamable HTTP exchange (revision 2026-07-28): one POST,
+    // one request, answered on that POST's response.
+    | { type: "http-exchange"; exchangeId: string }
     | { type: "stdio" }
     | { type: "internal"; client: IInternalClient }
     // A request the broker itself sent (an aggregated `resources/subscribe`,
@@ -146,6 +149,54 @@ export interface IHttpSession {
     principal: IPrincipal | null;
 }
 
+/**
+ * One stateless Streamable HTTP exchange (revision 2026-07-28) in flight on a
+ * slot: a POST carrying one request, whose response stays open until the
+ * request is answered (or, for a listen or an event stream, until the client
+ * closes it).
+ */
+export interface IStatelessExchange {
+    /** The exchange's server-side transport, as handed over by the endpoint. */
+    readonly transport: IMessageTransport;
+    /** The caller that sent the POST. Fixed: an exchange carries one request. */
+    readonly principal: IPrincipal | null;
+    /** The client's id for the request, once the frame arrived. */
+    clientId?: string | number;
+    /** The request's method, once the frame arrived. */
+    method?: string;
+    /**
+     * Set when the provider speaks only the handshake revisions: the broker
+     * relays the request inside its own session with the provider and
+     * completes the answer the way a stateless server would.
+     */
+    translated?: boolean;
+    /** With `translated`: the provider's `serverInfo`, from the broker's session, for the answer's `_meta`. */
+    serverInfo?: unknown;
+    /** Set for a `subscriptions/listen` the broker serves itself, with what it acknowledged. */
+    listen?: IBrokerListen;
+    /**
+     * The lowest `notifications/message` level the request asked for, from
+     * its `_meta`. A log the provider emits while the request is pending is
+     * written on this exchange when it is at that level or above.
+     */
+    logLevel?: McpLoggingLevel;
+    /**
+     * The client's `progressToken`. The provider receives a token of the
+     * broker's naming this exchange, and its progress comes back here only.
+     */
+    progressToken?: string | number;
+}
+
+/** What a `subscriptions/listen` served by the broker delivers. */
+export interface IBrokerListen {
+    readonly toolsListChanged: boolean;
+    readonly promptsListChanged: boolean;
+    readonly resourcesListChanged: boolean;
+}
+
+/** Which revisions a provider answers: found once per attachment, by a `server/discover` probe. */
+export type ProviderEra = "stateless" | "handshake";
+
 /** One request the broker sent to a provider and is still waiting on. */
 export interface IPendingRequest {
     /** Where the answer goes when it arrives. */
@@ -220,6 +271,16 @@ export interface IProviderState {
      * handshakes it and announces `list_changed` so those clients re-read.
      */
     answeredWithoutProvider?: boolean;
+    /** Stateless exchanges in flight on this slot, keyed by the endpoint's exchange id. */
+    readonly statelessExchanges: Map<string, IStatelessExchange>;
+    /** The provider's era, probed on the first stateless request after it attached. Reset on attach and detach. */
+    era?: Promise<ProviderEra>;
+    /**
+     * The `initialize` result of the session the broker opened with a
+     * handshake-only provider, to relay stateless requests in. Reset on attach
+     * and detach.
+     */
+    handshake?: Promise<Record<string, unknown>>;
 }
 
 // ---------------------------------------------------------------------------

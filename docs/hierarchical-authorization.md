@@ -137,7 +137,9 @@ on the slot's resource. The built-in table is:
 | `prompts/list`, `prompts/get` | `mcp.prompts.read` |
 | `completion/complete` | `mcp.completion.use` |
 | `logging/setLevel` | `mcp.logging.configure` |
+| `events/list`, `events/poll`, `events/stream` (MCP Events extension, protocol 2026-07-28) | `mcp.events.read` |
 | `initialize`, `server/discover`, `ping`, `resources/unsubscribe`, responses | nothing: every session needs them |
+| `subscriptions/listen` (protocol 2026-07-28) | nothing by itself: each notification it carries is checked, and each URI it names is checked like a `resources/subscribe` |
 | any other request | `methodCapabilities[method]`, otherwise `mcp.unclassified-method` |
 | any other notification | nothing |
 

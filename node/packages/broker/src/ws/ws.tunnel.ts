@@ -9,7 +9,16 @@ import * as nodePath from "path";
 import { randomUUID } from "crypto";
 import type { IncomingMessage, ServerResponse } from "http";
 import { WebSocket, WebSocketServer, type VerifyClientCallbackAsync } from "ws";
-import { createEventEmitter, negotiateProtocolVersion } from "@cyanmycelium/mcp-core";
+import {
+    createEventEmitter,
+    MCP_CACHEABLE_METHODS,
+    MCP_LATEST_PROTOCOL_VERSION,
+    MCP_LOGGING_LEVELS,
+    MCP_META,
+    MCP_STATELESS_PROTOCOL_VERSIONS,
+    MCP_STATELESS_REMOVED_METHODS,
+    negotiateProtocolVersion,
+} from "@cyanmycelium/mcp-core";
 import type { IEventEmitter, IEventSource, IMessageTransport, IMcpServer } from "@cyanmycelium/mcp-core";
 import { StdioTransport, StreamableHttpEndpoint } from "@cyanmycelium/mcp-core/node";
 // The broker is itself a provider: it publishes its own `_broker` and `_all`
@@ -70,8 +79,10 @@ import type {
     IInternalClient,
     ILoopbackProviderHandle,
     IProviderState,
+    IStatelessExchange,
     IWsTunnelOptions,
     McpEndpointKind,
+    ProviderEra,
     ProviderTakeoverMode,
     ResponseSink,
     WsConnectRole,
@@ -153,6 +164,8 @@ function sameSink(a: ResponseSink, b: ResponseSink): boolean {
             return b.type === "sse" && b.sessionId === a.sessionId;
         case "http-session":
             return b.type === "http-session" && b.sessionId === a.sessionId;
+        case "http-exchange":
+            return b.type === "http-exchange" && b.exchangeId === a.exchangeId;
         case "stdio":
             return b.type === "stdio";
         case "internal":
@@ -172,6 +185,78 @@ const EMPTY_LISTS: Readonly<Record<string, Record<string, unknown[]>>> = Object.
     "resources/list": { resources: [] },
     "resources/templates/list": { resourceTemplates: [] },
 });
+
+// ---------------------------------------------------------------------------
+// Stateless relay (protocol 2026-07-28)
+// ---------------------------------------------------------------------------
+
+/**
+ * How long the broker waits for a provider to answer its `server/discover`
+ * probe before taking it for a handshake-only provider. Short on purpose: the
+ * first stateless request of the slot waits on it, and a provider that
+ * ignores unknown methods would otherwise hold it for the whole request
+ * deadline.
+ */
+const STATELESS_PROBE_TIMEOUT_MS = 5_000;
+
+/** The stateless revision the broker writes its own requests in. */
+const STATELESS_REVISION = MCP_STATELESS_PROTOCOL_VERSIONS[0] ?? "2026-07-28";
+
+/**
+ * Requests that stay open until the client closes them: no request deadline
+ * applies, and the broker answers them itself when it stops.
+ */
+const LONG_LIVED_METHODS: ReadonlySet<string> = new Set(["subscriptions/listen", "events/stream"]);
+
+/** The `_meta` keys a stateless request carries and a handshake-only provider must not see. */
+const STATELESS_REQUEST_META_KEYS: readonly string[] = [MCP_META.protocolVersion, MCP_META.clientCapabilities, MCP_META.clientInfo, MCP_META.logLevel];
+
+/**
+ * Prefix of the `progressToken` the broker hands a provider in place of a
+ * stateless client's, followed by the exchange id (a random UUID): the
+ * provider's progress then names the one exchange it belongs to.
+ */
+const EXCHANGE_PROGRESS_PREFIX = "broker-exchange:";
+
+/** The `subscriptions/listen` flag each list notification answers to. */
+const LIST_CHANGED_FLAG: Readonly<Record<string, "toolsListChanged" | "promptsListChanged" | "resourcesListChanged">> = Object.freeze({
+    "notifications/tools/list_changed": "toolsListChanged",
+    "notifications/prompts/list_changed": "promptsListChanged",
+    "notifications/resources/list_changed": "resourcesListChanged",
+});
+
+/** `params._meta` of a frame, when it is an object. */
+function metaOf(message: Record<string, unknown>): Record<string, unknown> | undefined {
+    const params = message.params;
+    if (typeof params !== "object" || params === null || Array.isArray(params)) return undefined;
+    const meta = (params as Record<string, unknown>)._meta;
+    return typeof meta === "object" && meta !== null && !Array.isArray(meta) ? (meta as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Completes a handshake-revision answer as a stateless server would have
+ * written it (mcp-core's `_decorateStateless`): `resultType`, caching hints
+ * on cacheable results, and `-32602` for a resource not found.
+ */
+function completeStatelessAnswer(message: Record<string, unknown>, method: string | undefined, serverInfo: unknown): void {
+    const error = message.error as { code?: unknown; message?: unknown; data?: unknown } | undefined;
+    if (error && typeof error === "object") {
+        if (error.code === -32002) message.error = { code: -32602, message: error.message, ...(error.data !== undefined ? { data: error.data } : {}) };
+        return;
+    }
+    const result: Record<string, unknown> =
+        typeof message.result === "object" && message.result !== null && !Array.isArray(message.result) ? { ...(message.result as Record<string, unknown>) } : {};
+    if (result.resultType === undefined) result.resultType = "complete";
+    if (serverInfo !== undefined) {
+        const meta = typeof result._meta === "object" && result._meta !== null && !Array.isArray(result._meta) ? (result._meta as Record<string, unknown>) : {};
+        result._meta = { ...meta, [MCP_META.serverInfo]: serverInfo };
+    }
+    if (method !== undefined && MCP_CACHEABLE_METHODS.includes(method) && result.resultType === "complete") {
+        if (result.ttlMs === undefined) result.ttlMs = 0;
+        if (result.cacheScope === undefined) result.cacheScope = "private";
+    }
+    message.result = result;
+}
 
 /** Default heartbeat period, in ms, for `providerHeartbeatIntervalMs`. */
 const DEFAULT_PROVIDER_HEARTBEAT_MS = 30_000;
@@ -463,6 +548,12 @@ export class WsTunnel implements IBrokerContext {
 
     /** The `X-Correlation-Id` of the Streamable HTTP request being served, if it sent one. */
     private readonly _httpCorrelation = new AsyncLocalStorage<string | undefined>();
+    /**
+     * The caller of the Streamable HTTP request being handled. A stateless
+     * exchange is created inside the endpoint, which knows nothing of the
+     * broker's principals; it reads its caller from here.
+     */
+    private readonly _httpPrincipal = new AsyncLocalStorage<IPrincipal | null>();
 
     /** Slots already warned about for a `broker/*` notification the broker does not handle. */
     private readonly _brokerNotificationWarnedProviders = new Set<string>();
@@ -1604,7 +1695,8 @@ export class WsTunnel implements IBrokerContext {
         frame: string,
         sink: ResponseSink,
         principal: IPrincipal | null = null,
-        clientCorrelationId?: string
+        clientCorrelationId?: string,
+        options: { readonly longLived?: boolean } = {}
     ): string {
         let parsed: unknown;
         try {
@@ -1686,7 +1778,8 @@ export class WsTunnel implements IBrokerContext {
         const trace = ensureTraceparent(message);
 
         const brokerId = `${BROKER_REQUEST_ID_PREFIX}${this._limits ? this._requestEpoch + "-" : ""}${this._nextRequestId++}`;
-        const timeout = this._requestTimeoutMs();
+        // A listen or an event stream is answered only when it ends: no deadline.
+        const timeout = options.longLived ? 0 : this._requestTimeoutMs();
 
         // A provider that declared an authorization domain gets, with each
         // request, a reference to whoever sent it: valid on this slot, for as
@@ -1774,6 +1867,9 @@ export class WsTunnel implements IBrokerContext {
                 // The session transport decides whether this answers a held-open
                 // POST or travels on the GET stream: it correlates by id.
                 state.httpSessions.get(sink.sessionId)?.transport.send(data);
+                return;
+            case "http-exchange":
+                this._deliverToExchange(state, sink.exchangeId, data);
                 return;
             case "stdio":
                 this._stdioClientTransport?.send(data);
@@ -2501,7 +2597,7 @@ export class WsTunnel implements IBrokerContext {
         // body asynchronously and hands the frame over without the request, so
         // the header rides in an async scope; a field on the session would be
         // overwritten by a concurrent request on the same session.
-        this._httpCorrelation.run(correlationHeaderOf(req), () => void this._endpointFor(providerName, state).handleRequest(req, res));
+        this._httpPrincipal.run(principal, () => this._httpCorrelation.run(correlationHeaderOf(req), () => void this._endpointFor(providerName, state).handleRequest(req, res)));
     }
 
     /**
@@ -2517,14 +2613,13 @@ export class WsTunnel implements IBrokerContext {
 
         state.httpEndpoint = new StreamableHttpEndpoint({
             allowedOrigins: this._allowedOrigins,
-            // The relay below assumes a session opened by initialize, which it
-            // replays to the provider. Until the broker relays stateless
-            // requests (protocol 2026-07-28), a session-less POST is refused
-            // like before mcp-core 1.6.0, and a dual-era client falls back to
-            // initialize.
-            statelessProtocolVersions: [],
 
             createServer: (transport, sessionId, _principal) => {
+                // A POST of protocol 2026-07-28 outside any session: one
+                // request, one exchange. The endpoint has already checked its
+                // headers against its body.
+                if (sessionId.startsWith("stateless:")) return this._openStatelessExchange(state, providerName, sessionId, transport);
+
                 const session: IHttpSession = { transport, principal: null };
                 state.httpSessions.set(sessionId, session);
 
@@ -2567,6 +2662,391 @@ export class WsTunnel implements IBrokerContext {
         }
 
         this._sendToProvider(state, providerName, this._trackRequest(state, providerName, frame, { type: "http-session", sessionId }, session.principal), session.principal);
+    }
+
+    // -------------------------------------------------------------------------
+    // Stateless relay (protocol 2026-07-28)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Opens one stateless exchange: a POST outside any session, carrying one
+     * request. Returned to the endpoint in place of a server: the server is
+     * the provider, at the far end of the tunnel.
+     */
+    private _openStatelessExchange(state: IProviderState, providerName: string, exchangeId: string, transport: IMessageTransport): { start: () => void; stop: () => void } {
+        const exchange: IStatelessExchange = { transport, principal: this._httpPrincipal.getStore() ?? null };
+        state.statelessExchanges.set(exchangeId, exchange);
+        transport.onMessage = (frame: string) => this._fromStatelessExchange(state, providerName, exchangeId, exchange, frame);
+        return {
+            start: () => openTransport(transport),
+            stop: () => this._closeStatelessExchange(state, providerName, exchangeId, exchange),
+        };
+    }
+
+    /**
+     * Ends one stateless exchange: once answered, when the client closed its
+     * stream (which cancels the request), or when the broker stops.
+     *
+     * Still open means the broker is stopping: a listen or an event stream is
+     * answered the way a stopping server answers it, anything else with an
+     * error. A request still pending at the provider is withdrawn there.
+     */
+    private _closeStatelessExchange(state: IProviderState, providerName: string, exchangeId: string, exchange: IStatelessExchange): void {
+        if (state.statelessExchanges.get(exchangeId) !== exchange) return;
+        // Removed first: answering below finishes the exchange, and the endpoint calls this again.
+        state.statelessExchanges.delete(exchangeId);
+
+        const id = exchange.clientId;
+        if (exchange.transport.isOpen && id !== undefined) {
+            const answer =
+                exchange.method !== undefined && LONG_LIVED_METHODS.has(exchange.method)
+                    ? { jsonrpc: "2.0", id, result: { resultType: "complete", _meta: { [MCP_META.subscriptionId]: id } } }
+                    : { jsonrpc: "2.0", id, error: { code: -32000, message: "The broker is stopping" } };
+            exchange.transport.send(JSON.stringify(answer));
+        }
+
+        if (exchange.listen) void this._subscriptions.removeClient(`exchange:${exchangeId}`);
+
+        for (const [brokerId, entry] of state.pending) {
+            if (entry.sink.type !== "http-exchange" || entry.sink.exchangeId !== exchangeId) continue;
+            state.pending.delete(brokerId);
+            this._authority.releaseRef(entry.callerRef);
+            this._limits?.cancelled(providerName, String(brokerId));
+            this._rememberCancelled(providerName, brokerId);
+            if (this._isProviderConnected(providerName, state)) {
+                this._sendToProvider(
+                    state,
+                    providerName,
+                    JSON.stringify({ jsonrpc: "2.0", method: CANCELLED_METHOD, params: { requestId: brokerId, reason: "the client ended the exchange" } })
+                );
+            }
+        }
+    }
+
+    /**
+     * Writes one frame on a stateless exchange's response.
+     *
+     * A notification on a listen the broker serves is tagged with the listen's
+     * id, as the 2026-07-28 revision requires. The answer to a request relayed
+     * in the broker's own session with a handshake-only provider is completed
+     * the way a stateless server writes it.
+     */
+    private _deliverToExchange(state: IProviderState, exchangeId: string, data: string): void {
+        const exchange = state.statelessExchanges.get(exchangeId);
+        if (!exchange) return;
+        const message = parseObjectFrame(data);
+        if (!message) return;
+
+        if (typeof message.method === "string" && message.id === undefined) {
+            if (exchange.listen && exchange.clientId !== undefined) {
+                const params = typeof message.params === "object" && message.params !== null && !Array.isArray(message.params) ? (message.params as Record<string, unknown>) : {};
+                message.params = { ...params, _meta: { ...(metaOf(message) ?? {}), [MCP_META.subscriptionId]: exchange.clientId } };
+            }
+            exchange.transport.send(JSON.stringify(message));
+            return;
+        }
+
+        if (exchange.translated && message.id === exchange.clientId) completeStatelessAnswer(message, exchange.method, exchange.serverInfo);
+        exchange.transport.send(JSON.stringify(message));
+    }
+
+    /**
+     * Takes the one request of a stateless exchange. Notifications are
+     * ignored: the only one the endpoint delivers is the cancellation it
+     * synthesizes when the client closes its stream, and closing the exchange
+     * withdraws whatever was pending.
+     */
+    private _fromStatelessExchange(state: IProviderState, providerName: string, exchangeId: string, exchange: IStatelessExchange, frame: string): void {
+        const message = parseObjectFrame(frame);
+        const id = message?.id;
+        const method = message?.method;
+        if (!message || (typeof id !== "string" && typeof id !== "number") || typeof method !== "string") return;
+        exchange.clientId = id;
+        exchange.method = method;
+        const fail = (code: number, text: string) => this._deliverToExchange(state, exchangeId, JSON.stringify({ jsonrpc: "2.0", id, error: { code, message: text } }));
+
+        if (!this._authorizeMcpFrame(providerName, frame, exchange.principal)) {
+            exchange.transport.send(this._policyDeniedPayload(frame));
+            return;
+        }
+        if (MCP_STATELESS_REMOVED_METHODS.includes(method)) {
+            fail(-32601, `Method not found: ${method} does not exist in protocol ${STATELESS_REVISION}`);
+            return;
+        }
+        void this._relayStateless(state, providerName, exchangeId, exchange, message, method).catch((error: unknown) => {
+            fail(-32603, `The broker could not relay the request: ${(error as Error).message}`);
+        });
+    }
+
+    /**
+     * Relays one stateless request, by the provider's era:
+     *
+     * - no provider: the broker answers `server/discover`, the lists (empty)
+     *   and `subscriptions/listen` itself, like `initialize` on an empty slot;
+     * - a provider that speaks 2026-07-28: the request goes as it is, and its
+     *   answer and tagged notifications come back to this exchange;
+     * - a handshake-only provider: the broker relays the request in the
+     *   session it opened with the provider, without the stateless `_meta`,
+     *   and answers `server/discover` and `subscriptions/listen` itself.
+     */
+    private async _relayStateless(
+        state: IProviderState,
+        providerName: string,
+        exchangeId: string,
+        exchange: IStatelessExchange,
+        message: Record<string, unknown>,
+        method: string
+    ): Promise<void> {
+        const id = message.id as string | number;
+        const sink: ResponseSink = { type: "http-exchange", exchangeId };
+        const answer = (result: Record<string, unknown>) => this._deliverToExchange(state, exchangeId, JSON.stringify({ jsonrpc: "2.0", id, result }));
+        const live = () => state.statelessExchanges.get(exchangeId) === exchange;
+        const relay = () => {
+            if (!this._isProviderConnected(providerName, state)) {
+                exchange.transport.send(this._notConnectedPayload(providerName, JSON.stringify(message)));
+                return;
+            }
+            const frame = this._trackRequest(state, providerName, JSON.stringify(message), sink, exchange.principal, undefined, { longLived: LONG_LIVED_METHODS.has(method) });
+            this._sendToProvider(state, providerName, frame, exchange.principal);
+        };
+
+        if (!this._isProviderConnected(providerName, state)) {
+            const empty = EMPTY_LISTS[method];
+            if (method === "server/discover") answer(this._discoverResult(this._initializeWithoutProvider(providerName, undefined)));
+            else if (empty !== undefined) answer({ ...empty, resultType: "complete", ttlMs: 0, cacheScope: "private" });
+            else if (method === "subscriptions/listen") await this._openBrokerListen(state, providerName, exchangeId, exchange, message, null);
+            else {
+                exchange.transport.send(this._notConnectedPayload(providerName, JSON.stringify(message)));
+                return;
+            }
+            // When a provider attaches, the clients answered alone are told to re-read.
+            state.answeredWithoutProvider = true;
+            return;
+        }
+
+        const era = await this._providerEra(providerName, state);
+        if (!live()) return;
+        this._scopeExchangeNotifications(exchange, exchangeId, message, method);
+        if (era === "stateless") {
+            relay();
+            return;
+        }
+
+        const handshake = await this._handshakeSession(providerName, state);
+        if (!live()) return;
+        if (method === "server/discover") {
+            answer(this._discoverResult(handshake));
+            return;
+        }
+        if (method === "subscriptions/listen") {
+            await this._openBrokerListen(state, providerName, exchangeId, exchange, message, handshake);
+            return;
+        }
+        const meta = metaOf(message);
+        if (meta) {
+            for (const key of STATELESS_REQUEST_META_KEYS) delete meta[key];
+            if (Object.keys(meta).length === 0) delete (message.params as Record<string, unknown>)._meta;
+        }
+        exchange.translated = true;
+        exchange.serverInfo = handshake.serverInfo;
+        relay();
+    }
+
+    /**
+     * Notes which logs and which progress a relayed stateless request asked
+     * for, before its `_meta` goes to the provider.
+     *
+     * The provider emits both on its connection to the broker, without
+     * naming the request, whatever revision it speaks. So the client's
+     * `progressToken` is swapped for one naming this exchange (see
+     * {@link _routeExchangeProgress}), and the `logLevel` is kept here for
+     * {@link _broadcast}. A long-lived request gets neither: it carries
+     * notifications of its own.
+     */
+    private _scopeExchangeNotifications(exchange: IStatelessExchange, exchangeId: string, message: Record<string, unknown>, method: string): void {
+        if (LONG_LIVED_METHODS.has(method)) return;
+        const meta = metaOf(message);
+        if (!meta) return;
+        const level = meta[MCP_META.logLevel];
+        if (typeof level === "string" && (MCP_LOGGING_LEVELS as readonly string[]).includes(level)) exchange.logLevel = level as IStatelessExchange["logLevel"];
+        const token = meta.progressToken;
+        if (typeof token === "string" || typeof token === "number") {
+            exchange.progressToken = token;
+            meta.progressToken = `${EXCHANGE_PROGRESS_PREFIX}${exchangeId}`;
+        }
+    }
+
+    /**
+     * Delivers a `notifications/progress` naming a stateless exchange (see
+     * {@link _scopeExchangeNotifications}) to that exchange only, with the
+     * client's token back in place. Returns `false` for any other frame. One
+     * whose exchange has ended is dropped.
+     */
+    private _routeExchangeProgress(state: IProviderState, providerName: string, message: Record<string, unknown>): boolean {
+        if (message.method !== "notifications/progress") return false;
+        const params = message.params as Record<string, unknown> | undefined;
+        const token = params?.progressToken;
+        if (typeof token !== "string" || !token.startsWith(EXCHANGE_PROGRESS_PREFIX)) return false;
+        const exchange = state.statelessExchanges.get(token.slice(EXCHANGE_PROGRESS_PREFIX.length));
+        if (!exchange || exchange.progressToken === undefined) return true;
+        params!.progressToken = exchange.progressToken;
+        const data = JSON.stringify(message);
+        if (this._authorizeMcpFrame(providerName, data, exchange.principal)) exchange.transport.send(data);
+        return true;
+    }
+
+    /**
+     * Which revisions the provider serving `providerName` answers, probed once
+     * per attachment with a `server/discover` of the broker's own. Anything
+     * but a discovery naming the broker's stateless revision (an error, a
+     * refusal, silence past {@link STATELESS_PROBE_TIMEOUT_MS}) means the
+     * provider speaks only the handshake revisions.
+     */
+    private _providerEra(providerName: string, state: IProviderState): Promise<ProviderEra> {
+        if (state.era) return state.era;
+        const probe = this._brokerRequest(providerName, "server/discover", {
+            _meta: {
+                [MCP_META.protocolVersion]: STATELESS_REVISION,
+                [MCP_META.clientCapabilities]: {},
+                [MCP_META.clientInfo]: { name: this.name, version: this.version },
+            },
+        }).then((reply): ProviderEra => {
+            const versions = (reply.result as { supportedVersions?: unknown } | undefined)?.supportedVersions;
+            return Array.isArray(versions) && versions.includes(STATELESS_REVISION) ? "stateless" : "handshake";
+        });
+        let timer: NodeJS.Timeout | undefined;
+        const silence = new Promise<ProviderEra>((resolve) => {
+            timer = setTimeout(() => resolve("handshake"), STATELESS_PROBE_TIMEOUT_MS);
+            timer.unref?.();
+        });
+        state.era = Promise.race([probe, silence]).finally(() => clearTimeout(timer));
+        return state.era;
+    }
+
+    /**
+     * The session the broker holds with a handshake-only provider, to relay
+     * stateless requests in: opened once per attachment with the last
+     * `initialize` a client sent on the slot, or the broker's own. Resolves
+     * with the provider's `initialize` result (empty when it refused).
+     */
+    private _handshakeSession(providerName: string, state: IProviderState): Promise<Record<string, unknown>> {
+        if (state.handshake) return state.handshake;
+        const params = state.lastInitializeParams ?? {
+            protocolVersion: MCP_LATEST_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: { name: this.name, version: this.version },
+        };
+        state.handshake = this._brokerRequest(providerName, "initialize", params).then((reply) => {
+            if (reply.error) {
+                console.warn(
+                    `[broker] provider "${providerName}" refused the initialize the broker sends to relay stateless requests: ${reply.error.message}. Requests are relayed anyway.`
+                );
+                return {};
+            }
+            const current = this._providers.get(providerName);
+            if (current) this._sendToProvider(current, providerName, JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+            return typeof reply.result === "object" && reply.result !== null && !Array.isArray(reply.result) ? (reply.result as Record<string, unknown>) : {};
+        });
+        return state.handshake;
+    }
+
+    /**
+     * A `server/discover` result built from an `initialize` result. `logging`
+     * stays: a request carrying `logLevel` gets the provider's log messages
+     * (see {@link _broadcast}).
+     */
+    private _discoverResult(init: Record<string, unknown>): Record<string, unknown> {
+        const capabilities =
+            typeof init.capabilities === "object" && init.capabilities !== null && !Array.isArray(init.capabilities) ? { ...(init.capabilities as Record<string, unknown>) } : {};
+        return {
+            resultType: "complete",
+            supportedVersions: [...MCP_STATELESS_PROTOCOL_VERSIONS],
+            capabilities,
+            ...(typeof init.instructions === "string" ? { instructions: init.instructions } : {}),
+            ttlMs: 0,
+            cacheScope: "private",
+            ...(init.serverInfo !== undefined ? { _meta: { [MCP_META.serverInfo]: init.serverInfo } } : {}),
+        };
+    }
+
+    /**
+     * Serves a `subscriptions/listen` itself, for a slot with no provider or
+     * a handshake-only one: acknowledges what it can honor, then stays open.
+     *
+     * List changes come from the provider's session notifications (see
+     * {@link _broadcast}); resource updates from the broker's subscription
+     * registry, so N listens on one URI still cost the provider one
+     * `resources/subscribe`. Each URI is checked like a `resources/subscribe`;
+     * a refused one is left out of the acknowledgement. With no provider,
+     * only the list flags are honored: the client re-reads and listens again
+     * once the provider attached.
+     */
+    private async _openBrokerListen(
+        state: IProviderState,
+        providerName: string,
+        exchangeId: string,
+        exchange: IStatelessExchange,
+        message: Record<string, unknown>,
+        init: Record<string, unknown> | null
+    ): Promise<void> {
+        const id = message.id as string | number;
+        const params = message.params as Record<string, unknown> | undefined;
+        const asked = params?.notifications;
+        if (typeof asked !== "object" || asked === null || Array.isArray(asked)) {
+            this._deliverToExchange(state, exchangeId, JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32602, message: "subscriptions/listen needs params.notifications" } }));
+            return;
+        }
+        const wants = asked as Record<string, unknown>;
+        const capabilities = (init ? init.capabilities : { tools: {}, prompts: {}, resources: {} }) as Record<string, unknown> | undefined;
+        const has = (name: string) => typeof capabilities?.[name] === "object" && capabilities[name] !== null;
+
+        const honored: Record<string, unknown> = {};
+        if (wants.toolsListChanged === true && has("tools")) honored.toolsListChanged = true;
+        if (wants.promptsListChanged === true && has("prompts")) honored.promptsListChanged = true;
+        if (wants.resourcesListChanged === true && has("resources")) honored.resourcesListChanged = true;
+
+        const client = `exchange:${exchangeId}`;
+        if (Array.isArray(wants.resourceSubscriptions) && init && has("resources") && providerName !== AggregateServer.SLOT) {
+            const sink: ResponseSink = { type: "http-exchange", exchangeId };
+            const uris: string[] = [];
+            for (const uri of new Set(wants.resourceSubscriptions.filter((value): value is string => typeof value === "string" && value.length > 0))) {
+                const check = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "resources/subscribe", params: { uri } });
+                if (!this._authorizeMcpFrame(providerName, check, exchange.principal)) continue;
+                if ((await this._subscriptions.subscribe(providerName, client, sink, uri)).ok) uris.push(uri);
+                if (state.statelessExchanges.get(exchangeId) !== exchange) break;
+            }
+            honored.resourceSubscriptions = uris;
+        }
+        if (state.statelessExchanges.get(exchangeId) !== exchange) {
+            void this._subscriptions.removeClient(client);
+            return;
+        }
+
+        exchange.listen = {
+            toolsListChanged: honored.toolsListChanged === true,
+            promptsListChanged: honored.promptsListChanged === true,
+            resourcesListChanged: honored.resourcesListChanged === true,
+        };
+        // The acknowledgement is the first message of the subscription; it holds the response open.
+        this._deliverToExchange(state, exchangeId, JSON.stringify({ jsonrpc: "2.0", method: "notifications/subscriptions/acknowledged", params: { notifications: honored } }));
+    }
+
+    /**
+     * Delivers a provider notification tagged with a stateless request's id
+     * (a listen or an event stream relayed as it is) to that request's
+     * exchange, with the client's id in the tag. Returns `false` for an
+     * untagged notification. A tagged one nothing waits for is dropped.
+     */
+    private _routeTaggedNotification(state: IProviderState, providerName: string, message: Record<string, unknown>): boolean {
+        const meta = metaOf(message);
+        if (!meta || !(MCP_META.subscriptionId in meta)) return false;
+        const tag = meta[MCP_META.subscriptionId];
+        const entry = typeof tag === "string" || typeof tag === "number" ? state.pending.get(tag) : undefined;
+        if (!entry || entry.sink.type !== "http-exchange") return true;
+        meta[MCP_META.subscriptionId] = entry.clientId;
+        const data = JSON.stringify(message);
+        if (this._authorizeMcpFrame(providerName, data, this._principalOfSink(state, entry.sink))) this._deliverToSink(state, entry.sink, data);
+        return true;
     }
 
     /** Writes one JSON-RPC message as an SSE `message` event. */
@@ -3174,11 +3654,18 @@ export class WsTunnel implements IBrokerContext {
                 if (entry) {
                     state.pending.delete(msg.id);
                     this._authority.releaseRef(entry.callerRef);
+                    // A listen or an event stream ending names itself in its answer's `_meta`, by the id the provider saw.
+                    const resultMeta = metaOf({ params: (msg as { result?: unknown }).result });
+                    if (resultMeta && resultMeta[MCP_META.subscriptionId] === msg.id) resultMeta[MCP_META.subscriptionId] = entry.clientId;
                     (msg as { id: unknown }).id = entry.clientId;
                     this._deliverToSink(state, entry.sink, JSON.stringify(msg));
                 } else if (!this._cancelledIds.delete(cancellationKey(providerName, msg.id))) {
                     this._warnUnmatchedResponseId(providerName, msg.id);
                 }
+            } else if (this._routeTaggedNotification(state, providerName, msg as Record<string, unknown>)) {
+                // Belongs to one stateless request still open (a listen, an event stream): delivered there only.
+            } else if (this._routeExchangeProgress(state, providerName, msg as Record<string, unknown>)) {
+                // Progress of one stateless request, by the token the broker gave it: delivered there only.
             } else if ((msg as { method?: unknown }).method === "notifications/resources/updated") {
                 // Addressed: only the sessions subscribed to that URI get it.
                 this._routeResourceUpdated(state, providerName, msg as { params?: unknown }, data);
@@ -3405,6 +3892,27 @@ export class WsTunnel implements IBrokerContext {
         for (const ic of state.internalClients) {
             ic.onMessage?.(data);
         }
+        // Stateless exchanges: listens the broker serves itself get the list
+        // changes they asked for; a request pending with a `logLevel` gets the
+        // log messages at that level or above. A log names no request, so
+        // every such request on the slot gets it, as every session does.
+        if (state.statelessExchanges.size > 0) {
+            const message = parseObjectFrame(data);
+            const method = message?.method;
+            const flag = typeof method === "string" ? LIST_CHANGED_FLAG[method] : undefined;
+            if (flag) {
+                for (const [exchangeId, exchange] of state.statelessExchanges) {
+                    if (exchange.listen?.[flag] && this._authorizeMcpFrame(providerName, data, exchange.principal)) this._deliverToExchange(state, exchangeId, data);
+                }
+            } else if (method === "notifications/message") {
+                const level = (message?.params as { level?: unknown } | undefined)?.level;
+                const rank = typeof level === "string" ? (MCP_LOGGING_LEVELS as readonly string[]).indexOf(level) : -1;
+                for (const exchange of state.statelessExchanges.values()) {
+                    if (exchange.logLevel === undefined || rank < MCP_LOGGING_LEVELS.indexOf(exchange.logLevel)) continue;
+                    if (this._authorizeMcpFrame(providerName, data, exchange.principal)) exchange.transport.send(data);
+                }
+            }
+        }
         // Forward notifications to the stdio client if it is watching this provider.
         if (this._stdioClientProvider && this._providers.get(this._stdioClientProvider) === state) {
             this._stdioClientTransport?.send(data);
@@ -3418,6 +3926,9 @@ export class WsTunnel implements IBrokerContext {
      */
     private _failProviderDisconnected(state: IProviderState, name: string): void {
         state.connectedSinceMs = null;
+        // The next provider may speak another revision, and has no session with the broker.
+        state.era = undefined;
+        state.handshake = undefined;
         this._authority.noteSlotDisconnected(name);
         this._subscriptions.providerDisconnected(name);
         this._emitProviderChanged(name);
@@ -3465,6 +3976,7 @@ export class WsTunnel implements IBrokerContext {
                 wsClients: new Set(),
                 internalClients: new Set(),
                 httpEndpoint: null,
+                statelessExchanges: new Map(),
             };
             this._providers.set(name, state);
             this._emitProviderChanged(name);
@@ -3495,6 +4007,8 @@ export class WsTunnel implements IBrokerContext {
                 return `sse:${sink.sessionId}`;
             case "http-session":
                 return `http:${sink.sessionId}`;
+            case "http-exchange":
+                return `exchange:${sink.exchangeId}`;
             case "stdio":
                 return STDIO_CLIENT_KEY;
             case "internal":
@@ -3525,6 +4039,8 @@ export class WsTunnel implements IBrokerContext {
             }
             case "http-session":
                 return state.httpSessions.get(sink.sessionId)?.principal ?? null;
+            case "http-exchange":
+                return state.statelessExchanges.get(sink.exchangeId)?.principal ?? null;
             default:
                 return null;
         }
@@ -3550,10 +4066,10 @@ export class WsTunnel implements IBrokerContext {
         if (!msg) return false;
         const hasId = typeof msg.id === "string" || typeof msg.id === "number";
 
-        // Protocol 2026-07-28 probe. The broker relays the initialize
-        // revisions only, until it relays stateless requests: answering the
-        // probe -32601 makes a dual-era host (Claude Code, mcp-core "auto")
-        // fall back to initialize, whatever the provider behind speaks.
+        // Protocol 2026-07-28 probe on a session transport (WebSocket, SSE,
+        // stdio, an HTTP session). The broker relays stateless requests over
+        // Streamable HTTP only, as POSTs outside a session: here, answering
+        // the probe -32601 makes a dual-era host fall back to initialize.
         if (msg.method === "server/discover") {
             if (hasId)
                 this._deliverToSink(
@@ -3564,7 +4080,8 @@ export class WsTunnel implements IBrokerContext {
                         id: msg.id,
                         error: {
                             code: -32601,
-                            message: "Method not found: server/discover. This broker speaks the initialize revisions (up to 2025-11-25); connect with initialize.",
+                            message:
+                                "Method not found: server/discover. On this transport the broker speaks the initialize revisions (up to 2025-11-25); connect with initialize, or POST stateless requests to /<slot>/mcp without a session.",
                         },
                     })
                 );
@@ -3709,11 +4226,19 @@ export class WsTunnel implements IBrokerContext {
         this._emitProviderChanged(name);
         const state = this._providers.get(name);
         const announce = state?.answeredWithoutProvider === true;
-        if (state) state.answeredWithoutProvider = false;
+        if (state) {
+            state.answeredWithoutProvider = false;
+            state.era = undefined;
+            state.handshake = undefined;
+        }
         if (this._subscriptions.hasSubscriptions(name) || announce) {
             void this._replaySubscriptions(name, announce).catch((error: unknown) => {
                 console.error(`[broker] provider "${name}": restoring the slot's clients failed: ${(error as Error).message}`);
             });
+        } else if (state && [...state.statelessExchanges.values()].some((exchange) => exchange.listen)) {
+            // Listens the broker serves hear list changes through its session with the provider:
+            // an mcp-core server stays silent until it is initialized.
+            void this._handshakeSession(name, state);
         }
     }
 

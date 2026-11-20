@@ -8,7 +8,7 @@
 
 | transport | endpoint | notes |
 |---|---|---|
-| Streamable HTTP | `POST`, `GET`, `DELETE` `http(s)://<host>/<slot>/mcp` | current MCP transport, use this |
+| Streamable HTTP | `POST`, `GET`, `DELETE` `http(s)://<host>/<slot>/mcp` | current MCP transport, use this; sessions (`initialize`) and stateless requests (2026-07-28) |
 | Legacy SSE | `GET http(s)://<host>/<slot>/sse` then `POST .../<slot>/messages` | 2024-11-05 HTTP+SSE, kept for old hosts |
 | Raw WebSocket | `ws(s)://<host>/<slot>` | bare JSON-RPC frames, no session layer |
 | stdio bridge | the broker process itself | one slot per broker process, see `broker://guide/host-config` |
@@ -96,6 +96,50 @@ notification is still broadcast to the whole slot.
   answer is `-32000`, an overlong URI `-32602`.
 - If the provider disconnects, subscriptions are kept and restored when a
   provider comes back, followed by one `updated` per URI so you re-read.
+
+### Protocol 2026-07-28 (stateless)
+
+A `POST /<slot>/mcp` without `Mcp-Session-Id`, whose request carries
+`params._meta["io.modelcontextprotocol/protocolVersion"]`, is one stateless
+request: no handshake, no session, the answer on that POST's response. Send
+the headers the revision requires (`MCP-Protocol-Version`, `Mcp-Method`, and
+`Mcp-Name` for `tools/call`, `prompts/get`, `resources/read` and the Events
+methods); a mismatch is `-32020`. Sessions opened by `initialize` keep working
+at the same URL. WebSocket, SSE and the stdio bridge stay on the handshake
+revisions.
+
+- **The broker probes each provider once** (a `server/discover` of its own, on
+  the first stateless request after the provider attached). A provider that
+  speaks 2026-07-28 (mcp-core 1.6 or later) gets each request as it is: MRTR
+  (`input_required`), `subscriptions/listen` and the Events extension
+  (`events/list`, `events/poll`, `events/stream`) work end to end.
+- **A provider that speaks only the handshake revisions** (C, Python, stdio and
+  remote upstreams, older mcp-core) is relayed in a session the broker opens
+  with it: the stateless `_meta` is removed, the answer gets `resultType`,
+  `ttlMs: 0` and `cacheScope: "private"`, and the broker answers
+  `server/discover` from the provider's `initialize`. Its `subscriptions/listen`
+  is served by the broker: list changes from the provider's session, resource
+  updates through the same shared subscription (N listens on one URI cost the
+  provider one `resources/subscribe`).
+- **Logs and progress**, whatever the provider speaks: a request carrying
+  `_meta.io.modelcontextprotocol/logLevel` gets the provider's
+  `notifications/message` at that level or above on its response. A log names
+  no request, so every such request pending on the slot gets it, and a
+  handshake-only provider's own session level (default `info` in mcp-core) is
+  a floor. `notifications/progress` reaches only the request whose
+  `progressToken` it carries: the provider sees a token of the broker's, the
+  client gets its own back.
+- **A slot with no provider** answers `server/discover`, the lists (empty) and
+  `subscriptions/listen` (list changes only) itself, and announces
+  `list_changed` on the listen when the provider attaches.
+- Methods 2026-07-28 removed (`ping`, `logging/setLevel`, `resources/subscribe`,
+  `resources/unsubscribe`) answer `-32601` with HTTP 404.
+- A listen or an event stream has no request deadline; closing its response
+  cancels it, and the broker withdraws it at the provider. When the broker
+  stops, it answers each one as a stopping server does.
+- Authorization: `server/discover` and `subscriptions/listen` are free (each
+  notification is checked on its way, each listened URI like a
+  `resources/subscribe`); the Events methods need `mcp.events.read`.
 
 ## 4. Browser clients and the origin check
 
