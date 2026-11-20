@@ -24,8 +24,10 @@ and stays the choice for one entry that must follow a changing set of
 providers. `_broker` gives introspection only.
 
 Hosts on protocol 2026-07-28 (Claude Code 2.1.292 and later) probe with
-`server/discover` first. The broker answers it `-32601` on every slot until it
-relays stateless requests, so they fall back to `initialize`.
+`server/discover` first. Over Streamable HTTP the broker relays that revision
+(stateless, no session; see `broker://guide/connect-client`), so they stay on
+it. Over the stdio bridge, WebSocket and SSE the broker answers the probe
+`-32601`, and they fall back to `initialize`.
 
 ## 2. Claude Desktop recipe
 

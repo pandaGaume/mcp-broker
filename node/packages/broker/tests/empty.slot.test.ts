@@ -124,14 +124,14 @@ describe("the 2026-07-28 probe", () => {
 });
 
 describe("dual-era clients through the broker", () => {
-    it('a protocol "auto" client (mcp-core 1.6) falls back to initialize, over Streamable HTTP and on an empty slot', async () => {
+    it('a protocol "auto" client (mcp-core 1.6) goes stateless over Streamable HTTP, on an empty slot too', async () => {
         broker = await startTestBroker({ callers: { host: {} } });
         const client = new McpClient({ name: "host", version: "1" }, new StreamableHttpTransport(broker.mcpUrl("plant"), { headers: broker.bearer("host") }), 5_000, {
             protocol: "auto",
         });
         const opened = await client.connect();
-        expect(client.isStateless).toBe(false);
-        expect(opened.protocolVersion).toBe("2025-11-25");
+        expect(client.isStateless).toBe(true);
+        expect(opened.protocolVersion).toBe("2026-07-28");
         expect(await client.listTools()).toEqual([]);
 
         await attachProvider("plant");
