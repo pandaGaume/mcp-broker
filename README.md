@@ -52,6 +52,10 @@ Python tools use that same C99 transport through a native shared library and
 `Provider`, with TLS, `Multiplex` groups, subscriptions, JSON conversion,
 bounded execution and native polling during long handler calls.
 
+C# applications use [`dotnet/`](dotnet/), a .NET 8 provider transport built on
+`ClientWebSocket` and `System.Text.Json`, with no NuGet dependencies. It publishes
+one MCP server on a dedicated socket or several servers on one multiplexed socket.
+
 ## Repository layout
 
 This repo is a multi-implementation reference. Each language lives under its own folder, with its own build, dependencies, and release pipeline.
@@ -70,7 +74,7 @@ mcp-broker/
 │   ├── samples/                ← the transport-only echo provider the samples share
 │   └── tests/                  ← roundtrip against the Node broker, overnight soak
 ├── python/                     ← Python tools over the libmcpb native transport
-├── dotnet/                     ← .NET implementation (planned)
+├── dotnet/                     ← C# provider transport, dedicated and multiplexed
 ├── samples/                    ← five runnable Node integrations
 ├── docs/                       ← protocol, architecture, endpoints, and the website
 ├── AGENTS.md                   ← start here if you are an AI coding agent
@@ -92,7 +96,7 @@ Open `mcp-broker.code-workspace` in VSCode for a multi-root workspace with the r
 | [c/libmcpb/](c/libmcpb/) | 0.4.2, consumed from the repository | none: C99 sources, compiled into the firmware or the engine module | `c-v*` |
 | [c/espressif/](c/espressif/) | validated on an Arduino Nano ESP32, built for the S3 in CI | ESP-IDF component `mcpb_esp` | with `c-v*` |
 | [c/unreal/](c/unreal/) | built and run on UE 5.7 | plugin `McpBroker` | with `c-v*` |
-| [dotnet/](dotnet/) | planned | `CyanMycelium.Mcp.Broker` on NuGet | `dotnet-v*` |
+| [dotnet/](dotnet/) | provider available from checkout; .NET broker planned | `CyanMycelium.Mcp.Broker.Provider`, project reference, no NuGet publication | none for the provider yet |
 
 Each package carries its own `.npmrc` with the matching `tag-version-prefix`, so run `npm version` from inside the package directory rather than from the workspace root: npm ignores per-workspace `.npmrc` files when invoked at the root, and you would get an unprefixed `v*` tag that no release workflow listens to.
 
