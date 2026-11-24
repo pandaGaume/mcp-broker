@@ -103,7 +103,7 @@ Observable signatures, if you are debugging one:
 
 **The bridge is anonymous.** It reaches its slot with no principal. Invisible until you enable authorization, at which point the host's tool list silently empties.
 
-**Protocol 2026-07-28 hosts fall back to `initialize`.** Claude Code (2.1.292 and later) and other dual-era hosts probe with `server/discover` first. Until the broker relays stateless requests, it answers that probe `-32601` on every slot, which makes them use `initialize`, as the specification intends for an older server.
+**Protocol 2026-07-28 (stateless) is relayed over Streamable HTTP.** Claude Code (2.1.292 and later) and other dual-era hosts probe with `server/discover` first. A `POST /<slot>/mcp` without a session, carrying the revision in `params._meta`, is one stateless request: the broker probes the provider once, relays the request as it is to a provider that speaks 2026-07-28 (mcp-core 1.6+: MRTR, `subscriptions/listen`, Events end to end), and in a session of its own to a handshake-only one (it answers `server/discover` and the listen itself, and completes the answers). Over the stdio bridge, WebSocket and SSE the probe is still answered `-32601`, and hosts fall back to `initialize`. Details: `broker_guide({ topic: "connect-client" })`.
 
 **A host that speaks Streamable HTTP does not need the bridge.** Claude Code (`.mcp.json`), and any host with an `http` server type, can point straight at a slot of a broker you run once, on the side:
 

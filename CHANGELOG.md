@@ -22,6 +22,35 @@ repository; the changes it needed for this release are listed under
 
 ### Added
 
+- **broker** Protocol 2026-07-28 (stateless) over Streamable HTTP. A
+  `POST /<slot>/mcp` without `Mcp-Session-Id` whose request carries its
+  revision in `params._meta` is relayed as one stateless request; sessions
+  opened by `initialize` keep working at the same URL. On the first such
+  request after a provider attaches, the broker probes it with a
+  `server/discover` of its own (5 s). A provider that speaks the revision
+  (mcp-core 1.6 or later) gets each request as it is, and its tagged
+  notifications come back to the request's response: MRTR,
+  `subscriptions/listen` and the Events extension (`events/list`,
+  `events/poll`, `events/stream`) cross the broker. A handshake-only provider
+  is relayed in a session the broker opens with it: the stateless `_meta` is
+  removed, the answer is completed (`resultType`, `ttlMs: 0`,
+  `cacheScope: "private"`, `serverInfo`, `-32602` for a resource not found),
+  and the broker answers `server/discover` and `subscriptions/listen` itself,
+  the listen's resource updates going through the shared subscription
+  registry. Whatever the provider speaks, a request carrying `logLevel` gets
+  the provider's `notifications/message` at that level or above on its
+  response (a log names no request, so every such request pending on the slot
+  gets it; a handshake-only provider's own session level is a floor), and its
+  `notifications/progress` come back on its response only: the provider
+  receives a `progressToken` of the broker's naming the request, and the
+  client gets its own back. A slot with no provider answers discovery, the lists and the
+  listen, and announces `list_changed` when the provider attaches. Methods the
+  revision removed answer `-32601` (HTTP 404). Listens and event streams have
+  no request deadline, are withdrawn at the provider when the client closes
+  them, and are answered when the broker stops. `server/discover` and
+  `subscriptions/listen` need no capability; `events/list`, `events/poll` and
+  `events/stream` need `mcp.events.read`.
+
 - **broker** Development authorization, `auth.dev` in the security file: static
   bearer tokens, one per caller, read from the environment variables the file
   names and bound to user, group, service or client subjects, in front of the
@@ -166,6 +195,11 @@ repository; the changes it needed for this release are listed under
 
 ### Changed
 
+- **broker** A dual-era client over Streamable HTTP (Claude Code 2.1.292 and
+  later, mcp-core `protocol: "auto"`) now stays on protocol 2026-07-28 instead
+  of falling back to `initialize`. `server/discover` is still answered
+  `-32601` on the session transports (stdio bridge, WebSocket, SSE, an
+  `initialize` session), where hosts keep falling back.
 - **provider** `IBudgetReservation` gains `effect` and `obligations`.
 - **broker**, **provider** Require `@cyanmycelium/mcp-core` `^1.4.1`. The
   provider's peer range is unchanged. 1.4.1 fixes the Streamable HTTP endpoint

@@ -55,6 +55,11 @@ const STATIC_CAPABILITIES: Readonly<Record<string, string>> = {
     "prompts/list": "mcp.prompts.read",
     "prompts/get": "mcp.prompts.read",
     "completion/complete": "mcp.completion.use",
+    // MCP Events extension (io.modelcontextprotocol/events, stateless
+    // revisions): describing, polling and streaming a server's events read it.
+    "events/list": "mcp.events.read",
+    "events/poll": "mcp.events.read",
+    "events/stream": "mcp.events.read",
     // Changes the provider's log level for every client of the slot.
     "logging/setLevel": "mcp.logging.configure",
     "notifications/resources/list_changed": "mcp.resources.read",
@@ -68,8 +73,12 @@ const STATIC_CAPABILITIES: Readonly<Record<string, string>> = {
  * or `server/discover`, its stateless counterpart since 2026-07-28, which
  * hosts such as Claude Code send first as a probe), keeping it alive, and
  * letting go of a subscription.
+ *
+ * `subscriptions/listen` (2026-07-28) reads nothing by itself: every
+ * notification it carries is checked on its way to the client, and each URI
+ * it names is checked like a `resources/subscribe`.
  */
-const FREE_METHODS: ReadonlySet<string> = new Set(["initialize", "server/discover", "ping", "resources/unsubscribe"]);
+const FREE_METHODS: ReadonlySet<string> = new Set(["initialize", "server/discover", "ping", "resources/unsubscribe", "subscriptions/listen"]);
 
 const BROKER_READ_TOOLS = new Set(["broker_info", "providers_list", "provider_status"]);
 
