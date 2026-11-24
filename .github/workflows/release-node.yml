@@ -120,6 +120,27 @@ jobs:
                   tar xzf "$archive" mcp-publisher
                   rm -f "$archive" "$archive.sigstore.json"
 
+            # The registry checks the version against npm, and npm can take
+            # several minutes to serve a version it has just accepted (1.14.0
+            # and 1.15.0 both outlasted the 2.5 minutes of retries below). Wait
+            # for npm itself, before logging in, so the OIDC token is fresh.
+            - name: Wait until npm serves the version
+              timeout-minutes: 20
+              run: |
+                  set -euo pipefail
+                  package="$(jq -r .name package.json)"
+                  version="${GITHUB_REF_NAME#node-v}"
+                  for attempt in $(seq 1 60); do
+                      if [ "$(npm view "$package@$version" version 2>/dev/null)" = "$version" ]; then
+                          echo "npm serves $package@$version (check $attempt)"
+                          exit 0
+                      fi
+                      echo "npm does not serve $package@$version yet (check $attempt of 60), next check in 15 s"
+                      sleep 15
+                  done
+                  echo "::error::npm still does not serve $package@$version after 15 minutes; re-run this job once it does"
+                  exit 1
+
             - name: Authenticate to the MCP registry
               run: ./mcp-publisher login github-oidc
 
@@ -127,7 +148,7 @@ jobs:
               run: |
                   for attempt in 1 2 3 4 5; do
                       if ./mcp-publisher publish; then exit 0; fi
-                      echo "publish attempt $attempt failed; npm may not serve the new version yet, retrying in 30 s"
+                      echo "publish attempt $attempt failed, retrying in 30 s"
                       sleep 30
                   done
                   exit 1
